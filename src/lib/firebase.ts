@@ -25,7 +25,7 @@ try {
     }
     console.log('[CONEXA FIREBASE] Firebase inicializado con configuración oficial.');
   } else {
-    console.warn('[CONEXA FIREBASE] firebase-applet-config.json no detectado. Operando en modo desarrollo local con autenticación segura simulada.');
+    console.warn('[CONEXA FIREBASE] firebase-applet-config.json no detectado. DEMO MODE — Firebase Authentication no configurado.');
   }
 } catch (e) {
   console.warn('[CONEXA FIREBASE] Error al inicializar Firebase:', e);

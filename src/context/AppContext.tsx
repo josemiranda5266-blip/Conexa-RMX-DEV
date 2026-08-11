@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, updateDoc, collection, getDocs, getDoc } from 'firebase/firestore';
-import { auth, db } from '../lib/firebase';
+import { doc, setDoc, updateDoc, collection, getDocs, getDoc, onSnapshot } from 'firebase/firestore';
+import { auth, db, isFirebaseConfigured } from '../lib/firebase';
 import { 
   UserProfile, Category, Profession, ServiceRequest, Quote, 
   Conversation, Message, Review, UserReport, VerificationRequest, 
@@ -16,8 +16,8 @@ import {
 import { initialRadarOpportunities, initialRadarStats } from '../data/radarMockData';
 
 interface AppContextType {
-  currentUser: UserProfile;
-  setCurrentUser: (user: UserProfile) => void;
+  currentUser: UserProfile | null;
+  setCurrentUser: (user: UserProfile | null) => void;
   switchUserRole: (userId: string) => void;
   switchActiveMode: (mode: 'CLIENT' | 'PROFESSIONAL' | 'ADMIN') => boolean;
   
@@ -84,6 +84,7 @@ interface AppContextType {
   blockUser: (userIdToBlock: string) => void;
   resolveReport: (reportId: string, action: 'DISMISSED' | 'ACTION_TAKEN') => void;
   markNotificationRead: (notifId: string) => void;
+  deleteAccount: (userId: string) => Promise<boolean>;
   
   // Beta Actions
   trackEvent: (eventName: string, context?: Record<string, any>) => void;
@@ -102,7 +103,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : INITIAL_PROFILES;
   });
 
-  const [currentUser, setCurrentUser] = useState<UserProfile>(() => users[0]);
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
+    if (isFirebaseConfigured) {
+      return null;
+    }
+    return users[0];
+  });
   const [categories] = useState<Category[]>(INITIAL_CATEGORIES);
   const [professions] = useState<Profession[]>(INITIAL_PROFESSIONS);
   const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS);
@@ -166,33 +172,232 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem('conexa_users', JSON.stringify(users));
   }, [users]);
 
-  // Firebase Auth Real Listener Effect
+  // Firebase Auth Real Listener Effect & Real-time Firestore Sync
   useEffect(() => {
     if (!auth) return;
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         console.log('[CONEXA AUTH] Usuario autenticado vía Firebase Auth:', firebaseUser.uid, firebaseUser.email);
-        // Get custom token claims if available
+        
         try {
           const tokenResult = await firebaseUser.getIdTokenResult();
           const claimRole = (tokenResult.claims.role as Role) || 'USER';
           
-          setCurrentUser(prev => ({
-            ...prev,
-            id: firebaseUser.uid,
-            name: firebaseUser.displayName || prev.name || 'Usuario CONEXA',
-            email: firebaseUser.email || prev.email,
-            avatar: firebaseUser.photoURL || prev.avatar,
-            role: claimRole, // Derived from Custom Claims / Auth Token
-            isIdentityVerified: firebaseUser.emailVerified || prev.isIdentityVerified
-          }));
+          if (isFirebaseConfigured && db) {
+            // Load or create `/users/{uid}` in Firestore
+            const userDocRef = doc(db, 'users', firebaseUser.uid);
+            const userDocSnap = await getDoc(userDocRef);
+            
+            let profileData: Partial<UserProfile> = {};
+            if (userDocSnap.exists()) {
+              profileData = userDocSnap.data() as Partial<UserProfile>;
+              console.log('[CONEXA AUTH] Perfil de usuario cargado de Firestore:', profileData);
+            } else {
+              // Create default profile for newly registered users
+              const defaultProfile: UserProfile = {
+                id: firebaseUser.uid,
+                name: firebaseUser.displayName || 'Usuario CONEXA',
+                email: firebaseUser.email || '',
+                phonePrivate: '',
+                avatar: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150',
+                role: claimRole,
+                joinedDate: new Date().toLocaleDateString('es-AR'),
+                location: {
+                  city: 'Santiago del Estero',
+                  province: 'Santiago del Estero',
+                  country: 'Argentina',
+                  lat: -27.7834,
+                  lng: -64.2642,
+                  approxZone: 'Santiago del Estero - Centro'
+                },
+                isIdentityVerified: firebaseUser.emailVerified || false,
+                identityVerificationStatus: 'NONE',
+                rating: 0,
+                reviewCount: 0,
+                jobsCompleted: 0,
+                trustScore: 50,
+                availabilityStatus: 'DISPONIBLE'
+              };
+              await setDoc(userDocRef, defaultProfile);
+              profileData = defaultProfile;
+              console.log('[CONEXA AUTH] Perfil por defecto guardado en Firestore.');
+            }
+            
+            setCurrentUser({
+              ...profileData,
+              id: firebaseUser.uid,
+              name: profileData.name || firebaseUser.displayName || 'Usuario CONEXA',
+              email: profileData.email || firebaseUser.email || '',
+              avatar: profileData.avatar || firebaseUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150',
+              role: claimRole,
+              isIdentityVerified: firebaseUser.emailVerified || profileData.isIdentityVerified || false
+            } as UserProfile);
+          } else {
+            // Firebase Auth configured partially or in local mode
+            setCurrentUser({
+              id: firebaseUser.uid,
+              name: firebaseUser.displayName || 'Usuario Piloto',
+              email: firebaseUser.email || '',
+              phonePrivate: '385-555-0192',
+              avatar: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150',
+              role: claimRole,
+              joinedDate: new Date().toLocaleDateString('es-AR'),
+              location: {
+                city: 'Santiago del Estero',
+                province: 'Santiago del Estero',
+                country: 'Argentina',
+                lat: -27.7834,
+                lng: -64.2642,
+                approxZone: 'Centro'
+              },
+              isIdentityVerified: true,
+              rating: 5,
+              reviewCount: 1,
+              jobsCompleted: 3,
+              trustScore: 90,
+              availabilityStatus: 'DISPONIBLE'
+            } as UserProfile);
+          }
         } catch (err) {
-          console.warn('[CONEXA AUTH] Error obteniendo claims del token Firebase:', err);
+          console.warn('[CONEXA AUTH] Error procesando autenticación:', err);
+        }
+      } else {
+        console.log('[CONEXA AUTH] Sin sesión activa.');
+        if (isFirebaseConfigured) {
+          setCurrentUser(null);
+        } else {
+          // Keep mock user 0 in demo mode
+          setCurrentUser(INITIAL_PROFILES[0]);
         }
       }
     });
     return () => unsubscribe();
   }, []);
+
+  // Real-time synchronization with Firestore in production mode
+  useEffect(() => {
+    if (!isFirebaseConfigured || !db || !auth) return;
+
+    console.log("[CONEXA SYNCHRONIZER] Sincronización activa con Firestore...");
+
+    // Helper to seed a collection with mock data if empty
+    const seedCollectionIfEmpty = async (collectionName: string, initialData: any[]) => {
+      try {
+        const querySnapshot = await getDocs(collection(db, collectionName));
+        if (querySnapshot.empty) {
+          console.log(`[CONEXA SEED] Sembrando datos para ${collectionName}...`);
+          for (const item of initialData) {
+            await setDoc(doc(db, collectionName, item.id || `doc-${Math.random()}`), item);
+          }
+        }
+      } catch (err) {
+        console.warn(`[CONEXA SEED] Error en ${collectionName}:`, err);
+      }
+    };
+
+    // Seed collections asynchronously
+    const seedAll = async () => {
+      await seedCollectionIfEmpty('users', INITIAL_PROFILES);
+      await seedCollectionIfEmpty('reviews', INITIAL_REVIEWS);
+      await seedCollectionIfEmpty('requests', INITIAL_SERVICE_REQUESTS);
+      await seedCollectionIfEmpty('quotes', INITIAL_QUOTES);
+      await seedCollectionIfEmpty('conversations', INITIAL_CONVERSATIONS);
+    };
+    seedAll();
+
+    // Set up real-time sub subscriptions
+    const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+      const uList: UserProfile[] = [];
+      snapshot.forEach(doc => {
+        uList.push(doc.data() as UserProfile);
+      });
+      if (uList.length > 0) {
+        setUsers(uList);
+      }
+    });
+
+    const unsubReviews = onSnapshot(collection(db, 'reviews'), (snapshot) => {
+      const list: Review[] = [];
+      snapshot.forEach(doc => list.push(doc.data() as Review));
+      setReviews(list);
+    });
+
+    const unsubRequests = onSnapshot(collection(db, 'requests'), (snapshot) => {
+      const list: ServiceRequest[] = [];
+      snapshot.forEach(doc => list.push(doc.data() as ServiceRequest));
+      setRequests(list);
+    });
+
+    const unsubQuotes = onSnapshot(collection(db, 'quotes'), (snapshot) => {
+      const list: Quote[] = [];
+      snapshot.forEach(doc => list.push(doc.data() as Quote));
+      setQuotes(list);
+    });
+
+    const unsubConversations = onSnapshot(collection(db, 'conversations'), (snapshot) => {
+      const list: Conversation[] = [];
+      snapshot.forEach(doc => list.push(doc.data() as Conversation));
+      setConversations(list);
+    });
+
+    const unsubReports = onSnapshot(collection(db, 'reports'), (snapshot) => {
+      const list: UserReport[] = [];
+      snapshot.forEach(doc => list.push(doc.data() as UserReport));
+      setReports(list);
+    });
+
+    const unsubVerifications = onSnapshot(collection(db, 'verifications'), (snapshot) => {
+      const list: VerificationRequest[] = [];
+      snapshot.forEach(doc => list.push(doc.data() as VerificationRequest));
+      setVerifications(list);
+    });
+
+    return () => {
+      unsubUsers();
+      unsubReviews();
+      unsubRequests();
+      unsubQuotes();
+      unsubConversations();
+      unsubReports();
+      unsubVerifications();
+    };
+  }, []);
+
+  const deleteAccount = async (userId: string): Promise<boolean> => {
+    try {
+      const token = auth ? await auth.currentUser?.getIdToken() : null;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch('/api/user/delete-account', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ userId })
+      });
+
+      const resData = await response.json();
+      if (response.ok && resData.success) {
+        console.log('[CONEXA AUTH] Cuenta eliminada con éxito del backend.');
+        if (auth) {
+          await auth.signOut();
+        }
+        setCurrentUser(null);
+        return true;
+      } else {
+        console.warn('[CONEXA AUTH] Error al dar de baja la cuenta:', resData.error || response.statusText);
+        alert(`Error al eliminar cuenta: ${resData.error || 'Intente nuevamente.'}`);
+        return false;
+      }
+    } catch (err: any) {
+      console.error('[CONEXA AUTH] Excepción al invocar baja de cuenta:', err);
+      alert('Error de conexión al servidor al solicitar baja de cuenta.');
+      return false;
+    }
+  };
 
   // Helper authorization checks based on real currentUser.role
   const isAdmin = (): boolean => {
@@ -798,7 +1003,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       toggleFavorite, sharePhoneWithUser, shareAddressWithUser, sendMessage,
       createConversation, createServiceRequest, submitQuote, acceptQuote, completeJob,
       addReview, submitVerification, approveVerification, reportUser, blockUser,
-      resolveReport, markNotificationRead,
+      resolveReport, markNotificationRead, deleteAccount,
       trackEvent, submitFeedback, createInviteCode, toggleInviteCode, updateBetaConfig
     }}>
       {children}

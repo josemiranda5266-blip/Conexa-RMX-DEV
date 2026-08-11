@@ -11,10 +11,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose
 }) => {
-  const { currentUser } = useApp();
+  const { currentUser, deleteAccount } = useApp();
   const [downloaded, setDownloaded] = useState(false);
 
-  if (!isOpen) return null;
+  if (!isOpen || !currentUser) return null;
 
   const handleExportData = () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(currentUser, null, 2));
@@ -27,10 +27,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setDownloaded(true);
   };
 
-  const handleDeleteAccount = () => {
+  const handleDeleteAccount = async () => {
+    if (!currentUser) return;
     if (confirm("¿Estás seguro de solicitar la eliminación definitiva de tu cuenta y datos privados de CONEXA? Esta acción es irreversible.")) {
-      alert("Solicitud recibida. Tus datos serán dados de baja conforme a la normativa de Protección de Datos Personales.");
-      onClose();
+      const success = await deleteAccount(currentUser.id);
+      if (success) {
+        alert("Tu cuenta y datos asociados han sido eliminados de manera definitiva conforme a la normativa vigente.");
+        onClose();
+      }
     }
   };
 

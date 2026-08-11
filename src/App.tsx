@@ -20,6 +20,7 @@ import { OnboardingModal } from './components/OnboardingModal';
 import { RoleSelectionModal } from './components/RoleSelectionModal';
 import { BecomeProfessionalModal } from './components/BecomeProfessionalModal';
 import { DemandLanding } from './components/radar/DemandLanding';
+import { AuthPortal } from './components/AuthPortal';
 import { UserProfile, ServiceRequest, Quote } from './types';
 import { 
   Search, SlidersHorizontal, MapPin, Briefcase, Star, 
@@ -98,6 +99,14 @@ const MainAppContent: React.FC = () => {
   const handleRequestQuote = (pro: UserProfile) => {
     setIsServiceRequestFormOpen(true);
   };
+
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-100 via-indigo-50/50 to-sky-100/60 flex items-center justify-center p-4">
+        <AuthPortal />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 via-indigo-50/50 to-sky-100/60 text-slate-900 font-sans pb-28 relative overflow-x-hidden selection:bg-blue-500 selection:text-white">

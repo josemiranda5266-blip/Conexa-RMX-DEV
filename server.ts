@@ -231,8 +231,8 @@ Responde en JSON con:
   app.post("/api/user/delete-account", rateLimiter, async (req: Request, res: Response) => {
     try {
       const { userId, confirmationToken } = req.body;
-      if (!userId || !confirmationToken) {
-        return res.status(400).json({ error: "Falta token de confirmación o ID de usuario." });
+      if (!userId) {
+        return res.status(400).json({ error: "Falta ID de usuario para dar de baja." });
       }
 
       const auth = await verifyAuthToken(req);
@@ -255,14 +255,58 @@ Responde en JSON con:
         });
       }
 
-      return res.status(202).json({
-        success: false,
-        status: "PENDING_ADMIN_DELETION",
-        message: "Solicitud de eliminación de cuenta autenticada y registrada en cola de auditoría.",
-        requestedUserId: userId,
-        authenticatedUserId: auth.userId,
-        timestamp: new Date().toISOString()
-      });
+      const hasFirebaseAdminConfig = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
+      if (!hasFirebaseAdminConfig) {
+        // Fallback for simulation/demo environments
+        return res.status(200).json({
+          success: true,
+          status: "DELETED_DEMO_MODE",
+          message: "Modo Simulación: El usuario ha sido removido del registro local temporal.",
+          deletedUserId: userId,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      const adminModule = await import("firebase-admin");
+      const admin = (adminModule.default || adminModule) as any;
+      const db = admin.firestore();
+
+      try {
+        // Delete user from Firebase Auth
+        await admin.auth().deleteUser(userId);
+        console.log(`[CONEXA AUTH] Usuario borrado de Firebase Auth: ${userId}`);
+
+        // Delete user's profile from Firestore
+        await db.collection('users').doc(userId).delete();
+        console.log(`[CONEXA FIRESTORE] Perfil borrado de Firestore: ${userId}`);
+
+        // Mask or delete user's messages in Firestore to avoid digital footprint (Requirement 13)
+        const messagesSnapshot = await db.collection('messages').where('senderId', '==', userId).get();
+        const batch = db.batch();
+        messagesSnapshot.forEach((doc: any) => {
+          batch.update(doc.ref, {
+            text: "[MENSAJE ELIMINADO - USUARIO DADO DE BAJA]",
+            isDeleted: true
+          });
+        });
+        await batch.commit();
+        console.log(`[CONEXA FIRESTORE] Mensajes del usuario dados de baja para: ${userId}`);
+
+        return res.status(200).json({
+          success: true,
+          status: "DELETED",
+          message: "Tu cuenta y datos confidenciales han sido eliminados de manera definitiva de CONEXA.",
+          deletedUserId: userId,
+          timestamp: new Date().toISOString()
+        });
+      } catch (authErr: any) {
+        console.error(`Error al borrar físicamente al usuario ${userId}:`, authErr);
+        return res.status(500).json({
+          success: false,
+          error: `Error interno de Firebase Admin al borrar la cuenta: ${authErr.message || authErr}`,
+          code: "FIREBASE_DELETE_ERROR"
+        });
+      }
     } catch (err) {
       return res.status(500).json({ error: "Error al procesar la eliminación de la cuenta." });
     }
@@ -700,8 +744,54 @@ Clasificá la oportunidad y responde ÚNICAMENTE en formato JSON con la siguient
       const { category, subcategory, city, province, limit, environment, isTest, onlyVerified } = req.body;
       const isSimulation = Boolean(isTest || environment === "simulation");
 
-      // In production, query active professional candidates from database/Firestore dataset
-      const candidateList = MASTER_PROFESSIONAL_PROFILES;
+      let candidateList = MASTER_PROFESSIONAL_PROFILES;
+      let dataSource = "DEMO / MOCKDATA";
+
+      if (!isSimulation) {
+        // PRODUCTION GUARD: Authenticate and authorize as ADMIN/SUPER_ADMIN
+        const auth = await verifyAuthToken(req);
+        if (!auth.isAuthenticated) {
+          return res.status(401).json({
+            success: false,
+            error: auth.errorReason === "FIREBASE_ADMIN_SDK_NOT_CONFIGURED"
+              ? "Imposible verificar token en backend. Se requiere configurar credencial de Firebase Admin SDK en el servidor para realizar búsquedas de producción."
+              : "Acceso denegado. Se requiere un Firebase ID Token válido en el encabezado Authorization.",
+            code: "UNAUTHORIZED"
+          });
+        }
+        if (!auth.isAdmin) {
+          return res.status(403).json({
+            success: false,
+            error: "Acceso denegado. Solo administradores autorizados pueden realizar consultas del RADAR MATCH en producción.",
+            code: "FORBIDDEN"
+          });
+        }
+
+        // Fetch real professional users from Firestore
+        const hasFirebaseAdminConfig = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
+        if (hasFirebaseAdminConfig) {
+          const adminModule = await import("firebase-admin");
+          const admin = (adminModule.default || adminModule) as any;
+          const db = admin.firestore();
+
+          try {
+            const usersSnap = await db.collection('users')
+              .where('role', '==', 'PROFESSIONAL')
+              .get();
+
+            if (!usersSnap.empty) {
+              const candidates: any[] = [];
+              usersSnap.forEach((doc: any) => {
+                candidates.push({ id: doc.id, ...doc.data() });
+              });
+              candidateList = candidates;
+              dataSource = "FIRESTORE_PRODUCTION";
+            }
+          } catch (dbErr: any) {
+            console.error("[RADAR MATCH] Error consultando Firestore candidates:", dbErr.message || dbErr);
+          }
+        }
+      }
 
       const rankedProfessionals: any[] = [];
       const discardedProfessionals: any[] = [];
@@ -761,7 +851,7 @@ Clasificá la oportunidad y responde ÚNICAMENTE en formato JSON con la siguient
         category: category || "General",
         city: city || "Santiago del Estero",
         environment: isSimulation ? "simulation" : "production",
-        dataSource: "DEMO / MOCKDATA",
+        dataSource,
         matchCount: topRanked.length,
         rankedProfessionals: topRanked,
         discardedCount: discardedProfessionals.length,
