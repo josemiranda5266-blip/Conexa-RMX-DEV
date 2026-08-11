@@ -37,7 +37,7 @@ export interface UserProfile {
   isBlocked?: boolean;
   
   // Mode & Capabilities (Unified CONEXA Account)
-  activeMode?: 'CLIENT' | 'PROFESSIONAL';
+  activeMode?: 'CLIENT' | 'PROFESSIONAL' | 'ADMIN';
   hasClientProfile?: boolean;
   hasProfessionalProfile?: boolean;
   workHours?: string; // e.g. "Lun - Vie: 08:00 a 18:00"

@@ -3,7 +3,7 @@ import {
   UserProfile, Category, Profession, ServiceRequest, Quote, 
   Conversation, Message, Review, UserReport, VerificationRequest, 
   NotificationItem, LocationData, InviteCode, FeedbackItem, AnalyticsEvent, BetaConfig,
-  RadarOpportunity, RadarStats, ApprovalMode
+  RadarOpportunity, RadarStats, ApprovalMode, Role
 } from '../types';
 import { 
   INITIAL_CATEGORIES, INITIAL_PROFESSIONS, INITIAL_PROFILES, 
@@ -16,7 +16,10 @@ interface AppContextType {
   currentUser: UserProfile;
   setCurrentUser: (user: UserProfile) => void;
   switchUserRole: (userId: string) => void;
-  switchActiveMode: (mode: 'CLIENT' | 'PROFESSIONAL') => void;
+  switchActiveMode: (mode: 'CLIENT' | 'PROFESSIONAL' | 'ADMIN') => boolean;
+  
+  isAdmin: () => boolean;
+  hasRole: (roles: Role[]) => boolean;
   
   users: UserProfile[];
   categories: Category[];
@@ -160,12 +163,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem('conexa_users', JSON.stringify(users));
   }, [users]);
 
-  const switchUserRole = (userId: string) => {
-    const found = users.find(u => u.id === userId);
-    if (found) setCurrentUser(found);
+  // Helper authorization checks based on real currentUser.role
+  const isAdmin = (): boolean => {
+    return currentUser?.role === 'ADMIN' || currentUser?.role === 'SUPER_ADMIN';
   };
 
-  const switchActiveMode = (mode: 'CLIENT' | 'PROFESSIONAL') => {
+  const hasRole = (roles: Role[]): boolean => {
+    return !!currentUser?.role && roles.includes(currentUser.role);
+  };
+
+  const switchUserRole = (userId: string) => {
+    const found = users.find(u => u.id === userId);
+    if (found) {
+      // If switching to a non-admin user while activeMode was ADMIN, reset activeMode to CLIENT/PROFESSIONAL
+      const isFoundAdmin = found.role === 'ADMIN' || found.role === 'SUPER_ADMIN';
+      const adjustedMode = (!isFoundAdmin && currentUser.activeMode === 'ADMIN')
+        ? (found.isProfessional ? 'PROFESSIONAL' : 'CLIENT')
+        : found.activeMode || (found.isProfessional ? 'PROFESSIONAL' : 'CLIENT');
+      
+      const updatedUser = { ...found, activeMode: adjustedMode };
+      setCurrentUser(updatedUser);
+    }
+  };
+
+  const switchActiveMode = (mode: 'CLIENT' | 'PROFESSIONAL' | 'ADMIN'): boolean => {
+    // SECURITY RULE: ADMIN mode is strictly restricted to ADMIN or SUPER_ADMIN role
+    if (mode === 'ADMIN') {
+      if (!isAdmin()) {
+        console.warn(`[CONEXA SECURITY] Intento no autorizado de activar MODO ADMIN por usuario id=${currentUser?.id} con rol=${currentUser?.role}`);
+        return false;
+      }
+    }
+
     setCurrentUser(prev => {
       const updated = {
         ...prev,
@@ -174,6 +203,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setUsers(uList => uList.map(u => u.id === prev.id ? updated : u));
       return updated;
     });
+
+    return true;
   };
 
   const toggleFavorite = (proId: string) => {
@@ -634,6 +665,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <AppContext.Provider value={{
       currentUser, setCurrentUser, switchUserRole, switchActiveMode,
+      isAdmin, hasRole,
       users, categories, professions, reviews, requests, quotes, 
       conversations, messages, reports, verifications, notifications, favorites,
       betaConfig, inviteCodes, feedbacks, analyticsEvents,

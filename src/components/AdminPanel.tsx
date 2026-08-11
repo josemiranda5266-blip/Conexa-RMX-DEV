@@ -11,10 +11,28 @@ import { RadarDashboard } from './radar/RadarDashboard';
 
 export const AdminPanel: React.FC<{ onOpenLandingPreview?: () => void }> = ({ onOpenLandingPreview }) => {
   const { 
-    users, verifications, reports, categories, professions, requests, quotes, reviews,
+    currentUser, isAdmin, users, verifications, reports, categories, professions, requests, quotes, reviews,
     betaConfig, inviteCodes, feedbacks, analyticsEvents,
     approveVerification, resolveReport, blockUser, createInviteCode, toggleInviteCode, updateBetaConfig
   } = useApp();
+
+  // SECURITY GUARD: Strictly restrict Admin Panel to ADMIN or SUPER_ADMIN users
+  if (!isAdmin()) {
+    return (
+      <div className="bg-rose-50 border border-rose-200 text-rose-900 rounded-3xl p-8 text-center space-y-4 my-8 max-w-xl mx-auto shadow-xl">
+        <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto text-2xl font-black shadow-inner">
+          🔒
+        </div>
+        <h2 className="text-2xl font-black text-slate-900">ACCESO RESTRINGIDO</h2>
+        <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+          El Panel de Administración de CONEXA requiere un rol con privilegios de <strong>ADMIN</strong> o <strong>SUPER_ADMIN</strong>. Tu cuenta actual (<strong>{currentUser?.name || 'Usuario'}</strong>) posee el rol <strong>{currentUser?.role || 'USER'}</strong>.
+        </p>
+        <div className="p-3 bg-white/80 rounded-2xl border border-rose-200 text-xs text-rose-800 font-medium">
+          🛡️ El cambio de modo de interfaz no concede permisos administrativos si la cuenta no cuenta con el rol autorizado en el servidor.
+        </div>
+      </div>
+    );
+  }
 
   const [activeTab, setActiveTab] = useState<'RADAR' | 'BETA_CONTROL' | 'EMBUDO' | 'VERIFICACIONES' | 'REPORTES' | 'USUARIOS' | 'FEEDBACK' | 'SALUD_COSTOS' | 'AUDITORIA'>('RADAR');
   const [auditResults, setAuditResults] = useState<AuditTestResult[]>(() => runSecurityAndPrivacyAudit(users));

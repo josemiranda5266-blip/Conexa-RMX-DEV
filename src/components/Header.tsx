@@ -43,6 +43,8 @@ export const Header: React.FC<HeaderProps> = ({
   const unreadNotifs = notifications.filter(n => !n.read);
 
   const activeMode = currentUser.activeMode || (currentUser.isProfessional ? 'PROFESSIONAL' : 'CLIENT');
+  const isAdminUser = currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN';
+  const isDevEnvironment = Boolean((import.meta as any).env?.DEV);
 
   const handleToggleMode = () => {
     if (activeMode === 'CLIENT') {
@@ -104,13 +106,20 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenRegisterModal}
             className={`px-3 py-1.5 rounded-2xl font-bold text-xs flex items-center gap-1.5 border backdrop-blur-md shadow-md transition-all active:scale-95 cursor-pointer ${
-              activeMode === 'PROFESSIONAL'
+              activeMode === 'ADMIN'
+                ? 'bg-amber-400/20 hover:bg-amber-400/30 text-amber-300 border-amber-400/40'
+                : activeMode === 'PROFESSIONAL'
                 ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-400/40'
                 : 'bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border-blue-400/40'
             }`}
             title="Abrir selector: ¿Cómo querés usar CONEXA?"
           >
-            {activeMode === 'PROFESSIONAL' ? (
+            {activeMode === 'ADMIN' ? (
+              <>
+                <ShieldCheck size={14} className="text-amber-400" />
+                <span>🔐 Modo Administrador</span>
+              </>
+            ) : activeMode === 'PROFESSIONAL' ? (
               <>
                 <Wrench size={14} className="text-emerald-400" />
                 <span>🧰 Modo Profesional</span>
@@ -263,32 +272,37 @@ export const Header: React.FC<HeaderProps> = ({
                   </button>
                 )}
 
-                <div className="p-2 bg-slate-50 rounded-2xl text-slate-500 font-bold text-[10px] border border-slate-200/60 uppercase tracking-wider">
-                  Probar como otro usuario (Modo Test Beta):
-                </div>
-
-                {users.map(u => (
-                  <button
-                    key={u.id}
-                    onClick={() => {
-                      switchUserRole(u.id);
-                      setShowRoleMenu(false);
-                    }}
-                    className={`w-full text-left p-2 rounded-2xl flex items-center justify-between transition-colors ${
-                      currentUser.id === u.id ? 'bg-blue-50 text-blue-900 font-bold border border-blue-200' : 'hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <img src={u.avatar} alt={u.name} className="w-6 h-6 rounded-full object-cover" />
-                      <div>
-                        <p className="font-bold text-slate-900 leading-tight">{u.name}</p>
-                        <p className="text-[10px] text-slate-500">
-                          {u.isProfessional || u.hasProfessionalProfile ? 'Cliente + Profesional' : 'Cliente'}
-                        </p>
-                      </div>
+                {isDevEnvironment && (
+                  <>
+                    <div className="p-2 bg-slate-100 rounded-2xl text-slate-600 font-extrabold text-[10px] border border-slate-200 uppercase tracking-wider flex items-center justify-between">
+                      <span>Probar como otro usuario (DEV):</span>
+                      <span className="text-[9px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-black">TEST ONLY</span>
                     </div>
-                  </button>
-                ))}
+
+                    {users.map(u => (
+                      <button
+                        key={u.id}
+                        onClick={() => {
+                          switchUserRole(u.id);
+                          setShowRoleMenu(false);
+                        }}
+                        className={`w-full text-left p-2 rounded-2xl flex items-center justify-between transition-colors ${
+                          currentUser.id === u.id ? 'bg-blue-50 text-blue-900 font-bold border border-blue-200' : 'hover:bg-slate-100'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <img src={u.avatar} alt={u.name} className="w-6 h-6 rounded-full object-cover" />
+                          <div>
+                            <p className="font-bold text-slate-900 leading-tight">{u.name}</p>
+                            <p className="text-[10px] text-slate-500">
+                              {u.role === 'ADMIN' || u.role === 'SUPER_ADMIN' ? '👑 Admin' : u.isProfessional || u.hasProfessionalProfile ? 'Cliente + Profesional' : 'Cliente'}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </>
+                )}
 
                 <div className="pt-2 border-t border-slate-100 space-y-1">
                   <button

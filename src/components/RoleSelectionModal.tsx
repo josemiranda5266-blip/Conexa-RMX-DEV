@@ -5,29 +5,47 @@ import { useApp } from '../context/AppContext';
 interface RoleSelectionModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelectClient: () => void;
-  onSelectProfessional: () => void;
+  onSelectRole?: (role: 'CLIENT' | 'PROFESSIONAL' | 'ADMIN') => void;
+  onSelectClient?: () => void;
+  onSelectProfessional?: () => void;
+  onSelectAdmin?: () => void;
 }
 
 export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({
   isOpen,
   onClose,
+  onSelectRole,
   onSelectClient,
-  onSelectProfessional
+  onSelectProfessional,
+  onSelectAdmin
 }) => {
-  const { currentUser } = useApp();
+  const { currentUser, isAdmin } = useApp();
   const [showExplanation, setShowExplanation] = useState(false);
 
   if (!isOpen) return null;
 
   const hasPro = currentUser.hasProfessionalProfile || currentUser.isProfessional;
+  const isAdminUser = isAdmin();
+
+  const handleClientClick = () => {
+    if (onSelectRole) onSelectRole('CLIENT');
+    else if (onSelectClient) onSelectClient();
+  };
 
   const handleProfessionalClick = () => {
     if (hasPro) {
-      onSelectProfessional();
+      if (onSelectRole) onSelectRole('PROFESSIONAL');
+      else if (onSelectProfessional) onSelectProfessional();
     } else {
       setShowExplanation(true);
     }
+  };
+
+  const handleAdminClick = () => {
+    if (!isAdminUser) return;
+    if (onSelectRole) onSelectRole('ADMIN');
+    else if (onSelectAdmin) onSelectAdmin();
+    onClose();
   };
 
   const handleClose = () => {
@@ -63,11 +81,11 @@ export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({
               </p>
             </div>
 
-            {/* Two Large Distinct Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Cards Grid */}
+            <div className={`grid grid-cols-1 ${isAdminUser ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-4`}>
               {/* Card 1: Cliente */}
               <div 
-                onClick={onSelectClient}
+                onClick={handleClientClick}
                 className="group relative p-5 bg-gradient-to-b from-blue-50/80 to-indigo-50/40 rounded-3xl border-2 border-blue-200 hover:border-blue-600 hover:shadow-xl transition-all cursor-pointer flex flex-col justify-between space-y-4"
               >
                 <div className="space-y-3">
@@ -90,7 +108,7 @@ export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    onSelectClient();
+                    handleClientClick();
                   }}
                   className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
                 >
@@ -132,6 +150,42 @@ export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({
                   <ArrowRight size={15} />
                 </button>
               </div>
+
+              {/* Card 3: Administrador (ONLY for ADMIN or SUPER_ADMIN) */}
+              {isAdminUser && (
+                <div 
+                  onClick={handleAdminClick}
+                  className="group relative p-5 bg-gradient-to-b from-slate-900 via-slate-800 to-indigo-950 text-white rounded-3xl border-2 border-amber-400/80 hover:border-amber-300 hover:shadow-xl transition-all cursor-pointer flex flex-col justify-between space-y-4"
+                >
+                  <div className="space-y-3">
+                    <div className="w-11 h-11 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center shadow-lg shadow-amber-400/20 group-hover:scale-110 transition-transform font-bold">
+                      🔐
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-extrabold tracking-wider uppercase text-amber-300 bg-amber-400/20 px-2.5 py-0.5 rounded-full border border-amber-400/30">
+                        CONTROL TOTAL
+                      </span>
+                      <h3 className="text-base sm:text-lg font-black text-white mt-1.5 group-hover:text-amber-300 transition-colors">
+                        🔐 MODO ADMINISTRADOR
+                      </h3>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed font-medium">
+                      Administrá CONEXA, supervisá usuarios, moderación, métricas y RADAR.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleAdminClick();
+                    }}
+                    className="w-full py-3 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-2xl text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+                  >
+                    <span>PANEL ADMIN</span>
+                    <ArrowRight size={15} />
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Footer info banner */}

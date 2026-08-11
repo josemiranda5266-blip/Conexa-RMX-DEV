@@ -777,10 +777,34 @@ const MainAppContent: React.FC = () => {
             switchActiveMode('CLIENT');
             setOnboardingRoleMode('CLIENT');
             setIsOnboardingModalOpen(true);
+          } else if (role === 'ADMIN') {
+            const success = switchActiveMode('ADMIN');
+            if (success) {
+              setIsAdminPanelOpen(true);
+            }
           } else {
             switchActiveMode('PROFESSIONAL');
             setOnboardingRoleMode('PROFESSIONAL');
             setIsOnboardingModalOpen(true);
+          }
+        }}
+        onSelectClient={() => {
+          setIsRoleSelectionModalOpen(false);
+          switchActiveMode('CLIENT');
+          setOnboardingRoleMode('CLIENT');
+          setIsOnboardingModalOpen(true);
+        }}
+        onSelectProfessional={() => {
+          setIsRoleSelectionModalOpen(false);
+          switchActiveMode('PROFESSIONAL');
+          setOnboardingRoleMode('PROFESSIONAL');
+          setIsOnboardingModalOpen(true);
+        }}
+        onSelectAdmin={() => {
+          setIsRoleSelectionModalOpen(false);
+          const success = switchActiveMode('ADMIN');
+          if (success) {
+            setIsAdminPanelOpen(true);
           }
         }}
       />
