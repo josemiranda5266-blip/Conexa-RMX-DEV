@@ -1,5 +1,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import path from "path";
+import crypto from "crypto";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 
@@ -169,31 +171,60 @@ Responde en JSON con:
     }
   });
 
-  // Helper function to verify authorization tokens / admin header permissions
-  function verifyAuthHeader(req: Request): { isAuthenticated: boolean; isAdmin: boolean; userId?: string } {
+  // Centralized Auth Verification & Middleware
+  async function verifyAuthToken(req: Request): Promise<{
+    isAuthenticated: boolean;
+    isAdmin: boolean;
+    userId?: string;
+    role?: string;
+    errorReason?: string;
+  }> {
     const authHeader = req.headers.authorization;
     const adminKeyHeader = req.headers['x-admin-key'] || req.headers['x-radar-secret'];
-    const expectedSecret = process.env.RADAR_WEBHOOK_SECRET || process.env.ADMIN_SECRET_KEY;
+    const expectedSecret = process.env.ADMIN_SECRET_KEY || process.env.RADAR_WEBHOOK_SECRET;
 
-    let isAuthenticated = false;
-    let isAdmin = false;
-    let userId: string | undefined = undefined;
-
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      isAuthenticated = true;
-      const token = authHeader.split('Bearer ')[1];
-      if (token.includes('admin') || token.includes('super_admin')) {
-        isAdmin = true;
-      }
-      userId = token.split('_')[0] || 'authenticated_user';
-    }
-
+    // Check operator secret key (ONLY if expectedSecret is explicitly configured and non-empty)
     if (adminKeyHeader && expectedSecret && adminKeyHeader === expectedSecret) {
-      isAuthenticated = true;
-      isAdmin = true;
+      return { isAuthenticated: true, isAdmin: true, userId: 'admin_secret_operator', role: 'SUPER_ADMIN' };
     }
 
-    return { isAuthenticated, isAdmin, userId };
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return { isAuthenticated: false, isAdmin: false, errorReason: "MISSING_BEARER_TOKEN" };
+    }
+
+    const token = authHeader.split('Bearer ')[1].trim();
+    if (!token) {
+      return { isAuthenticated: false, isAdmin: false, errorReason: "EMPTY_TOKEN" };
+    }
+
+    // Check if Firebase Admin SDK is available
+    const hasFirebaseAdminConfig = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
+
+    if (!hasFirebaseAdminConfig) {
+      // Without Firebase Admin Service Account credentials on backend, do NOT fake token strings!
+      return {
+        isAuthenticated: false,
+        isAdmin: false,
+        errorReason: "FIREBASE_ADMIN_SDK_NOT_CONFIGURED"
+      };
+    }
+
+    try {
+      const adminModule = await import("firebase-admin");
+      const admin = (adminModule.default || adminModule) as any;
+      const decodedToken = await admin.auth().verifyIdToken(token);
+      const role = (decodedToken.role as string) || 'USER';
+      const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN' || decodedToken.admin === true;
+
+      return {
+        isAuthenticated: true,
+        isAdmin,
+        userId: decodedToken.uid,
+        role
+      };
+    } catch (err) {
+      return { isAuthenticated: false, isAdmin: false, errorReason: "INVALID_FIREBASE_ID_TOKEN" };
+    }
   }
 
   // Account Deletion API Endpoint (GDPR/ARCO Compliance)
@@ -204,12 +235,14 @@ Responde en JSON con:
         return res.status(400).json({ error: "Falta token de confirmación o ID de usuario." });
       }
 
-      const auth = verifyAuthHeader(req);
+      const auth = await verifyAuthToken(req);
       if (!auth.isAuthenticated) {
         return res.status(401).json({
           success: false,
-          error: "Acceso denegado. Se requiere encabezado Authorization: Bearer <token> para procesar la eliminación de cuenta.",
-          code: "UNAUTHORIZED"
+          error: auth.errorReason === "FIREBASE_ADMIN_SDK_NOT_CONFIGURED"
+            ? "Imposible verificar token en backend. Se requiere configurar credencial de Firebase Admin SDK en el servidor para procesamiento automático de bajas."
+            : "Acceso denegado. Se requiere token Bearer válido para procesar la eliminación de cuenta.",
+          code: auth.errorReason || "UNAUTHORIZED"
         });
       }
 
@@ -222,12 +255,10 @@ Responde en JSON con:
         });
       }
 
-      // Honest status: In this serverless container environment without Firebase Admin Service Account credentials, 
-      // the account deletion request is authenticated and logged for admin execution.
       return res.status(202).json({
         success: false,
         status: "PENDING_ADMIN_DELETION",
-        message: "Solicitud de eliminación de cuenta autenticada y registrada en cola de auditoría. La eliminación permanente requiere procesamiento de Firebase Admin SDK por la administración.",
+        message: "Solicitud de eliminación de cuenta autenticada y registrada en cola de auditoría.",
         requestedUserId: userId,
         authenticatedUserId: auth.userId,
         timestamp: new Date().toISOString()
@@ -253,11 +284,24 @@ Responde en JSON con:
   // 1. Opportunity AI Classification Service Endpoint
   app.post("/api/radar/analyze", rateLimiter, async (req: Request, res: Response) => {
     try {
-      const { description, rawText, city, province } = req.body;
+      const { description, rawText, city, province, contextType } = req.body;
       const textToAnalyze = (description || rawText || "").trim();
 
       if (!textToAnalyze) {
         return res.status(400).json({ error: "No se provino texto o descripción para analizar." });
+      }
+
+      // Requirement 8: Separate PUBLIC USER REQUEST ANALYSIS from ADMIN RADAR ANALYSIS
+      const isUserRequest = contextType === 'USER_REQUEST';
+      if (!isUserRequest) {
+        const auth = await verifyAuthToken(req);
+        const isSimulation = Boolean(req.body.isSimulation || req.body.isTest);
+        if (!isSimulation && !auth.isAdmin) {
+          return res.status(403).json({
+            error: "Acceso denegado. El análisis de RADAR administrativo requiere rol de ADMINISTRADOR.",
+            code: "UNAUTHORIZED_ADMIN_REQUIRED"
+          });
+        }
       }
 
       const sanitized = sanitizePIIForAI(textToAnalyze.slice(0, 1000));
@@ -744,7 +788,16 @@ Clasificá la oportunidad y responde ÚNICAMENTE en formato JSON con la siguient
       if (!isTestEnv) {
         const incomingSecret = req.headers['x-radar-secret'] || req.headers['x-n8n-secret'];
         const expectedSecret = process.env.RADAR_WEBHOOK_SECRET || process.env.N8N_WEBHOOK_SECRET;
-        if (expectedSecret && incomingSecret !== expectedSecret) {
+        
+        if (!expectedSecret) {
+          return res.status(500).json({
+            success: false,
+            error: "Acceso denegado. Secreto RADAR_WEBHOOK_SECRET / N8N_WEBHOOK_SECRET no configurado en el servidor para recibir eventos en producción.",
+            code: "WEBHOOK_SECRET_NOT_CONFIGURED"
+          });
+        }
+
+        if (incomingSecret !== expectedSecret) {
           return res.status(401).json({
             success: false,
             error: "Acceso denegado. Se requiere encabezado x-radar-secret o x-n8n-secret válido para registrar oportunidades en producción.",
@@ -903,7 +956,7 @@ Responde en JSON:
       }
 
       const isSimulation = Boolean(isTest || dryRun);
-      const auth = verifyAuthHeader(req);
+      const auth = await verifyAuthToken(req);
 
       // SECURITY CHECK 1: Production Authorization Guard
       if (!isSimulation && !auth.isAdmin) {
@@ -978,7 +1031,7 @@ Responde en JSON:
     try {
       const { opportunityId, campaign, userId, conversionType, isTest, dryRun } = req.body;
       const isSimulation = Boolean(isTest || dryRun);
-      const auth = verifyAuthHeader(req);
+      const auth = await verifyAuthToken(req);
 
       if (!isSimulation && !auth.isAdmin) {
         return res.status(403).json({
@@ -1011,6 +1064,29 @@ Responde en JSON:
   app.get("/api/radar/config-status", rateLimiter, async (_req: Request, res: Response) => {
     const hasGeminiKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "MY_GEMINI_API_KEY");
     
+    // Check if Firebase Client config exists
+    const hasFirebaseConfigFile = fs.existsSync(path.join(process.cwd(), 'firebase-applet-config.json')) || 
+      Boolean(process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_CONFIG);
+    
+    // Check if Firebase Admin SDK Service Account exists
+    const hasFirebaseAdminConfig = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
+
+    let firebaseStatus = "NOT_CONFIGURED";
+    let firebaseBadge = "🔴 NO CONFIGURADO";
+    let firebaseDetails = "Falta archivo firebase-applet-config.json y credencial de Firebase Admin SDK.";
+
+    if (hasFirebaseConfigFile && hasFirebaseAdminConfig) {
+      firebaseStatus = "CONFIGURED";
+      firebaseBadge = "🟢 CONFIGURADO";
+      firebaseDetails = "Firebase Client y Firebase Admin SDK conectados activamente.";
+    } else if (hasFirebaseConfigFile || hasFirebaseAdminConfig) {
+      firebaseStatus = "PARTIAL";
+      firebaseBadge = "🟡 CONFIGURACIÓN PARCIAL";
+      firebaseDetails = hasFirebaseConfigFile
+        ? "Cliente Firebase disponible. Falta credencial de Firebase Admin SDK para verificación de tokens en backend."
+        : "Firebase Admin SDK disponible. Falta configuración de cliente firebase-applet-config.json.";
+    }
+
     const metaAppId = process.env.META_APP_ID;
     const metaAppSecret = process.env.META_APP_SECRET;
     const metaVerifyToken = process.env.META_VERIFY_TOKEN;
@@ -1030,9 +1106,16 @@ Responde en JSON:
       timestamp: new Date().toISOString(),
       integrations: {
         firebase: {
-          status: "CONFIGURED",
-          badge: "🟢 CONFIGURADO",
-          details: "Firebase Firestore y Auth inicializados con reglas de seguridad estrictas."
+          status: firebaseStatus,
+          badge: firebaseBadge,
+          details: firebaseDetails
+        },
+        firebaseAdmin: {
+          status: hasFirebaseAdminConfig ? "CONFIGURED" : "NOT_CONFIGURED",
+          badge: hasFirebaseAdminConfig ? "🟢 CONFIGURADO" : "🔴 NO CONFIGURADO",
+          details: hasFirebaseAdminConfig 
+            ? "Firebase Admin SDK disponible para verificación de ID tokens en backend." 
+            : "Sin servicio de cuenta Firebase Admin. Token verification se realiza previa inicialización."
         },
         aiEngine: {
           status: hasGeminiKey ? "CONFIGURED" : "INCOMPLETE",
@@ -1089,10 +1172,21 @@ Responde en JSON:
   // POST Meta Webhook Ingestion (Page Comments, Messages, Leadgen)
   app.post("/api/radar/meta/webhook", rateLimiter, async (req: Request, res: Response) => {
     try {
-      // In production, verify HMAC signature via req.headers['x-hub-signature-256'] with META_APP_SECRET
-      const signature = req.headers['x-hub-signature-256'];
-      if (process.env.META_APP_SECRET && !signature) {
-        return res.status(401).json({ error: "Firma X-Hub-Signature-256 requerida de Meta." });
+      // Requirement 11: Verify HMAC SHA256 signature if META_APP_SECRET is set
+      const signatureHeader = req.headers['x-hub-signature-256'] as string;
+      const metaSecret = process.env.META_APP_SECRET;
+
+      if (metaSecret) {
+        if (!signatureHeader) {
+          return res.status(401).json({ error: "Acceso denegado. Se requiere encabezado X-Hub-Signature-256 para eventos de Meta." });
+        }
+        const expectedHmac = crypto.createHmac('sha256', metaSecret).update(JSON.stringify(req.body)).digest('hex');
+        const expectedSignature = `sha256=${expectedHmac}`;
+
+        if (signatureHeader !== expectedSignature) {
+          console.warn("[MetaConnector] Firma X-Hub-Signature-256 no coincide.");
+          return res.status(401).json({ error: "Firma de Webhook Meta inválida (X-Hub-Signature-256 mismatch)." });
+        }
       }
 
       const body = req.body;
@@ -1203,10 +1297,17 @@ Responde en JSON:
 
   app.post("/api/radar/n8n/webhook", rateLimiter, async (req: Request, res: Response) => {
     try {
-      const incomingSecret = req.headers['x-n8n-secret'] || req.headers['x-radar-secret'] || req.query.secret;
+      const incomingSecret = (req.headers['x-n8n-secret'] || req.headers['x-radar-secret']) as string;
       const expectedSecret = process.env.N8N_WEBHOOK_SECRET || process.env.RADAR_WEBHOOK_SECRET;
 
-      if (expectedSecret && incomingSecret !== expectedSecret) {
+      if (!expectedSecret) {
+        return res.status(500).json({
+          error: "Acceso denegado. Secreto de webhook N8N_WEBHOOK_SECRET no configurado en las variables de entorno del servidor para producción.",
+          code: "N8N_WEBHOOK_SECRET_NOT_CONFIGURED"
+        });
+      }
+
+      if (incomingSecret !== expectedSecret) {
         return res.status(401).json({
           error: "Acceso denegado. Secreto X-N8N-Secret o X-Radar-Secret no válido.",
           code: "INVALID_WEBHOOK_SECRET"

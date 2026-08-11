@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from '../lib/firebase';
+import { doc, setDoc, updateDoc, collection, getDocs, getDoc } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
 import { 
   UserProfile, Category, Profession, ServiceRequest, Quote, 
   Conversation, Message, Review, UserReport, VerificationRequest, 
@@ -467,7 +468,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const approveVerification = (verificationId: string) => {
+  // Helper for Admin Audit Logging (Requirement 15)
+  const logAdminAction = async (action: string, targetId: string, result: string) => {
+    const logData = {
+      adminUid: currentUser.id,
+      action,
+      targetId,
+      timestamp: new Date().toISOString(),
+      environment: import.meta.env.DEV ? 'development' : 'production',
+      result
+    };
+    console.log('[CONEXA AUDIT LOG]', logData);
+    if (db) {
+      try {
+        const logId = `log-${Date.now()}`;
+        await setDoc(doc(db, 'admin_audit_logs', logId), logData);
+      } catch (err) {
+        console.warn('[CONEXA AUDIT LOG] Error escribiendo log de auditoría en Firestore:', err);
+      }
+    }
+  };
+
+  const approveVerification = async (verificationId: string) => {
     const req = verifications.find(v => v.id === verificationId);
     if (!req) return;
 
@@ -483,9 +505,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return u;
     }));
+
+    await logAdminAction('APPROVE_VERIFICATION', verificationId, 'SUCCESS');
+
+    if (db) {
+      try {
+        await updateDoc(doc(db, 'verifications', verificationId), { status: 'VERIFIED' });
+        await updateDoc(doc(db, 'users', req.userId), req.type === 'IDENTITY' 
+          ? { isIdentityVerified: true, identityVerificationStatus: 'VERIFIED' }
+          : { isProfessionalVerified: true, professionalVerificationStatus: 'VERIFIED' }
+        );
+      } catch (e) {
+        console.warn('[Firestore] Error registrando verificación aprobada:', e);
+      }
+    }
   };
 
-  const reportUser = (reportedUserId: string, reason: UserReport['reason'], description: string) => {
+  const reportUser = async (reportedUserId: string, reason: UserReport['reason'], description: string) => {
     const reportedUser = users.find(u => u.id === reportedUserId);
     const newReport: UserReport = {
       id: `rep-${Date.now()}`,
@@ -499,14 +535,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       status: 'PENDING'
     };
     setReports(prev => [newReport, ...prev]);
+
+    if (db) {
+      try {
+        await setDoc(doc(db, 'reports', newReport.id), newReport);
+      } catch (e) {
+        console.warn('[Firestore] Error guardando reporte:', e);
+      }
+    }
   };
 
-  const blockUser = (userIdToBlock: string) => {
+  const blockUser = async (userIdToBlock: string) => {
     setUsers(prev => prev.map(u => u.id === userIdToBlock ? { ...u, isBlocked: true } : u));
+    await logAdminAction('BLOCK_USER', userIdToBlock, 'SUCCESS');
+
+    if (db) {
+      try {
+        await updateDoc(doc(db, 'users', userIdToBlock), { isBlocked: true });
+      } catch (e) {
+        console.warn('[Firestore] Error actualizando bloqueo de usuario:', e);
+      }
+    }
   };
 
-  const resolveReport = (reportId: string, action: 'DISMISSED' | 'ACTION_TAKEN') => {
+  const resolveReport = async (reportId: string, action: 'DISMISSED' | 'ACTION_TAKEN') => {
     setReports(prev => prev.map(r => r.id === reportId ? { ...r, status: action } : r));
+    await logAdminAction('RESOLVE_REPORT', reportId, action);
+
+    if (db) {
+      try {
+        await updateDoc(doc(db, 'reports', reportId), { status: action });
+      } catch (e) {
+        console.warn('[Firestore] Error resolviendo reporte:', e);
+      }
+    }
   };
 
   // Beta 1.0 System State
@@ -604,7 +666,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     trackEvent('feedback_submitted', { category });
   };
 
-  const createInviteCode = (code: string, maxUses: number, role: UserProfile['role'], note?: string) => {
+  const createInviteCode = async (code: string, maxUses: number, role: UserProfile['role'], note?: string) => {
     const newCode: InviteCode = {
       id: `inv-${Date.now()}`,
       code: code.trim().toUpperCase(),
@@ -617,14 +679,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdForNote: note
     };
     setInviteCodes(prev => [newCode, ...prev]);
+    await logAdminAction('CREATE_INVITE_CODE', newCode.id, newCode.code);
+
+    if (db) {
+      try {
+        await setDoc(doc(db, 'invite_codes', newCode.id), newCode);
+      } catch (e) {
+        console.warn('[Firestore] Error guardando código de invitación:', e);
+      }
+    }
   };
 
-  const toggleInviteCode = (codeId: string) => {
+  const toggleInviteCode = async (codeId: string) => {
+    const code = inviteCodes.find(c => c.id === codeId);
+    const newStatus = code ? !code.isActive : true;
     setInviteCodes(prev => prev.map(c => c.id === codeId ? { ...c, isActive: !c.isActive } : c));
+    await logAdminAction('TOGGLE_INVITE_CODE', codeId, String(newStatus));
+
+    if (db) {
+      try {
+        await updateDoc(doc(db, 'invite_codes', codeId), { isActive: newStatus });
+      } catch (e) {
+        console.warn('[Firestore] Error actualizando código de invitación:', e);
+      }
+    }
   };
 
-  const updateBetaConfig = (updates: Partial<BetaConfig>) => {
+  const updateBetaConfig = async (updates: Partial<BetaConfig>) => {
     setBetaConfig(prev => ({ ...prev, ...updates }));
+    await logAdminAction('UPDATE_BETA_CONFIG', 'main', JSON.stringify(updates));
+
+    if (db) {
+      try {
+        await setDoc(doc(db, 'beta_config', 'main'), { ...betaConfig, ...updates }, { merge: true });
+      } catch (e) {
+        console.warn('[Firestore] Error actualizando configuración beta:', e);
+      }
+    }
   };
 
   const markNotificationRead = (notifId: string) => {

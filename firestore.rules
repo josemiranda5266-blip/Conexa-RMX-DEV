@@ -52,9 +52,15 @@ service cloud.firestore {
       }
     }
 
-    // Service Requests
+    // Service Requests - Restricted to Client Owner, Bidding/Assigned Professionals, or Admins
     match /service_requests/{requestId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() && (
+        resource.data.clientId == request.auth.uid ||
+        (resource.data.assignedProfessionalId != null && resource.data.assignedProfessionalId == request.auth.uid) ||
+        (resource.data.biddingProfessionalIds != null && request.auth.uid in resource.data.biddingProfessionalIds) ||
+        resource.data.status == 'OPEN' ||
+        isAdmin()
+      );
       allow create: if isSignedIn() && request.resource.data.clientId == request.auth.uid;
       allow update: if isSignedIn() && (
         resource.data.clientId == request.auth.uid || isAdmin()
@@ -110,6 +116,23 @@ service cloud.firestore {
     // CONEXA RADAR Demand Opportunities - Restricted to Admins
     match /radar_opportunities/{opportunityId} {
       allow read, create, update, delete: if isAdmin();
+    }
+
+    // Immutable Admin Audit Logs
+    match /admin_audit_logs/{logId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // Beta System Config & Invite Codes
+    match /beta_config/{configId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /invite_codes/{codeId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
   }
 }
