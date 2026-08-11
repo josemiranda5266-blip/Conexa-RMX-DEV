@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from '../lib/firebase';
 import { 
   UserProfile, Category, Profession, ServiceRequest, Quote, 
   Conversation, Message, Review, UserReport, VerificationRequest, 
@@ -158,10 +160,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [maxDistanceKm, setMaxDistanceKm] = useState<number>(30);
   const [onlyVerified, setOnlyVerified] = useState<boolean>(false);
 
-  // Sync users to localStorage
+  // Sync users to localStorage (for local preferences only - NOT for authorization)
   useEffect(() => {
     localStorage.setItem('conexa_users', JSON.stringify(users));
   }, [users]);
+
+  // Firebase Auth Real Listener Effect
+  useEffect(() => {
+    if (!auth) return;
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        console.log('[CONEXA AUTH] Usuario autenticado vía Firebase Auth:', firebaseUser.uid, firebaseUser.email);
+        // Get custom token claims if available
+        try {
+          const tokenResult = await firebaseUser.getIdTokenResult();
+          const claimRole = (tokenResult.claims.role as Role) || 'USER';
+          
+          setCurrentUser(prev => ({
+            ...prev,
+            id: firebaseUser.uid,
+            name: firebaseUser.displayName || prev.name || 'Usuario CONEXA',
+            email: firebaseUser.email || prev.email,
+            avatar: firebaseUser.photoURL || prev.avatar,
+            role: claimRole, // Derived from Custom Claims / Auth Token
+            isIdentityVerified: firebaseUser.emailVerified || prev.isIdentityVerified
+          }));
+        } catch (err) {
+          console.warn('[CONEXA AUTH] Error obteniendo claims del token Firebase:', err);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Helper authorization checks based on real currentUser.role
   const isAdmin = (): boolean => {

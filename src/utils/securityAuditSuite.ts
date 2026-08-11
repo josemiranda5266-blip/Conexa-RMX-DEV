@@ -3,8 +3,8 @@ import { UserProfile, Review, ServiceRequest, Quote, Conversation } from '../typ
 export interface AuditTestResult {
   testId: string;
   category: 'PRIVACY' | 'SECURITY' | 'AUTHORIZATION' | 'REPUTATION' | 'ANTI_SCRAPING' | 'AI_PRIVACY';
+  status: 'VERIFIED_PASS' | 'LOCAL_LOGIC_PASS' | 'VERIFIED_FAIL' | 'NOT_VERIFIED';
   title: string;
-  status: 'VERIFIED_PASS' | 'VERIFIED_FAIL' | 'NOT_VERIFIED';
   details: string;
 }
 
@@ -49,8 +49,8 @@ export function runSecurityAndPrivacyAudit(sampleUsers: UserProfile[]): AuditTes
     testId: 'SEC-03',
     category: 'AUTHORIZATION',
     title: 'Protección contra Escalada de Privilegios (Role Tampering)',
-    status: roleTamperBlocked ? 'VERIFIED_PASS' : 'VERIFIED_FAIL',
-    details: 'Las solicitudes para auto-asignarse permisos de ADMIN o SUPER_ADMIN desde el frontend son rechazadas.'
+    status: roleTamperBlocked ? 'LOCAL_LOGIC_PASS' : 'VERIFIED_FAIL',
+    details: 'Validado localmente. Las reglas de Firestore e interfaz impiden auto-asignarse permisos de ADMIN o SUPER_ADMIN. Verificación de producción requiere sesión con token activo.'
   });
 
   // TEST 4: Self-Review & Unverified Review Prevention
@@ -63,8 +63,8 @@ export function runSecurityAndPrivacyAudit(sampleUsers: UserProfile[]): AuditTes
     testId: 'SEC-04',
     category: 'REPUTATION',
     title: 'Prevención de Auto-Reseñas y Reseñas Falsas',
-    status: selfReviewBlocked ? 'VERIFIED_PASS' : 'VERIFIED_FAIL',
-    details: 'El sistema valida que el autor de la reseña no sea el mismo profesional y requiere un trabajo/presupuesto previo aceptado.'
+    status: selfReviewBlocked ? 'LOCAL_LOGIC_PASS' : 'VERIFIED_FAIL',
+    details: 'El sistema valida localmente que el autor de la reseña no sea el mismo profesional y requiere un trabajo/presupuesto previo aceptado.'
   });
 
   // TEST 5: Pipeline Job State Machine Transitions
@@ -86,7 +86,7 @@ export function runSecurityAndPrivacyAudit(sampleUsers: UserProfile[]): AuditTes
     testId: 'SEC-05',
     category: 'SECURITY',
     title: 'Inviolabilidad del Pipeline de Estado de Trabajos',
-    status: invalidJumpBlocked ? 'VERIFIED_PASS' : 'VERIFIED_FAIL',
+    status: invalidJumpBlocked ? 'LOCAL_LOGIC_PASS' : 'VERIFIED_FAIL',
     details: 'No se permite saltar estados en el flujo de solicitud -> presupuesto -> trabajo -> reseña mediante solicitudes manipuladas.'
   });
 

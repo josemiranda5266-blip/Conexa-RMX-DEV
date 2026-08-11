@@ -32,9 +32,18 @@ service cloud.firestore {
     // Public Users profiles (No phone or exact address)
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow create: if isOwner(userId);
-      // Prevent role self-elevation: owner can update if role field is not modified
-      allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin();
+      allow create: if isOwner(userId) 
+        && (!request.resource.data.keys().hasAny(['role']) || request.resource.data.role == 'USER' || request.resource.data.role == 'PROFESSIONAL')
+        && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode != 'ADMIN');
+      
+      // Prevent role & privilege tampering on update
+      allow update: if isAdmin() || (
+        isOwner(userId) 
+        && request.resource.data.role == resource.data.role
+        && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode != 'ADMIN')
+        && (!resource.data.keys().hasAny(['isIdentityVerified']) || request.resource.data.isIdentityVerified == resource.data.isIdentityVerified)
+        && (!resource.data.keys().hasAny(['isProfessionalVerified']) || request.resource.data.isProfessionalVerified == resource.data.isProfessionalVerified)
+      );
       allow delete: if isAdmin();
 
       // Confidential Private Info (Phone, Exact Address, ID docs) - Restricted strictly to owner or admin
