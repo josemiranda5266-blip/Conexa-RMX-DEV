@@ -12,7 +12,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose
 }) => {
-  const { currentUser, deleteAccount, connectMercadoPago, getMercadoPagoStatus, authLoading, openAuthPortal } = useApp();
+  const { currentUser, deleteAccount, connectMercadoPago, getMercadoPagoStatus, authLoading, authSessionReady, openAuthPortal } = useApp();
   const [downloaded, setDownloaded] = useState(false);
   const [mpStatus, setMpStatus] = useState<{ connected: boolean; mpUserId?: string | null; loading?: boolean; unauthenticated?: boolean } | null>(null);
   const [loadingMp, setLoadingMp] = useState(false);
@@ -27,14 +27,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     );
 
   useEffect(() => {
-    if (isOpen && currentUser && isPro) {
+    if (isOpen && currentUser && isPro && authSessionReady) {
       setLoadingMp(true);
       getMercadoPagoStatus()
         .then(res => setMpStatus(res))
         .catch(err => console.warn('Error al verificar estado de Mercado Pago:', err))
         .finally(() => setLoadingMp(false));
     }
-  }, [isOpen, currentUser, authLoading, isPro]);
+  }, [isOpen, currentUser, authLoading, authSessionReady, isPro]);
 
   if (!isOpen || !currentUser) return null;
 
@@ -115,7 +115,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
               {authLoading || loadingMp ? (
                 <p className="text-slate-500 text-[11px] animate-pulse">Verificando sesión de autenticación...</p>
-              ) : (!auth?.currentUser || mpStatus?.unauthenticated) ? (
+              ) : (currentUser && (!auth?.currentUser || !authSessionReady)) ? (
+                <p className="text-slate-500 text-[11px] animate-pulse">Sincronizando sesión...</p>
+              ) : (!auth?.currentUser || !authSessionReady || mpStatus?.unauthenticated) ? (
                 <div className="p-3 bg-amber-50 border border-amber-200/80 rounded-xl text-amber-900 text-xs flex items-start gap-2">
                   <AlertCircle size={15} className="text-amber-600 shrink-0 mt-0.5" />
                   <div className="space-y-1 flex-1">

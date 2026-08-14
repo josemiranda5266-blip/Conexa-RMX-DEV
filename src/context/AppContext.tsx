@@ -21,6 +21,7 @@ interface AppContextType {
   switchUserRole: (userId: string) => void;
   switchActiveMode: (mode: 'CLIENT' | 'PROFESSIONAL' | 'ADMIN') => boolean;
   authLoading: boolean;
+  authSessionReady: boolean;
   isAuthPortalOpen: boolean;
   openAuthPortal: () => void;
   closeAuthPortal: () => void;
@@ -121,6 +122,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return users[0] || null;
   });
   const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [authSessionReady, setAuthSessionReady] = useState<boolean>(!isFirebaseConfigured);
   const [categories] = useState<Category[]>(INITIAL_CATEGORIES);
   const [professions] = useState<Profession[]>(INITIAL_PROFESSIONS);
   const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS);
@@ -196,6 +198,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      setAuthSessionReady(false);
       try {
         if (firebaseUser) {
           console.log('[CONEXA AUTH] Usuario autenticado vía Firebase Auth:', firebaseUser.uid, firebaseUser.email);
@@ -299,6 +302,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               hasProfessionalProfile: finalHasProfessionalProfile,
               isIdentityVerified: firebaseUser.emailVerified || profileData.isIdentityVerified || false
             } as UserProfile);
+            setAuthSessionReady(true);
           } else {
             // Firebase Auth configured partially or in local mode
             setCurrentUser({
@@ -324,6 +328,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               trustScore: 90,
               availabilityStatus: 'DISPONIBLE'
             } as UserProfile);
+            setAuthSessionReady(true);
           }
         } else {
           console.log('[CONEXA AUTH] Sin sesión activa.');
@@ -333,9 +338,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             // Keep mock user 0 in demo mode
             setCurrentUser(INITIAL_PROFILES[0]);
           }
+          setAuthSessionReady(false);
         }
       } catch (err) {
         console.warn('[CONEXA AUTH] Error procesando autenticación:', err);
+        setAuthSessionReady(false);
       } finally {
         setAuthLoading(false);
       }
@@ -723,11 +730,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const connectMercadoPago = async () => {
-    if (authLoading) {
+    if (authLoading || !authSessionReady) {
       throw new Error('Verificando sesión de autenticación. Por favor reintentá en unos segundos.');
     }
 
-    if (!auth?.currentUser) {
+    if (!auth?.currentUser || !currentUser) {
       throw new Error('Usuario no autenticado o sesión de Firebase Auth expirada. Para vincular Mercado Pago primero debés iniciar sesión.');
     }
 
@@ -774,10 +781,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const getMercadoPagoStatus = async () => {
-    if (authLoading) {
+    if (authLoading || !authSessionReady) {
       return { connected: false, loading: true };
     }
-    if (!auth?.currentUser) {
+    if (!auth?.currentUser || !currentUser) {
       return { connected: false, unauthenticated: true };
     }
     try {
@@ -1278,7 +1285,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   return (
     <AppContext.Provider value={{
-      currentUser, setCurrentUser, switchUserRole, switchActiveMode, authLoading,
+      currentUser, setCurrentUser, switchUserRole, switchActiveMode, authLoading, authSessionReady,
       isAuthPortalOpen, openAuthPortal, closeAuthPortal,
       isAdmin, hasRole,
       users, categories, professions, reviews, requests, quotes, 

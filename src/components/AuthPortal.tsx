@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { auth, db } from '../lib/firebase';
 import { 
   signInWithEmailAndPassword, 
@@ -13,7 +13,7 @@ import { Role } from '../types';
 import { useApp } from '../context/AppContext';
 
 export const AuthPortal: React.FC = () => {
-  const { closeAuthPortal } = useApp();
+  const { closeAuthPortal, authSessionReady, authLoading, currentUser } = useApp();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -21,8 +21,20 @@ export const AuthPortal: React.FC = () => {
   const [phone, setPhone] = useState('');
   const [selectedRole, setSelectedRole] = useState<Role>('USER');
   const [loading, setLoading] = useState(false);
+  const [isAwaitingSessionSync, setIsAwaitingSessionSync] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // Monitor AppContext states reactively to finalize session sync and close the portal
+  useEffect(() => {
+    if (isAwaitingSessionSync) {
+      if (auth.currentUser && currentUser && authSessionReady && !authLoading) {
+        setSuccess('Sesión sincronizada e iniciada correctamente.');
+        closeAuthPortal?.();
+        setIsAwaitingSessionSync(false);
+      }
+    }
+  }, [isAwaitingSessionSync, currentUser, authSessionReady, authLoading, closeAuthPortal]);
 
   if (!auth) {
     return (
@@ -80,10 +92,9 @@ export const AuthPortal: React.FC = () => {
         }
       }
 
-      setSuccess('Sesión iniciada con Google correctamente.');
-      setTimeout(() => {
-        closeAuthPortal?.();
-      }, 1000);
+      await firebaseUser.getIdToken(true);
+      setSuccess('Sesión de Google iniciada. Sincronizando perfil con CONEXA...');
+      setIsAwaitingSessionSync(true);
     } catch (err: any) {
       console.error('[CONEXA GOOGLE AUTH ERROR]', err);
       setError(err.message || 'Error al iniciar sesión con Google.');
@@ -101,11 +112,14 @@ export const AuthPortal: React.FC = () => {
     try {
       if (isLogin) {
         // Sign In
-        await signInWithEmailAndPassword(auth, email, password);
-        setSuccess('Sesión iniciada con éxito. Redireccionando...');
-        setTimeout(() => {
-          closeAuthPortal?.();
-        }, 1000);
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const firebaseUser = userCredential.user;
+        if (!firebaseUser) {
+          throw new Error('No se pudo verificar el usuario autenticado.');
+        }
+        await firebaseUser.getIdToken(true);
+        setSuccess('Sesión iniciada correctamente. Sincronizando perfil con CONEXA...');
+        setIsAwaitingSessionSync(true);
       } else {
         // Sign Up
         if (!name.trim()) {
@@ -113,6 +127,9 @@ export const AuthPortal: React.FC = () => {
         }
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const firebaseUser = userCredential.user;
+        if (!firebaseUser) {
+          throw new Error('No se pudo registrar el usuario en Firebase Auth.');
+        }
 
         // Update Auth Profile
         await updateProfile(firebaseUser, {
@@ -157,10 +174,9 @@ export const AuthPortal: React.FC = () => {
           });
         }
 
-        setSuccess('¡Cuenta registrada correctamente!');
-        setTimeout(() => {
-          closeAuthPortal?.();
-        }, 1000);
+        await firebaseUser.getIdToken(true);
+        setSuccess('¡Cuenta registrada correctamente! Sincronizando perfil con CONEXA...');
+        setIsAwaitingSessionSync(true);
       }
     } catch (err: any) {
       console.error('[CONEXA AUTH ERROR]', err);
@@ -333,10 +349,10 @@ export const AuthPortal: React.FC = () => {
         {/* Submit Button */}
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || isAwaitingSessionSync}
           className="w-full py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer text-xs uppercase tracking-wider"
         >
-          {loading ? (
+          {loading || isAwaitingSessionSync ? (
             <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
           ) : (
             <span>{isLogin ? 'Iniciar Sesión' : 'Crear Cuenta Segura'}</span>
@@ -353,7 +369,7 @@ export const AuthPortal: React.FC = () => {
         <button
           type="button"
           onClick={handleGoogleSignIn}
-          disabled={loading}
+          disabled={loading || isAwaitingSessionSync}
           className="w-full py-3 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold rounded-xl shadow-sm transition-all flex items-center justify-center gap-2.5 cursor-pointer text-xs"
         >
           <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
