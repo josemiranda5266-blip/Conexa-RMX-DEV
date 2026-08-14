@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { Shield, Lock, Download, Trash2, Bell, Eye, EyeOff, X, CheckCircle2, CreditCard, AlertCircle } from 'lucide-react';
+import { Shield, Lock, Download, Trash2, Bell, Eye, EyeOff, X, CheckCircle2, CreditCard, AlertCircle, LogIn } from 'lucide-react';
+import { auth } from '../lib/firebase';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -108,14 +109,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
               {authLoading || loadingMp ? (
                 <p className="text-slate-500 text-[11px] animate-pulse">Verificando sesión de autenticación...</p>
-              ) : mpStatus?.unauthenticated ? (
-                <div className="p-2.5 bg-amber-50 border border-amber-200/80 rounded-xl text-amber-900 text-xs flex items-start gap-2">
+              ) : (!auth?.currentUser || mpStatus?.unauthenticated) ? (
+                <div className="p-3 bg-amber-50 border border-amber-200/80 rounded-xl text-amber-900 text-xs flex items-start gap-2">
                   <AlertCircle size={15} className="text-amber-600 shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-bold text-[11px]">Sesión de Firebase Auth requerida</p>
-                    <p className="text-[10px] text-amber-800 leading-relaxed mt-0.5">
-                      Tu sesión expiró o no iniciaste sesión con tu cuenta de Firebase Auth. Por favor iniciá sesión para vincular Mercado Pago.
+                  <div className="space-y-1 flex-1">
+                    <p className="font-bold text-xs">Sesión de Firebase Auth requerida</p>
+                    <p className="text-[11px] text-amber-800 leading-relaxed">
+                      Para vincular Mercado Pago primero debés iniciar sesión.
                     </p>
+                    <button
+                      onClick={() => {
+                        onClose();
+                      }}
+                      className="mt-1 px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+                    >
+                      <LogIn size={13} />
+                      <span>Iniciar sesión</span>
+                    </button>
                   </div>
                 </div>
               ) : mpStatus?.connected ? (

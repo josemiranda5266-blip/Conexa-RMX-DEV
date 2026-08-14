@@ -2,9 +2,70 @@ import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import crypto from "crypto";
 import fs from "fs";
+import * as adminModule from "firebase-admin";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { validateMercadoPagoEnv } from "./src/lib/envValidation.js";
+
+const firebaseAdmin: any = (adminModule as any).default || adminModule;
+let firebaseAdminApp: any = null;
+
+function getFirebaseAdmin(): any {
+  if (firebaseAdminApp) return firebaseAdminApp;
+  if (firebaseAdmin.apps && firebaseAdmin.apps.length > 0) {
+    firebaseAdminApp = firebaseAdmin.apps[0];
+    return firebaseAdminApp;
+  }
+
+  const saEnv = process.env.FIREBASE_SERVICE_ACCOUNT?.trim();
+  const gacEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
+
+  let credential: any = null;
+
+  if (saEnv) {
+    try {
+      let parsedSA: any;
+      if (saEnv.startsWith('{')) {
+        parsedSA = JSON.parse(saEnv);
+      } else {
+        const decoded = Buffer.from(saEnv, 'base64').toString('utf8');
+        parsedSA = JSON.parse(decoded);
+      }
+      credential = firebaseAdmin.credential.cert(parsedSA);
+    } catch (err: any) {
+      console.error('[FIREBASE ADMIN] Error parseando FIREBASE_SERVICE_ACCOUNT:', err?.message || err);
+    }
+  }
+
+  if (!credential && gacEnv) {
+    try {
+      credential = firebaseAdmin.credential.applicationDefault();
+    } catch (err: any) {
+      console.error('[FIREBASE ADMIN] Error con GOOGLE_APPLICATION_CREDENTIALS:', err?.message || err);
+    }
+  }
+
+  if (!credential) {
+    try {
+      credential = firebaseAdmin.credential.applicationDefault();
+    } catch {
+      // ADC unavailable
+    }
+  }
+
+  if (!credential) {
+    return null;
+  }
+
+  try {
+    firebaseAdminApp = firebaseAdmin.initializeApp({ credential });
+    console.log('[FIREBASE ADMIN] Inicializado exitosamente.');
+    return firebaseAdminApp;
+  } catch (err: any) {
+    console.error('[FIREBASE ADMIN] Error en initializeApp:', err?.message || err);
+    return null;
+  }
+}
 
 async function startServer() {
   const app = express();
@@ -221,22 +282,17 @@ Responde en JSON con:
       return { isAuthenticated: false, isAdmin: false, errorReason: "EMPTY_TOKEN" };
     }
 
-    // Check if Firebase Admin SDK is available
-    const hasFirebaseAdminConfig = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
-
-    if (!hasFirebaseAdminConfig) {
-      // Without Firebase Admin Service Account credentials on backend, do NOT fake token strings!
+    const adminApp = getFirebaseAdmin();
+    if (!adminApp) {
       return {
         isAuthenticated: false,
         isAdmin: false,
-        errorReason: "FIREBASE_ADMIN_SDK_NOT_CONFIGURED"
+        errorReason: "FIREBASE_ADMIN_NOT_CONFIGURED"
       };
     }
 
     try {
-      const adminModule = await import("firebase-admin");
-      const admin = (adminModule.default || adminModule) as any;
-      const decodedToken = await admin.auth().verifyIdToken(token);
+      const decodedToken = await adminApp.auth().verifyIdToken(token);
       const role = (decodedToken.role as string) || 'USER';
       const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN' || decodedToken.admin === true;
 
@@ -246,7 +302,7 @@ Responde en JSON con:
         userId: decodedToken.uid,
         role
       };
-    } catch (err) {
+    } catch (err: any) {
       return { isAuthenticated: false, isAdmin: false, errorReason: "INVALID_FIREBASE_ID_TOKEN" };
     }
   }
@@ -311,15 +367,49 @@ Responde en JSON con:
   }
 
   async function getAdminDb(): Promise<any> {
-    const adminModule = await import('firebase-admin');
-    const admin = (adminModule.default || adminModule) as any;
-    return admin.firestore();
+    const adminApp = getFirebaseAdmin();
+    if (!adminApp) throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
+    return adminApp.firestore();
   }
+
+  // Diagnostic Endpoint: Only returns booleans
+  app.get('/api/auth/config-status', (_req: Request, res: Response) => {
+    const firebaseAdminApp = getFirebaseAdmin();
+    const mpEnv = validateMercadoPagoEnv();
+
+    let clientConfigured = false;
+    try {
+      const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+      if (fs.existsSync(configPath)) {
+        const raw = fs.readFileSync(configPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed.projectId && parsed.apiKey) {
+          clientConfigured = true;
+        }
+      }
+    } catch {
+      clientConfigured = false;
+    }
+
+    const hasAdminEnv = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
+
+    return res.json({
+      firebaseClientConfigured: clientConfigured,
+      firebaseAdminConfigured: hasAdminEnv,
+      firebaseAdminInitialized: firebaseAdminApp !== null,
+      mercadoPagoConfigured: mpEnv.isValid
+    });
+  });
 
   app.get('/api/mercadopago/oauth/start', async (req: Request, res: Response) => {
     try {
       const auth = await verifyAuthToken(req);
-      if (!auth.isAuthenticated || !auth.userId) return res.status(401).json({ error: 'UNAUTHORIZED' });
+      if (!auth.isAuthenticated || !auth.userId) {
+        if (auth.errorReason === 'FIREBASE_ADMIN_NOT_CONFIGURED') {
+          return res.status(503).json({ error: 'FIREBASE_ADMIN_NOT_CONFIGURED', message: 'El backend de Firebase Admin no está configurado en el servidor.' });
+        }
+        return res.status(401).json({ error: auth.errorReason || 'UNAUTHORIZED' });
+      }
       const appId = requireEnv('MP_APP_ID');
       const redirectUri = getMpRedirectUri();
       const state = createOAuthState(auth.userId);

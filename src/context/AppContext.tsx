@@ -668,7 +668,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     if (!auth?.currentUser) {
-      throw new Error('Usuario no autenticado o sesión de Firebase Auth expirada.');
+      throw new Error('Usuario no autenticado o sesión de Firebase Auth expirada. Para vincular Mercado Pago primero debés iniciar sesión.');
     }
 
     // Immediately open popup window synchronously during user click gesture to avoid browser popup blockers
@@ -695,6 +695,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (response.status === 401) {
           throw new Error('Usuario no autenticado o sesión de Firebase Auth expirada.');
         }
+        if (data.error === 'FIREBASE_ADMIN_NOT_CONFIGURED') {
+          throw new Error('El backend de Firebase Admin no está configurado en el servidor.');
+        }
         if (response.status === 503 || data.error === 'MERCADO_PAGO_NOT_CONFIGURED') {
           throw new Error('Mercado Pago no está configurado en el servidor (faltan variables de entorno MP_APP_ID / MP_CLIENT_SECRET).');
         }
@@ -717,11 +720,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!auth?.currentUser) {
       return { connected: false, unauthenticated: true };
     }
-    const token = await auth.currentUser.getIdToken();
-    const response = await fetch('/api/mercadopago/status', { headers: { Authorization: `Bearer ${token}` } });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'No se pudo consultar Mercado Pago.');
-    return data;
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const response = await fetch('/api/mercadopago/status', { headers: { Authorization: `Bearer ${token}` } });
+      const data = await response.json();
+      if (response.status === 401) {
+        return { connected: false, unauthenticated: true };
+      }
+      if (!response.ok) throw new Error(data.error || 'No se pudo consultar Mercado Pago.');
+      return data;
+    } catch (err: any) {
+      return { connected: false, error: err?.message || 'Error de conexión' };
+    }
   };
 
   const createMercadoPagoCheckout = async (transactionId: string) => {

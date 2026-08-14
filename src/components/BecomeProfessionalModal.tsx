@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { X, Wrench, ShieldCheck, CheckCircle2, Sparkles, MapPin, Clock, Award, Plus, Trash2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { INITIAL_PROFESSIONS } from '../data/mockData';
+import { auth, db } from '../lib/firebase';
+import { doc, setDoc } from 'firebase/firestore';
 
 interface BecomeProfessionalModalProps {
   isOpen: boolean;
@@ -27,7 +29,7 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const updatedSpecialties = specialtiesText
@@ -35,13 +37,17 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
       .map(s => s.trim())
       .filter(Boolean);
 
+    const targetUid = auth?.currentUser?.uid || currentUser.id;
+    const safeRole = currentUser.role === 'SUPER_ADMIN' || currentUser.role === 'ADMIN' ? currentUser.role : 'PROFESSIONAL' as const;
+
     const updatedUser = {
       ...currentUser,
+      id: targetUid,
       isProfessional: true,
       hasProfessionalProfile: true,
       hasClientProfile: true,
       activeMode: 'PROFESSIONAL' as const,
-      role: currentUser.role === 'SUPER_ADMIN' || currentUser.role === 'ADMIN' ? currentUser.role : 'PROFESSIONAL' as const,
+      role: safeRole,
       professionName,
       businessName: businessName || `${professionName} ${currentUser.name.split(' ')[0]}`,
       specialties: updatedSpecialties.length > 0 ? updatedSpecialties : ['Atención rápida', 'Presupuestos sin cargo'],
@@ -53,8 +59,18 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
       availabilityStatus: 'DISPONIBLE' as const
     };
 
+    if (auth?.currentUser && db) {
+      try {
+        const userDocRef = doc(db, 'users', auth.currentUser.uid);
+        await setDoc(userDocRef, updatedUser, { merge: true });
+        console.log('[CONEXA PROFILE] Perfil profesional guardado en Firestore para UID:', auth.currentUser.uid);
+      } catch (err) {
+        console.error('[CONEXA PROFILE] Error guardando en Firestore:', err);
+      }
+    }
+
     setCurrentUser(updatedUser);
-    trackEvent('became_professional', { userId: currentUser.id, professionName });
+    trackEvent('became_professional', { userId: targetUid, professionName });
 
     if (onSuccess) onSuccess();
     onClose();
