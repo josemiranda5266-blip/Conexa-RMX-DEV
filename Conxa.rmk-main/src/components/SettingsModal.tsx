@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Shield, Lock, Download, Trash2, Bell, Eye, EyeOff, X, CheckCircle2, CreditCard, AlertCircle } from 'lucide-react';
+import { Shield, Lock, Download, Trash2, Bell, Eye, EyeOff, X, CheckCircle2 } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -11,25 +11,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose
 }) => {
-  const { currentUser, deleteAccount, connectMercadoPago, getMercadoPagoStatus, authLoading } = useApp();
+  const { currentUser, deleteAccount } = useApp();
   const [downloaded, setDownloaded] = useState(false);
-  const [mpStatus, setMpStatus] = useState<{ connected: boolean; mpUserId?: string | null; loading?: boolean; unauthenticated?: boolean } | null>(null);
-  const [loadingMp, setLoadingMp] = useState(false);
-  const [mpError, setMpError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (isOpen && currentUser && (currentUser.role === 'PROFESSIONAL' || currentUser.isProfessional)) {
-      setLoadingMp(true);
-      getMercadoPagoStatus()
-        .then(res => setMpStatus(res))
-        .catch(err => console.warn('Error al verificar estado de Mercado Pago:', err))
-        .finally(() => setLoadingMp(false));
-    }
-  }, [isOpen, currentUser, authLoading]);
 
   if (!isOpen || !currentUser) return null;
-
-  const isPro = currentUser.role === 'PROFESSIONAL' || currentUser.isProfessional;
 
   const handleExportData = () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(currentUser, null, 2));
@@ -78,70 +63,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         <div className="space-y-3 pt-1">
-          {isPro && (
-            <div className="p-3.5 bg-sky-50 rounded-2xl border border-sky-200 space-y-2">
-              <h4 className="font-bold text-sky-900 flex items-center gap-1.5">
-                <CreditCard size={15} className="text-sky-600" />
-                <span>Cobros con Mercado Pago Marketplace</span>
-              </h4>
-              <p className="text-sky-800 leading-relaxed">
-                {mpStatus?.connected 
-                  ? 'Tu cuenta de Mercado Pago está vinculada y lista para recibir cobros directamente.' 
-                  : 'Vinculá tu cuenta para recibir pagos directos de clientes al aceptar presupuestos.'}
-              </p>
-              {mpError && (
-                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-start gap-2 animate-fade-in">
-                  <AlertCircle size={15} className="text-rose-600 shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <p className="font-semibold text-rose-900">Error al vincular Mercado Pago</p>
-                    <p className="text-[11px] text-rose-700 mt-0.5 leading-relaxed">{mpError}</p>
-                  </div>
-                  <button 
-                    onClick={() => setMpError(null)} 
-                    className="text-rose-400 hover:text-rose-600 font-bold text-xs"
-                    aria-label="Cerrar mensaje de error"
-                  >
-                    ✕
-                  </button>
-                </div>
-              )}
-
-              {authLoading || loadingMp ? (
-                <p className="text-slate-500 text-[11px] animate-pulse">Verificando sesión de autenticación...</p>
-              ) : mpStatus?.unauthenticated ? (
-                <div className="p-2.5 bg-amber-50 border border-amber-200/80 rounded-xl text-amber-900 text-xs flex items-start gap-2">
-                  <AlertCircle size={15} className="text-amber-600 shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-bold text-[11px]">Sesión de Firebase Auth requerida</p>
-                    <p className="text-[10px] text-amber-800 leading-relaxed mt-0.5">
-                      Tu sesión expiró o no iniciaste sesión con tu cuenta de Firebase Auth. Por favor iniciá sesión para vincular Mercado Pago.
-                    </p>
-                  </div>
-                </div>
-              ) : mpStatus?.connected ? (
-                <div className="flex items-center gap-2 text-emerald-700 font-bold bg-emerald-100/80 px-3 py-1.5 rounded-xl border border-emerald-200">
-                  <CheckCircle2 size={15} />
-                  <span>Cuenta Vinculada {mpStatus.mpUserId ? `(ID: ${mpStatus.mpUserId})` : ''}</span>
-                </div>
-              ) : (
-                <button
-                  onClick={async () => {
-                    setMpError(null);
-                    try {
-                      await connectMercadoPago();
-                    } catch (err: any) {
-                      setMpError(err?.message || 'No se pudo iniciar la conexión con Mercado Pago.');
-                    }
-                  }}
-                  className="w-full py-2 bg-sky-600 hover:bg-sky-700 active:scale-98 text-white font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer"
-                >
-                  <CreditCard size={14} />
-                  <span>Vincular Cuenta de Mercado Pago</span>
-                </button>
-              )}
-            </div>
-          )}
-
           <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
             <h4 className="font-bold text-slate-900 flex items-center gap-1.5">
               <Lock size={15} className="text-emerald-600" />

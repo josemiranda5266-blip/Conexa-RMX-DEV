@@ -136,6 +136,7 @@ export interface ServiceRequest {
 export interface Quote {
   id: string;
   requestId: string;
+  clientId?: string;
   professionalId: string;
   professionalName: string;
   professionalAvatar: string;
@@ -152,6 +153,7 @@ export interface Quote {
   createdAt: string;
   isDemoData?: boolean;
 }
+
 
 export type TransactionStatus =
   | 'CREATED'

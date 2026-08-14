@@ -151,13 +151,11 @@ service cloud.firestore {
 
     // Beta System Config & Invite Codes
     match /beta_config/{configId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow read, write: if isAdmin();
     }
 
     match /invite_codes/{codeId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow read, write: if isAdmin();
     }
   }
 }

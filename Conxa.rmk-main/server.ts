@@ -4,24 +4,10 @@ import crypto from "crypto";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
-import { validateMercadoPagoEnv } from "./src/lib/envValidation.js";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
-
-  // Environment Variables Validation for Mercado Pago & Platform Config
-  const envValidation = validateMercadoPagoEnv();
-  if (!envValidation.isValid) {
-    console.warn("\n⚠️ [Mercado Pago Config Warning] Se detectaron variables de entorno faltantes o con formato inválido:");
-    envValidation.errors.forEach((err) => console.warn(`   ${err}`));
-    console.warn("   Para habilitar pagos de Mercado Pago, configure las variables correspondientes.\n");
-    if (process.env.STRICT_ENV_CHECK === "true") {
-      validateMercadoPagoEnv({ throwOnError: true });
-    }
-  } else {
-    console.log("✅ [Mercado Pago Config] Todas las variables de entorno requeridas están configuradas y verificadas con éxito.");
-  }
 
   // Security Headers Middleware
   app.use((_req: Request, res: Response, next: NextFunction) => {
@@ -105,7 +91,6 @@ async function startServer() {
       if (!auth.isAuthenticated) {
         return res.status(401).json({ error: "Se requiere autenticación para utilizar la IA de CONEXA.", code: "UNAUTHORIZED" });
       }
-
       const { userPrompt } = req.body;
       if (!userPrompt || typeof userPrompt !== "string") {
         return res.status(400).json({ error: "Parámetro userPrompt inválido" });
@@ -160,7 +145,6 @@ Responde ÚNICAMENTE en formato JSON estructurado con estas claves:
       if (!auth.isAuthenticated) {
         return res.status(401).json({ error: "Se requiere autenticación para utilizar la moderación de CONEXA.", code: "UNAUTHORIZED" });
       }
-
       const { text, contextType } = req.body; // contextType: 'chat' | 'review' | 'request'
       if (!text || typeof text !== "string") {
         return res.json({ isSafe: true, flags: [], riskScore: 0, analysis: "Sin texto provisto." });
@@ -345,19 +329,16 @@ Responde en JSON con:
       const clientId = requireEnv('MP_APP_ID');
       const clientSecret = requireEnv('MP_CLIENT_SECRET');
       const redirectUri = getMpRedirectUri();
-
       const tokenResponse = await fetch('https://api.mercadopago.com/oauth/token', {
         method: 'POST',
         headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ grant_type: 'authorization_code', client_id: clientId, client_secret: clientSecret, code, redirect_uri: redirectUri }).toString()
       });
-
       if (!tokenResponse.ok) {
         const body = await tokenResponse.text();
         console.error('[MP OAuth] token exchange failed', tokenResponse.status, body.slice(0, 500));
         return res.status(502).send('No se pudo completar la vinculación con Mercado Pago.');
       }
-
       const token = await tokenResponse.json() as any;
       if (!token.access_token || !token.refresh_token) return res.status(502).send('Mercado Pago no devolvió credenciales completas.');
 
@@ -386,7 +367,6 @@ Responde en JSON con:
     try {
       const auth = await verifyAuthToken(req);
       if (!auth.isAuthenticated || !auth.userId) return res.status(401).json({ error: 'UNAUTHORIZED' });
-
       const db = await getAdminDb();
       const snap = await db.collection('mercadopago_connections').doc(auth.userId).get();
       if (!snap.exists) return res.json({ connected: false });
@@ -401,7 +381,6 @@ Responde en JSON con:
     try {
       const auth = await verifyAuthToken(req);
       if (!auth.isAuthenticated || !auth.userId) return res.status(401).json({ error: 'UNAUTHORIZED' });
-
       const db = await getAdminDb();
       await db.collection('mercadopago_connections').doc(auth.userId).set({ connected: false, accessTokenEnc: null, refreshTokenEnc: null, disconnectedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, { merge: true });
       return res.json({ success: true });
@@ -416,7 +395,6 @@ Responde en JSON con:
     try {
       const auth = await verifyAuthToken(req);
       if (!auth.isAuthenticated || !auth.userId) return res.status(401).json({ error: 'UNAUTHORIZED' });
-
       const { transactionId } = req.body || {};
       if (!transactionId || typeof transactionId !== 'string') return res.status(400).json({ error: 'INVALID_TRANSACTION_ID' });
 
@@ -424,7 +402,6 @@ Responde en JSON con:
       const txRef = db.collection('transactions').doc(transactionId);
       const txSnap = await txRef.get();
       if (!txSnap.exists) return res.status(404).json({ error: 'TRANSACTION_NOT_FOUND' });
-
       const transaction = txSnap.data() || {};
       if (transaction.clientId !== auth.userId) return res.status(403).json({ error: 'FORBIDDEN' });
       if (transaction.status !== 'PAYMENT_PENDING') return res.status(409).json({ error: 'TRANSACTION_NOT_PAYABLE' });
@@ -433,11 +410,10 @@ Responde en JSON con:
       if (!connectionSnap.exists) return res.status(409).json({ error: 'PROFESSIONAL_MERCADO_PAGO_NOT_CONNECTED' });
       const connection = connectionSnap.data() || {};
       if (!connection.connected || !connection.accessTokenEnc) return res.status(409).json({ error: 'PROFESSIONAL_MERCADO_PAGO_NOT_CONNECTED' });
-
       const sellerAccessToken = decryptSecret(connection.accessTokenEnc);
+
       const fee = Number(transaction.platformFeeAmountArs || 0);
       const appUrl = (process.env.APP_URL || '').replace(/\/$/, '');
-
       const preferenceResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
         method: 'POST',
         headers: { accept: 'application/json', 'content-type': 'application/json', Authorization: `Bearer ${sellerAccessToken}` },
@@ -450,16 +426,13 @@ Responde en JSON con:
           notification_url: `${appUrl}/api/mercadopago/webhook`
         })
       });
-
       const bodyText = await preferenceResponse.text();
       if (!preferenceResponse.ok) {
         console.error('[MP Checkout] preference failed', preferenceResponse.status, bodyText.slice(0, 1000));
         return res.status(502).json({ error: 'MERCADO_PAGO_PREFERENCE_FAILED' });
       }
-
       const preference = JSON.parse(bodyText);
       await txRef.update({ mercadoPagoPreferenceId: preference.id, status: 'PAYMENT_PENDING', paymentCheckoutCreatedAt: new Date().toISOString() });
-
       return res.json({ success: true, transactionId: transaction.id, preferenceId: preference.id, initPoint: preference.init_point, sandboxInitPoint: preference.sandbox_init_point || null });
     } catch (err: any) {
       console.error('[MP Checkout] error', err?.message || err);
@@ -475,7 +448,6 @@ Responde en JSON con:
       const signature = String(req.headers['x-signature'] || '');
       const requestId = String(req.headers['x-request-id'] || '');
       const webhookSecret = process.env.MP_WEBHOOK_SECRET;
-
       if (webhookSecret && signature && requestId) {
         // Signature format is parsed defensively; if configured, a missing/invalid signature is rejected.
         const parts = Object.fromEntries(signature.split(',').map((part: string) => { const [k, v] = part.trim().split('=', 2); return [k, v]; }));
@@ -490,68 +462,25 @@ Responde en JSON con:
       const paymentId = String(event?.data?.id || event?.id || '');
       if (!paymentId) return res.status(200).send('ok');
 
-      // Look up transaction by paymentId or fetch S2S from Mercado Pago using external_reference
+      // Fetch the payment using the platform integration token. If your Mercado Pago setup
+      // requires seller-scoped retrieval, the transaction's seller token is used instead.
       const db = await getAdminDb();
-      let txDocRef: any = null;
-      let transactionData: any = null;
-
       const querySnap = await db.collection('transactions').where('mercadoPagoPaymentId', '==', paymentId).limit(1).get();
-      if (!querySnap.empty) {
-        txDocRef = querySnap.docs[0].ref;
-        transactionData = querySnap.docs[0].data();
-      }
-
-      // Fetch payment details directly from Mercado Pago S2S using platform or seller access token
-      let payment: any = null;
-      if (transactionData) {
-        const connectionSnap = await db.collection('mercadopago_connections').doc(transactionData.professionalId).get();
-        if (connectionSnap.exists) {
-          const sellerToken = decryptSecret(connectionSnap.data().accessTokenEnc);
-          const paymentResponse = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`, { headers: { Authorization: `Bearer ${sellerToken}`, accept: 'application/json' } });
-          if (paymentResponse.ok) payment = await paymentResponse.json();
-        }
-      }
-
-      if (!payment) {
-        const platformToken = process.env.MP_CLIENT_SECRET;
-        if (platformToken) {
-          const paymentResponse = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`, { headers: { Authorization: `Bearer ${platformToken}`, accept: 'application/json' } });
-          if (paymentResponse.ok) payment = await paymentResponse.json();
-        }
-      }
-
-      if (!payment) return res.status(200).send('ok');
-
-      // If transaction not found by paymentId, locate by payment.external_reference (transactionId)
-      if (!txDocRef && payment.external_reference) {
-        const docRef = db.collection('transactions').doc(String(payment.external_reference));
-        const docSnap = await docRef.get();
-        if (docSnap.exists) {
-          txDocRef = docRef;
-          transactionData = docSnap.data();
-        }
-      }
-
-      if (!txDocRef || !transactionData) return res.status(200).send('ok');
-
-      // Verify payment details against transaction record
-      if (payment.external_reference && String(payment.external_reference) !== String(transactionData.id)) {
-        console.warn('[MP Webhook] Mismatched external_reference', payment.external_reference, transactionData.id);
-        return res.status(200).send('ok');
-      }
-
-      if (payment.transaction_amount && Number(payment.transaction_amount) < Number(transactionData.amountArs)) {
-        console.warn('[MP Webhook] Paid amount lower than required transaction amount', payment.transaction_amount, transactionData.amountArs);
-        return res.status(200).send('ok');
-      }
-
+      if (querySnap.empty) return res.status(200).send('ok');
+      const txDoc = querySnap.docs[0];
+      const transaction = txDoc.data();
+      const connectionSnap = await db.collection('mercadopago_connections').doc(transaction.professionalId).get();
+      if (!connectionSnap.exists) return res.status(200).send('ok');
+      const sellerToken = decryptSecret(connectionSnap.data().accessTokenEnc);
+      const paymentResponse = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`, { headers: { Authorization: `Bearer ${sellerToken}`, accept: 'application/json' } });
+      if (!paymentResponse.ok) return res.status(200).send('ok');
+      const payment = await paymentResponse.json() as any;
       const update: any = { mercadoPagoPaymentId: paymentId, paymentStatus: payment.status, paymentUpdatedAt: new Date().toISOString() };
       if (payment.status === 'approved') { update.status = 'PAID'; update.paidAt = new Date().toISOString(); }
       else if (payment.status === 'refunded') { update.status = 'REFUNDED'; update.refundedAt = new Date().toISOString(); }
       else if (payment.status === 'cancelled') update.status = 'CANCELLED';
       else if (payment.status === 'charged_back') update.status = 'CHARGEBACK';
-
-      await txDocRef.update(update);
+      await txDoc.ref.update(update);
       return res.status(200).send('ok');
     } catch (err) {
       console.error('[MP Webhook] error', err);
@@ -584,11 +513,9 @@ Responde en JSON con:
       const adminModule = await import("firebase-admin");
       const admin = (adminModule.default || adminModule) as any;
       const firestore = admin.firestore();
-
       const quoteRef = firestore.collection('quotes').doc(quoteId);
       const transactionRef = firestore.collection('transactions').doc(`txn-${quoteId}`);
       const now = new Date().toISOString();
-
       const feePercentRaw = Number(process.env.CONEXA_PLATFORM_FEE_PERCENT || '8');
       const feePercent = Number.isFinite(feePercentRaw) && feePercentRaw >= 0 && feePercentRaw <= 20 ? feePercentRaw : 8;
 
@@ -622,7 +549,6 @@ Responde en JSON con:
         const amountArs = Number(quote.priceArs);
         const platformFeeAmountArs = Number((amountArs * feePercent / 100).toFixed(2));
         const professionalAmountArs = Number((amountArs - platformFeeAmountArs).toFixed(2));
-
         const transaction = {
           id: transactionRef.id,
           serviceRequestId: quote.requestId,
@@ -1721,7 +1647,11 @@ Responde en JSON:
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
 
-    const expectedToken = process.env.META_VERIFY_TOKEN || "CONEXA_RADAR_META_VERIFY_TOKEN_2026";
+    const expectedToken = process.env.META_VERIFY_TOKEN;
+    if (!expectedToken) {
+      console.error("[MetaConnector] META_VERIFY_TOKEN no configurado; webhook cerrado por seguridad.");
+      return res.status(503).json({ error: "Webhook Meta no configurado." });
+    }
 
     if (mode === 'subscribe' && token === expectedToken) {
       console.log("[MetaConnector] Webhook de Meta verificado correctamente.");
@@ -1743,10 +1673,17 @@ Responde en JSON:
         if (!signatureHeader) {
           return res.status(401).json({ error: "Acceso denegado. Se requiere encabezado X-Hub-Signature-256 para eventos de Meta." });
         }
-        const expectedHmac = crypto.createHmac('sha256', metaSecret).update(JSON.stringify(req.body)).digest('hex');
+        const rawBody = (req as any).rawBody as Buffer | undefined;
+        if (!rawBody) {
+          return res.status(400).json({ error: "No se pudo obtener el payload original del webhook." });
+        }
+        const expectedHmac = crypto.createHmac('sha256', metaSecret).update(rawBody).digest('hex');
         const expectedSignature = `sha256=${expectedHmac}`;
+        const provided = Buffer.from(signatureHeader);
+        const expected = Buffer.from(expectedSignature);
+        const signatureMatches = provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
 
-        if (signatureHeader !== expectedSignature) {
+        if (!signatureMatches) {
           console.warn("[MetaConnector] Firma X-Hub-Signature-256 no coincide.");
           return res.status(401).json({ error: "Firma de Webhook Meta inválida (X-Hub-Signature-256 mismatch)." });
         }

@@ -17,31 +17,11 @@ export const RequestsList: React.FC<RequestsListProps> = ({
 }) => {
   const { requests, quotes, acceptQuote, createMercadoPagoCheckout, connectMercadoPago, currentUser } = useApp();
   const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
 
   const isPro = currentUser.role === 'PROFESSIONAL';
 
   return (
     <div className="space-y-4 animate-fade-in">
-      {actionError && (
-        <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-rose-800 text-xs flex items-start justify-between gap-2 animate-fade-in shadow-xs">
-          <div className="flex items-start gap-2">
-            <AlertCircle size={16} className="text-rose-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold text-rose-900">Aviso de Operación</p>
-              <p className="text-rose-700 mt-0.5 leading-relaxed">{actionError}</p>
-            </div>
-          </div>
-          <button 
-            onClick={() => setActionError(null)} 
-            className="text-rose-400 hover:text-rose-600 font-bold p-1 text-xs"
-            aria-label="Cerrar aviso"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
       <div className="flex items-center justify-between border-b border-white/60 pb-3 gap-3">
         <div>
           <h2 className="font-bold text-slate-900 text-lg">Solicitudes de Servicios Locales</h2>
@@ -52,14 +32,10 @@ export const RequestsList: React.FC<RequestsListProps> = ({
         {isPro && (
           <button
             onClick={async () => {
-              setActionError(null);
-              try { 
-                await connectMercadoPago(); 
-              } catch (error: any) { 
-                setActionError(error?.message || 'No se pudo iniciar la conexión con Mercado Pago.'); 
-              }
+              try { await connectMercadoPago(); }
+              catch (error: any) { alert(error?.message || 'No se pudo iniciar la conexión con Mercado Pago.'); }
             }}
-            className="shrink-0 px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 active:scale-95 transition-all shadow-sm"
+            className="shrink-0 px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800"
           >
             Conectar Mercado Pago
           </button>
@@ -196,28 +172,20 @@ export const RequestsList: React.FC<RequestsListProps> = ({
                     </button>
                     <button
                       onClick={async () => {
-                        setActionError(null);
-                        const checkoutWindow = window.open('about:blank', '_blank');
                         try {
                           const transaction = await acceptQuote(q.id);
                           if (transaction?.id) {
                             const initPoint = await createMercadoPagoCheckout(transaction.id);
-                            if (checkoutWindow) {
-                              checkoutWindow.location.href = initPoint;
-                            } else {
-                              window.location.assign(initPoint);
-                            }
+                            window.location.assign(initPoint);
                             return;
                           }
-                          if (checkoutWindow && !checkoutWindow.closed) checkoutWindow.close();
-                          setActionError(`¡Presupuesto de ${q.professionalName} aceptado! Para cobrar, el profesional debe completar la vinculación de Mercado Pago.`);
+                          alert(`¡Presupuesto de ${q.professionalName} aceptado! La contratación quedó creada. Para pagar, completá primero la vinculación de Mercado Pago del profesional.`);
                           setSelectedRequest(null);
                         } catch (error: any) {
-                          if (checkoutWindow && !checkoutWindow.closed) checkoutWindow.close();
-                          setActionError(error?.message || 'No se pudo aceptar el presupuesto.');
+                          alert(error?.message || 'No se pudo aceptar el presupuesto.');
                         }
                       }}
-                      className="flex-1 py-2 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 active:scale-98 shadow-md border border-white/20"
+                      className="flex-1 py-2 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-md border border-white/20"
                     >
                       Aceptar Presupuesto
                     </button>

@@ -5,8 +5,8 @@ import { auth, db, isFirebaseConfigured } from '../lib/firebase';
 import { 
   UserProfile, Category, Profession, ServiceRequest, Quote, 
   Conversation, Message, Review, UserReport, VerificationRequest, 
-  NotificationItem, LocationData, InviteCode, FeedbackItem, AnalyticsEvent, BetaConfig,
-  RadarOpportunity, RadarStats, ApprovalMode, Role, Transaction
+  NotificationItem, LocationData, InviteCode, FeedbackItem, AnalyticsEvent, BetaConfig, Transaction,
+  RadarOpportunity, RadarStats, ApprovalMode, Role
 } from '../types';
 import { 
   INITIAL_CATEGORIES, INITIAL_PROFESSIONS, INITIAL_PROFILES, 
@@ -20,7 +20,6 @@ interface AppContextType {
   setCurrentUser: (user: UserProfile | null) => void;
   switchUserRole: (userId: string) => void;
   switchActiveMode: (mode: 'CLIENT' | 'PROFESSIONAL' | 'ADMIN') => boolean;
-  authLoading: boolean;
   
   isAdmin: () => boolean;
   hasRole: (roles: Role[]) => boolean;
@@ -117,7 +116,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     return users[0] || null;
   });
-  const [authLoading, setAuthLoading] = useState<boolean>(true);
   const [categories] = useState<Category[]>(INITIAL_CATEGORIES);
   const [professions] = useState<Profession[]>(INITIAL_PROFESSIONS);
   const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS);
@@ -185,15 +183,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Firebase Auth Real Listener Effect & Real-time Firestore Sync
   useEffect(() => {
-    if (!auth) {
-      setAuthLoading(false);
-      return;
-    }
+    if (!auth) return;
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      try {
-        if (firebaseUser) {
-          console.log('[CONEXA AUTH] Usuario autenticado vía Firebase Auth:', firebaseUser.uid, firebaseUser.email);
-          
+      if (firebaseUser) {
+        console.log('[CONEXA AUTH] Usuario autenticado vía Firebase Auth:', firebaseUser.uid, firebaseUser.email);
+        
+        try {
           const tokenResult = await firebaseUser.getIdTokenResult();
           const claimRole = (tokenResult.claims.role as Role) || 'USER';
           
@@ -272,19 +267,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               availabilityStatus: 'DISPONIBLE'
             } as UserProfile);
           }
-        } else {
-          console.log('[CONEXA AUTH] Sin sesión activa.');
-          if (isFirebaseConfigured) {
-            setCurrentUser(null);
-          } else {
-            // Keep mock user 0 in demo mode
-            setCurrentUser(INITIAL_PROFILES[0]);
-          }
+        } catch (err) {
+          console.warn('[CONEXA AUTH] Error procesando autenticación:', err);
         }
-      } catch (err) {
-        console.warn('[CONEXA AUTH] Error procesando autenticación:', err);
-      } finally {
-        setAuthLoading(false);
+      } else {
+        console.log('[CONEXA AUTH] Sin sesión activa.');
+        if (isFirebaseConfigured) {
+          setCurrentUser(null);
+        } else {
+          // Keep mock user 0 in demo mode
+          setCurrentUser(INITIAL_PROFILES[0]);
+        }
       }
     });
     return () => unsubscribe();
@@ -617,8 +610,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const submitQuote = async (quoteData: Omit<Quote, 'id' | 'createdAt' | 'status'>) => {
+    const targetReqForQuote = requests.find(r => r.id === quoteData.requestId);
     const newQuote: Quote = {
       ...quoteData,
+      clientId: targetReqForQuote?.clientId,
       id: `quote-${Date.now()}`,
       createdAt: new Date().toLocaleDateString('es-AR'),
       status: 'PENDING'
@@ -663,60 +658,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const connectMercadoPago = async () => {
-    if (authLoading) {
-      throw new Error('Verificando sesión de autenticación. Por favor reintentá en unos segundos.');
-    }
-
-    if (!auth?.currentUser) {
-      throw new Error('Usuario no autenticado o sesión de Firebase Auth expirada.');
-    }
-
-    // Immediately open popup window synchronously during user click gesture to avoid browser popup blockers
-    const oauthWindow = window.open(
-      'about:blank',
-      'mercadopago_oauth',
-      'width=600,height=700,scrollbars=yes,resizable=yes'
-    );
-
-    if (!oauthWindow) {
-      throw new Error('El navegador bloqueó la ventana emergente de Mercado Pago. Por favor permití las ventanas emergentes (popups) para este sitio.');
-    }
-
-    try {
-      const token = await auth.currentUser.getIdToken();
-      const response = await fetch('/api/mercadopago/oauth/start', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const data = await response.json();
-
-      if (!response.ok || !data.authorizationUrl) {
-        if (!oauthWindow.closed) oauthWindow.close();
-
-        if (response.status === 401) {
-          throw new Error('Usuario no autenticado o sesión de Firebase Auth expirada.');
-        }
-        if (response.status === 503 || data.error === 'MERCADO_PAGO_NOT_CONFIGURED') {
-          throw new Error('Mercado Pago no está configurado en el servidor (faltan variables de entorno MP_APP_ID / MP_CLIENT_SECRET).');
-        }
-        throw new Error(data.error || `Error HTTP ${response.status}: No se pudo obtener la URL de autorización de Mercado Pago.`);
-      }
-
-      oauthWindow.location.href = data.authorizationUrl;
-    } catch (err: any) {
-      if (oauthWindow && !oauthWindow.closed) {
-        oauthWindow.close();
-      }
-      throw err;
-    }
+    if (!auth?.currentUser) throw new Error('Debés iniciar sesión como profesional.');
+    const token = await auth.currentUser.getIdToken();
+    const response = await fetch('/api/mercadopago/oauth/start', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await response.json();
+    if (!response.ok || !data.authorizationUrl) throw new Error(data.error || 'No se pudo iniciar la conexión con Mercado Pago.');
+    window.location.assign(data.authorizationUrl);
   };
 
   const getMercadoPagoStatus = async () => {
-    if (authLoading) {
-      return { connected: false, loading: true };
-    }
-    if (!auth?.currentUser) {
-      return { connected: false, unauthenticated: true };
-    }
+    if (!auth?.currentUser) return { connected: false };
     const token = await auth.currentUser.getIdToken();
     const response = await fetch('/api/mercadopago/status', { headers: { Authorization: `Bearer ${token}` } });
     const data = await response.json();
@@ -752,6 +705,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!response.ok || !data.success) {
         throw new Error(data.error || 'No se pudo crear la transacción.');
       }
+
       setQuotes(prev => prev.map(q => q.id === quoteId ? { ...q, status: 'ACCEPTED' } : q));
       setRequests(prev => prev.map(r => r.id === targetQuote.requestId ? { ...r, status: 'PROFESSIONAL_SELECTED' } : r));
       const transaction = data.transaction as Transaction;
@@ -759,6 +713,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return transaction;
     }
 
+    // Demo/local mode: reflect the economic state without pretending a real payment occurred.
     setQuotes(prev => prev.map(q => q.id === quoteId ? { ...q, status: 'ACCEPTED' } : q));
     setRequests(prev => prev.map(r => r.id === targetQuote.requestId ? { ...r, status: 'PROFESSIONAL_SELECTED' } : r));
     return null;
@@ -1208,7 +1163,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   return (
     <AppContext.Provider value={{
-      currentUser, setCurrentUser, switchUserRole, switchActiveMode, authLoading,
+      currentUser, setCurrentUser, switchUserRole, switchActiveMode,
       isAdmin, hasRole,
       users, categories, professions, reviews, requests, quotes, 
       conversations, messages, reports, verifications, notifications, transactions, favorites,
