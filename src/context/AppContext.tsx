@@ -99,6 +99,9 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Load or initialize state
   const [users, setUsers] = useState<UserProfile[]>(() => {
+    if (isFirebaseConfigured) {
+      return []; // empty until Firestore snapshot loads them
+    }
     const saved = localStorage.getItem('conexa_users');
     return saved ? JSON.parse(saved) : INITIAL_PROFILES;
   });
@@ -107,7 +110,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (isFirebaseConfigured) {
       return null;
     }
-    return users[0];
+    return users[0] || null;
   });
   const [categories] = useState<Category[]>(INITIAL_CATEGORIES);
   const [professions] = useState<Profession[]>(INITIAL_PROFESSIONS);
@@ -169,6 +172,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Sync users to localStorage (for local preferences only - NOT for authorization)
   useEffect(() => {
+    if (isFirebaseConfigured) return;
     localStorage.setItem('conexa_users', JSON.stringify(users));
   }, [users]);
 
@@ -282,6 +286,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Helper to seed a collection with mock data if empty
     const seedCollectionIfEmpty = async (collectionName: string, initialData: any[]) => {
+      // ABSOLUTE SECURITY RULE: Never seed simulation data on real production/cloud environment
+      const isProdOrCloud = import.meta.env.PROD || import.meta.env.MODE === 'production' || window.location.hostname !== 'localhost';
+      if (isProdOrCloud) {
+        console.log(`[CONEXA SEED] Evitando siembra de datos de simulación en producción para: ${collectionName}`);
+        return;
+      }
       try {
         const querySnapshot = await getDocs(collection(db, collectionName));
         if (querySnapshot.empty) {
@@ -299,7 +309,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const seedAll = async () => {
       await seedCollectionIfEmpty('users', INITIAL_PROFILES);
       await seedCollectionIfEmpty('reviews', INITIAL_REVIEWS);
-      await seedCollectionIfEmpty('requests', INITIAL_SERVICE_REQUESTS);
+      await seedCollectionIfEmpty('service_requests', INITIAL_SERVICE_REQUESTS);
       await seedCollectionIfEmpty('quotes', INITIAL_QUOTES);
       await seedCollectionIfEmpty('conversations', INITIAL_CONVERSATIONS);
     };
@@ -322,7 +332,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setReviews(list);
     });
 
-    const unsubRequests = onSnapshot(collection(db, 'requests'), (snapshot) => {
+    const unsubRequests = onSnapshot(collection(db, 'service_requests'), (snapshot) => {
       const list: ServiceRequest[] = [];
       snapshot.forEach(doc => list.push(doc.data() as ServiceRequest));
       setRequests(list);
@@ -565,30 +575,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return newConvId;
   };
 
-  const createServiceRequest = (reqData: Omit<ServiceRequest, 'id' | 'clientId' | 'clientName' | 'clientAvatar' | 'createdAt' | 'status' | 'quotesCount'>) => {
+  const createServiceRequest = async (reqData: Omit<ServiceRequest, 'id' | 'clientId' | 'clientName' | 'clientAvatar' | 'createdAt' | 'status' | 'quotesCount'>) => {
     const newReq: ServiceRequest = {
       ...reqData,
       id: `req-${Date.now()}`,
       clientId: currentUser.id,
       clientName: currentUser.name,
       clientAvatar: currentUser.avatar,
-      createdAt: 'Recién publicado',
+      createdAt: new Date().toLocaleDateString('es-AR'),
       status: 'REQUEST_CREATED',
       quotesCount: 0
     };
     setRequests(prev => [newReq, ...prev]);
+
+    if (db) {
+      try {
+        await setDoc(doc(db, 'service_requests', newReq.id), newReq);
+      } catch (e) {
+        console.warn('[Firestore] Error guardando solicitud de servicio:', e);
+      }
+    }
   };
 
-  const submitQuote = (quoteData: Omit<Quote, 'id' | 'createdAt' | 'status'>) => {
+  const submitQuote = async (quoteData: Omit<Quote, 'id' | 'createdAt' | 'status'>) => {
     const newQuote: Quote = {
       ...quoteData,
       id: `quote-${Date.now()}`,
-      createdAt: 'Recién enviado',
+      createdAt: new Date().toLocaleDateString('es-AR'),
       status: 'PENDING'
     };
     setQuotes(prev => [newQuote, ...prev]);
 
-    // Update request status & count
+    // Update request status & count locally
     setRequests(prev => prev.map(r => {
       if (r.id === quoteData.requestId) {
         return {
@@ -600,6 +618,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return r;
     }));
 
+    if (db) {
+      try {
+        await setDoc(doc(db, 'quotes', newQuote.id), newQuote);
+        const reqRef = doc(db, 'service_requests', quoteData.requestId);
+        const reqSnap = await getDoc(reqRef);
+        if (reqSnap.exists()) {
+          const rData = reqSnap.data() as ServiceRequest;
+          await updateDoc(reqRef, {
+            quotesCount: (rData.quotesCount || 0) + 1,
+            status: 'QUOTES_RECEIVED'
+          });
+        }
+      } catch (e) {
+        console.warn('[Firestore] Error guardando presupuesto:', e);
+      }
+    }
+
     // Find request to open chat with client
     const targetReq = requests.find(r => r.id === quoteData.requestId);
     if (targetReq) {
@@ -608,28 +643,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const acceptQuote = (quoteId: string) => {
+  const acceptQuote = async (quoteId: string) => {
     setQuotes(prev => prev.map(q => q.id === quoteId ? { ...q, status: 'ACCEPTED' } : q));
     const targetQuote = quotes.find(q => q.id === quoteId);
     if (targetQuote) {
       setRequests(prev => prev.map(r => r.id === targetQuote.requestId ? { ...r, status: 'PROFESSIONAL_SELECTED' } : r));
     }
+
+    if (db && targetQuote) {
+      try {
+        await updateDoc(doc(db, 'quotes', quoteId), { status: 'ACCEPTED' });
+        await updateDoc(doc(db, 'service_requests', targetQuote.requestId), { status: 'PROFESSIONAL_SELECTED' });
+      } catch (e) {
+        console.warn('[Firestore] Error aceptando presupuesto:', e);
+      }
+    }
   };
 
-  const completeJob = (requestId: string) => {
+  const completeJob = async (requestId: string) => {
     setRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'REVIEW_PENDING' } : r));
+
+    if (db) {
+      try {
+        await updateDoc(doc(db, 'service_requests', requestId), { status: 'REVIEW_PENDING' });
+      } catch (e) {
+        console.warn('[Firestore] Error completando trabajo:', e);
+      }
+    }
   };
 
-  const addReview = (reviewData: Omit<Review, 'id' | 'createdAt' | 'isVerifiedJob'>) => {
+  const addReview = async (reviewData: Omit<Review, 'id' | 'createdAt' | 'isVerifiedJob'>) => {
     const newRev: Review = {
       ...reviewData,
       id: `rev-${Date.now()}`,
-      createdAt: 'Recién publicado',
+      createdAt: new Date().toLocaleDateString('es-AR'),
       isVerifiedJob: true
     };
     setReviews(prev => [newRev, ...prev]);
 
-    // Recalculate target professional rating
+    // Recalculate target professional rating locally
     setUsers(prev => prev.map(u => {
       if (u.id === reviewData.professionalId) {
         const newCount = u.reviewCount + 1;
@@ -643,6 +695,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return u;
     }));
+
+    if (db) {
+      try {
+        await setDoc(doc(db, 'reviews', newRev.id), newRev);
+        const proRef = doc(db, 'users', reviewData.professionalId);
+        const proSnap = await getDoc(proRef);
+        if (proSnap.exists()) {
+          const u = proSnap.data() as UserProfile;
+          const newCount = (u.reviewCount || 0) + 1;
+          const newRating = Number(((((u.rating || 0) * (u.reviewCount || 0)) + reviewData.overallRating) / newCount).toFixed(1));
+          await updateDoc(proRef, {
+            reviewCount: newCount,
+            rating: newRating,
+            jobsCompleted: (u.jobsCompleted || 0) + 1
+          });
+        }
+      } catch (e) {
+        console.warn('[Firestore] Error guardando reseña:', e);
+      }
+    }
   };
 
   const submitVerification = (type: 'IDENTITY' | 'PROFESSIONAL', documentName: string, docUrl: string) => {
@@ -698,21 +770,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const req = verifications.find(v => v.id === verificationId);
     if (!req) return;
 
-    setVerifications(prev => prev.map(v => v.id === verificationId ? { ...v, status: 'VERIFIED' } : v));
-
-    setUsers(prev => prev.map(u => {
-      if (u.id === req.userId) {
-        if (req.type === 'IDENTITY') {
-          return { ...u, isIdentityVerified: true, identityVerificationStatus: 'VERIFIED' };
-        } else {
-          return { ...u, isProfessionalVerified: true, professionalVerificationStatus: 'VERIFIED' };
-        }
-      }
-      return u;
-    }));
-
-    await logAdminAction('APPROVE_VERIFICATION', verificationId, 'SUCCESS');
-
     if (db) {
       try {
         await updateDoc(doc(db, 'verifications', verificationId), { status: 'VERIFIED' });
@@ -720,9 +777,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ? { isIdentityVerified: true, identityVerificationStatus: 'VERIFIED' }
           : { isProfessionalVerified: true, professionalVerificationStatus: 'VERIFIED' }
         );
-      } catch (e) {
-        console.warn('[Firestore] Error registrando verificación aprobada:', e);
+        await logAdminAction('APPROVE_VERIFICATION', verificationId, 'SUCCESS');
+
+        // On success, update local state
+        setVerifications(prev => prev.map(v => v.id === verificationId ? { ...v, status: 'VERIFIED' } : v));
+        setUsers(prev => prev.map(u => {
+          if (u.id === req.userId) {
+            if (req.type === 'IDENTITY') {
+              return { ...u, isIdentityVerified: true, identityVerificationStatus: 'VERIFIED' };
+            } else {
+              return { ...u, isProfessionalVerified: true, professionalVerificationStatus: 'VERIFIED' };
+            }
+          }
+          return u;
+        }));
+      } catch (e: any) {
+        console.error('[CONEXA SECURITY] Error en Firestore al aprobar verificación:', e);
+        await logAdminAction('APPROVE_VERIFICATION', verificationId, `FAILED: ${e.message || e}`);
+        alert('Error al guardar en el servidor. La operación no se concretó.');
+        throw e;
       }
+    } else {
+      setVerifications(prev => prev.map(v => v.id === verificationId ? { ...v, status: 'VERIFIED' } : v));
+      setUsers(prev => prev.map(u => {
+        if (u.id === req.userId) {
+          if (req.type === 'IDENTITY') {
+            return { ...u, isIdentityVerified: true, identityVerificationStatus: 'VERIFIED' };
+          } else {
+            return { ...u, isProfessionalVerified: true, professionalVerificationStatus: 'VERIFIED' };
+          }
+        }
+        return u;
+      }));
+      await logAdminAction('APPROVE_VERIFICATION', verificationId, 'SUCCESS_LOCAL');
     }
   };
 
@@ -739,40 +826,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: 'Hace un momento',
       status: 'PENDING'
     };
-    setReports(prev => [newReport, ...prev]);
 
     if (db) {
       try {
         await setDoc(doc(db, 'reports', newReport.id), newReport);
+        setReports(prev => [newReport, ...prev]);
       } catch (e) {
         console.warn('[Firestore] Error guardando reporte:', e);
+        alert('Error al guardar reporte en el servidor.');
       }
+    } else {
+      setReports(prev => [newReport, ...prev]);
     }
   };
 
   const blockUser = async (userIdToBlock: string) => {
-    setUsers(prev => prev.map(u => u.id === userIdToBlock ? { ...u, isBlocked: true } : u));
-    await logAdminAction('BLOCK_USER', userIdToBlock, 'SUCCESS');
-
     if (db) {
       try {
         await updateDoc(doc(db, 'users', userIdToBlock), { isBlocked: true });
-      } catch (e) {
-        console.warn('[Firestore] Error actualizando bloqueo de usuario:', e);
+        await logAdminAction('BLOCK_USER', userIdToBlock, 'SUCCESS');
+        setUsers(prev => prev.map(u => u.id === userIdToBlock ? { ...u, isBlocked: true } : u));
+      } catch (e: any) {
+        console.error('[CONEXA SECURITY] Error al bloquear usuario:', e);
+        await logAdminAction('BLOCK_USER', userIdToBlock, `FAILED: ${e.message || e}`);
+        alert('Error al bloquear usuario en el servidor.');
+        throw e;
       }
+    } else {
+      setUsers(prev => prev.map(u => u.id === userIdToBlock ? { ...u, isBlocked: true } : u));
+      await logAdminAction('BLOCK_USER', userIdToBlock, 'SUCCESS_LOCAL');
     }
   };
 
   const resolveReport = async (reportId: string, action: 'DISMISSED' | 'ACTION_TAKEN') => {
-    setReports(prev => prev.map(r => r.id === reportId ? { ...r, status: action } : r));
-    await logAdminAction('RESOLVE_REPORT', reportId, action);
-
     if (db) {
       try {
         await updateDoc(doc(db, 'reports', reportId), { status: action });
-      } catch (e) {
-        console.warn('[Firestore] Error resolviendo reporte:', e);
+        await logAdminAction('RESOLVE_REPORT', reportId, action);
+        setReports(prev => prev.map(r => r.id === reportId ? { ...r, status: action } : r));
+      } catch (e: any) {
+        console.error('[CONEXA SECURITY] Error al resolver reporte:', e);
+        await logAdminAction('RESOLVE_REPORT', reportId, `FAILED_${action}: ${e.message || e}`);
+        alert('Error al resolver reporte en el servidor.');
+        throw e;
       }
+    } else {
+      setReports(prev => prev.map(r => r.id === reportId ? { ...r, status: action } : r));
+      await logAdminAction('RESOLVE_REPORT', reportId, `SUCCESS_LOCAL_${action}`);
     }
   };
 
@@ -883,43 +983,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString().split('T')[0],
       createdForNote: note
     };
-    setInviteCodes(prev => [newCode, ...prev]);
-    await logAdminAction('CREATE_INVITE_CODE', newCode.id, newCode.code);
 
     if (db) {
       try {
         await setDoc(doc(db, 'invite_codes', newCode.id), newCode);
-      } catch (e) {
-        console.warn('[Firestore] Error guardando código de invitación:', e);
+        await logAdminAction('CREATE_INVITE_CODE', newCode.id, newCode.code);
+        setInviteCodes(prev => [newCode, ...prev]);
+      } catch (e: any) {
+        console.error('[CONEXA SECURITY] Error al crear código de invitación:', e);
+        alert('Error al guardar el código de invitación en el servidor.');
+        throw e;
       }
+    } else {
+      setInviteCodes(prev => [newCode, ...prev]);
+      await logAdminAction('CREATE_INVITE_CODE', newCode.id, newCode.code);
     }
   };
 
   const toggleInviteCode = async (codeId: string) => {
     const code = inviteCodes.find(c => c.id === codeId);
     const newStatus = code ? !code.isActive : true;
-    setInviteCodes(prev => prev.map(c => c.id === codeId ? { ...c, isActive: !c.isActive } : c));
-    await logAdminAction('TOGGLE_INVITE_CODE', codeId, String(newStatus));
 
     if (db) {
       try {
         await updateDoc(doc(db, 'invite_codes', codeId), { isActive: newStatus });
-      } catch (e) {
-        console.warn('[Firestore] Error actualizando código de invitación:', e);
+        await logAdminAction('TOGGLE_INVITE_CODE', codeId, String(newStatus));
+        setInviteCodes(prev => prev.map(c => c.id === codeId ? { ...c, isActive: newStatus } : c));
+      } catch (e: any) {
+        console.error('[CONEXA SECURITY] Error al cambiar estado de código:', e);
+        alert('Error al actualizar código de invitación en el servidor.');
+        throw e;
       }
+    } else {
+      setInviteCodes(prev => prev.map(c => c.id === codeId ? { ...c, isActive: !c.isActive } : c));
+      await logAdminAction('TOGGLE_INVITE_CODE', codeId, String(newStatus));
     }
   };
 
   const updateBetaConfig = async (updates: Partial<BetaConfig>) => {
-    setBetaConfig(prev => ({ ...prev, ...updates }));
-    await logAdminAction('UPDATE_BETA_CONFIG', 'main', JSON.stringify(updates));
-
     if (db) {
       try {
         await setDoc(doc(db, 'beta_config', 'main'), { ...betaConfig, ...updates }, { merge: true });
-      } catch (e) {
-        console.warn('[Firestore] Error actualizando configuración beta:', e);
+        await logAdminAction('UPDATE_BETA_CONFIG', 'main', JSON.stringify(updates));
+        setBetaConfig(prev => ({ ...prev, ...updates }));
+      } catch (e: any) {
+        console.error('[CONEXA SECURITY] Error al actualizar configuración beta:', e);
+        alert('Error al actualizar configuración en el servidor.');
+        throw e;
       }
+    } else {
+      setBetaConfig(prev => ({ ...prev, ...updates }));
+      await logAdminAction('UPDATE_BETA_CONFIG', 'main', JSON.stringify(updates));
     }
   };
 

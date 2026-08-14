@@ -230,40 +230,37 @@ Responde en JSON con:
   // Account Deletion API Endpoint (GDPR/ARCO Compliance)
   app.post("/api/user/delete-account", rateLimiter, async (req: Request, res: Response) => {
     try {
-      const { userId, confirmationToken } = req.body;
+      const { userId } = req.body;
       if (!userId) {
         return res.status(400).json({ error: "Falta ID de usuario para dar de baja." });
+      }
+
+      // Check if Firebase Admin SDK is available
+      const hasFirebaseAdminConfig = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
+      if (!hasFirebaseAdminConfig) {
+        return res.status(503).json({
+          success: false,
+          error: "El servicio de Firebase Admin SDK no está configurado en el servidor para realizar eliminaciones reales de cuenta.",
+          code: "FIREBASE_ADMIN_NOT_CONFIGURED"
+        });
       }
 
       const auth = await verifyAuthToken(req);
       if (!auth.isAuthenticated) {
         return res.status(401).json({
           success: false,
-          error: auth.errorReason === "FIREBASE_ADMIN_SDK_NOT_CONFIGURED"
-            ? "Imposible verificar token en backend. Se requiere configurar credencial de Firebase Admin SDK en el servidor para procesamiento automático de bajas."
-            : "Acceso denegado. Se requiere token Bearer válido para procesar la eliminación de cuenta.",
-          code: auth.errorReason || "UNAUTHORIZED"
+          error: "Acceso denegado. Se requiere token Bearer válido para procesar la eliminación de cuenta.",
+          code: "UNAUTHORIZED"
         });
       }
 
       // Ensure user can only request deletion of their own account unless admin
-      if (auth.userId !== userId && !auth.isAdmin) {
+      const canDelete = (auth.userId === userId) || (auth.isAdmin === true);
+      if (!canDelete) {
         return res.status(403).json({
           success: false,
-          error: "Acceso denegado. Solo podés solicitar la eliminación de tu propia cuenta.",
+          error: "Acceso denegado. Solo podés solicitar la eliminación de tu propia cuenta o poseer perfil de Administrador.",
           code: "FORBIDDEN"
-        });
-      }
-
-      const hasFirebaseAdminConfig = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
-      if (!hasFirebaseAdminConfig) {
-        // Fallback for simulation/demo environments
-        return res.status(200).json({
-          success: true,
-          status: "DELETED_DEMO_MODE",
-          message: "Modo Simulación: El usuario ha sido removido del registro local temporal.",
-          deletedUserId: userId,
-          timestamp: new Date().toISOString()
         });
       }
 
@@ -280,17 +277,38 @@ Responde en JSON con:
         await db.collection('users').doc(userId).delete();
         console.log(`[CONEXA FIRESTORE] Perfil borrado de Firestore: ${userId}`);
 
+        // Also delete subcollection /users/{userId}/private/info if exists
+        try {
+          await db.collection('users').doc(userId).collection('private').doc('info').delete();
+        } catch (e) {
+          console.log("[CONEXA FIRESTORE] No private/info subdoc to delete or already deleted.");
+        }
+
         // Mask or delete user's messages in Firestore to avoid digital footprint (Requirement 13)
         const messagesSnapshot = await db.collection('messages').where('senderId', '==', userId).get();
         const batch = db.batch();
         messagesSnapshot.forEach((doc: any) => {
           batch.update(doc.ref, {
             text: "[MENSAJE ELIMINADO - USUARIO DADO DE BAJA]",
+            content: "[MENSAJE ELIMINADO - USUARIO DADO DE BAJA]",
             isDeleted: true
           });
         });
         await batch.commit();
         console.log(`[CONEXA FIRESTORE] Mensajes del usuario dados de baja para: ${userId}`);
+
+        // Log the admin/user action to admin_audit_logs (Requirement 15)
+        const auditLogId = `AUD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        await db.collection('admin_audit_logs').doc(auditLogId).set({
+          adminUid: auth.userId || 'system',
+          role: auth.role || 'USER',
+          action: 'DELETE_ACCOUNT',
+          targetType: 'USER',
+          targetId: userId,
+          environment: 'production',
+          timestamp: new Date().toISOString(),
+          result: 'SUCCESS'
+        });
 
         return res.status(200).json({
           success: true,
@@ -742,12 +760,13 @@ Clasificá la oportunidad y responde ÚNICAMENTE en formato JSON con la siguient
   app.post("/api/radar/match", rateLimiter, async (req: Request, res: Response) => {
     try {
       const { category, subcategory, city, province, limit, environment, isTest, onlyVerified } = req.body;
-      const isSimulation = Boolean(isTest || environment === "simulation");
+      const isProductionMode = (process.env.RADAR_MODE || process.env.APP_ENV || "PRODUCTION").toUpperCase() === "PRODUCTION";
+      const isSimulation = !isProductionMode && Boolean(isTest || environment === "simulation");
 
-      let candidateList = MASTER_PROFESSIONAL_PROFILES;
-      let dataSource = "DEMO / MOCKDATA";
+      let candidateList: any[] = [];
+      let dataSource = "";
 
-      if (!isSimulation) {
+      if (isProductionMode) {
         // PRODUCTION GUARD: Authenticate and authorize as ADMIN/SUPER_ADMIN
         const auth = await verifyAuthToken(req);
         if (!auth.isAuthenticated) {
@@ -769,28 +788,43 @@ Clasificá la oportunidad y responde ÚNICAMENTE en formato JSON con la siguient
 
         // Fetch real professional users from Firestore
         const hasFirebaseAdminConfig = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
-        if (hasFirebaseAdminConfig) {
-          const adminModule = await import("firebase-admin");
-          const admin = (adminModule.default || adminModule) as any;
-          const db = admin.firestore();
-
-          try {
-            const usersSnap = await db.collection('users')
-              .where('role', '==', 'PROFESSIONAL')
-              .get();
-
-            if (!usersSnap.empty) {
-              const candidates: any[] = [];
-              usersSnap.forEach((doc: any) => {
-                candidates.push({ id: doc.id, ...doc.data() });
-              });
-              candidateList = candidates;
-              dataSource = "FIRESTORE_PRODUCTION";
-            }
-          } catch (dbErr: any) {
-            console.error("[RADAR MATCH] Error consultando Firestore candidates:", dbErr.message || dbErr);
-          }
+        if (!hasFirebaseAdminConfig) {
+          return res.status(503).json({
+            success: false,
+            error: "El servidor de producción no tiene configuradas las credenciales de Firebase Admin SDK.",
+            code: "FIREBASE_ADMIN_NOT_CONFIGURED"
+          });
         }
+
+        const adminModule = await import("firebase-admin");
+        const admin = (adminModule.default || adminModule) as any;
+        const db = admin.firestore();
+
+        try {
+          const usersSnap = await db.collection('users')
+            .where('role', '==', 'PROFESSIONAL')
+            .get();
+
+          const candidates: any[] = [];
+          if (!usersSnap.empty) {
+            usersSnap.forEach((doc: any) => {
+              candidates.push({ id: doc.id, ...doc.data() });
+            });
+          }
+          candidateList = candidates;
+          dataSource = "FIRESTORE_PRODUCTION";
+        } catch (dbErr: any) {
+          console.error("[RADAR MATCH] Error consultando Firestore candidates:", dbErr.message || dbErr);
+          return res.status(503).json({
+            success: false,
+            error: `Servicio de Firestore no disponible o error de consulta: ${dbErr.message || dbErr}`,
+            code: "FIRESTORE_PRODUCTION_UNAVAILABLE"
+          });
+        }
+      } else {
+        // Simulation mode
+        candidateList = MASTER_PROFESSIONAL_PROFILES;
+        dataSource = "DEMO / MOCKDATA";
       }
 
       const rankedProfessionals: any[] = [];
@@ -854,6 +888,7 @@ Clasificá la oportunidad y responde ÚNICAMENTE en formato JSON con la siguient
         dataSource,
         matchCount: topRanked.length,
         rankedProfessionals: topRanked,
+        results: topRanked,
         discardedCount: discardedProfessionals.length,
         discardedProfessionals
       });
@@ -1045,7 +1080,8 @@ Responde en JSON:
         return res.status(400).json({ error: "Falta el ID de la oportunidad." });
       }
 
-      const isSimulation = Boolean(isTest || dryRun);
+      const isProductionMode = (process.env.RADAR_MODE || process.env.APP_ENV || "PRODUCTION").toUpperCase() === "PRODUCTION";
+      const isSimulation = !isProductionMode && Boolean(isTest || dryRun);
       const auth = await verifyAuthToken(req);
 
       // SECURITY CHECK 1: Production Authorization Guard
@@ -1089,27 +1125,22 @@ Responde en JSON:
       }
 
       if (!hasMessagingProvider) {
-        return res.status(422).json({
+        return res.status(503).json({
           success: false,
           opportunityId,
-          status: "REJECTED_PROVIDER_NOT_CONFIGURED",
+          status: "PROVIDER_NOT_CONFIGURED",
           error: "Imposible realizar envío real en producción. No hay proveedor oficial de mensajería (WHATSAPP_API_TOKEN / TWILIO_AUTH_TOKEN) configurado.",
-          isSimulation: false,
-          dispatchedAt: null
+          code: "PROVIDER_NOT_CONFIGURED"
         });
       }
 
-      return res.json({
-        success: true,
+      // Since there is no actual external messaging provider library code integrated to talk toTwilio/WhatsApp:
+      return res.status(501).json({
+        success: false,
         opportunityId,
-        status: "SENT",
-        isSimulation: false,
-        selectedProfessional: "Ing. Carlos Mansilla",
-        channel: contactMethod || "CANAL_OFICIAL",
-        generatedMessage: responseText || "Mensaje oficial de invitación enviado.",
-        dispatchedAt: new Date().toISOString(),
-        approval: operatorApproval ? "APPROVED_BY_OPERATOR" : "SYSTEM_DISPATCHED",
-        notes: "Comunicación despachada y confirmada mediante proveedor oficial conectado."
+        status: "PROVIDER_NOT_IMPLEMENTED",
+        error: "No existe una implementación real de cliente para el proveedor seleccionado en el servidor de producción.",
+        code: "PROVIDER_NOT_IMPLEMENTED"
       });
     } catch (err: any) {
       return res.status(500).json({ error: "Error al orquestar el contacto." });
@@ -1120,7 +1151,8 @@ Responde en JSON:
   app.post("/api/radar/conversion", rateLimiter, async (req: Request, res: Response) => {
     try {
       const { opportunityId, campaign, userId, conversionType, isTest, dryRun } = req.body;
-      const isSimulation = Boolean(isTest || dryRun);
+      const isProductionMode = (process.env.RADAR_MODE || process.env.APP_ENV || "PRODUCTION").toUpperCase() === "PRODUCTION";
+      const isSimulation = !isProductionMode && Boolean(isTest || dryRun);
       const auth = await verifyAuthToken(req);
 
       if (!isSimulation && !auth.isAdmin) {
@@ -1191,9 +1223,12 @@ Responde en JSON:
 
     const hasMessagingProvider = Boolean(process.env.WHATSAPP_API_TOKEN || process.env.TWILIO_AUTH_TOKEN || process.env.MESSAGING_PROVIDER_KEY);
 
+    const radarMode = process.env.RADAR_MODE || "PRODUCTION";
+
     return res.json({
       status: "OK",
       timestamp: new Date().toISOString(),
+      radarMode,
       integrations: {
         firebase: {
           status: firebaseStatus,
@@ -1207,22 +1242,27 @@ Responde en JSON:
             ? "Firebase Admin SDK disponible para verificación de ID tokens en backend." 
             : "Sin servicio de cuenta Firebase Admin. Token verification se realiza previa inicialización."
         },
+        firestore: {
+          status: hasFirebaseAdminConfig ? "CONFIGURED" : "NOT_CONFIGURED",
+          badge: hasFirebaseAdminConfig ? "🟢 CONFIGURADO" : "🔴 NO CONFIGURADO",
+          details: hasFirebaseAdminConfig ? "Firestore disponible para persistencia real." : "Firestore no disponible."
+        },
         aiEngine: {
-          status: hasGeminiKey ? "CONFIGURED" : "INCOMPLETE",
-          badge: hasGeminiKey ? "🟢 CONFIGURADO" : "🟡 CONFIGURACIÓN INCOMPLETA",
+          status: hasGeminiKey ? "CONFIGURED" : "NOT_CONFIGURED",
+          badge: hasGeminiKey ? "🟢 CONFIGURADO" : "🔴 NO CONFIGURADO",
           model: "gemini-3.6-flash",
           details: hasGeminiKey ? "Gemini 3.6 Flash activo para análisis de demanda y PII redaction." : "Usando parser heurístico por falta de GEMINI_API_KEY."
         },
         metaConnector: {
-          status: hasMetaFull ? "CONFIGURED" : (hasMetaPartial ? "INCOMPLETE" : "NOT_CONFIGURED"),
-          badge: hasMetaFull ? "🟢 CONFIGURADO" : (hasMetaPartial ? "🟡 CONFIGURACIÓN INCOMPLETA" : "🔴 NO CONFIGURADO"),
+          status: hasMetaFull ? "CONFIGURED" : (hasMetaPartial ? "PARTIAL" : "NOT_CONFIGURED"),
+          badge: hasMetaFull ? "🟢 CONFIGURADO" : (hasMetaPartial ? "🟡 CONFIGURACIÓN PARCIAL" : "🔴 NO CONFIGURADO"),
           details: hasMetaFull 
             ? "Webhook y Graph API listos con verificación de firma HMAC."
             : "Endpoints de webhook listos en server.ts. Requiere variables META_APP_ID, META_APP_SECRET, META_VERIFY_TOKEN y META_ACCESS_TOKEN."
         },
         n8nConnector: {
-          status: hasN8nFull ? "CONFIGURED" : (hasN8nPartial ? "INCOMPLETE" : "NOT_CONFIGURED"),
-          badge: hasN8nFull ? "🟢 CONFIGURADO" : (hasN8nPartial ? "🟡 CONFIGURACIÓN INCOMPLETA" : "🔴 NO CONFIGURADO"),
+          status: hasN8nFull ? "CONFIGURED" : (hasN8nPartial ? "PARTIAL" : "NOT_CONFIGURED"),
+          badge: hasN8nFull ? "🟢 CONFIGURADO" : (hasN8nPartial ? "🟡 CONFIGURACIÓN PARCIAL" : "🔴 NO CONFIGURADO"),
           details: hasN8nFull 
             ? "Flujo de automatización n8n conectado con secreto encriptado."
             : "Endpoint /api/radar/n8n/webhook listo. Requiere N8N_WEBHOOK_SECRET para autenticación."

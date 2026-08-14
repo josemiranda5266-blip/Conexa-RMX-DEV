@@ -18,15 +18,9 @@ service cloud.firestore {
 
     function isAdmin() {
       return isSignedIn() && (
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
         request.auth.token.role == 'ADMIN' ||
         request.auth.token.role == 'SUPER_ADMIN'
       );
-    }
-
-    // Admins Collection - Restricted
-    match /admins/{adminId} {
-      allow read, write: if false;
     }
 
     // Public Users profiles (No phone or exact address)
@@ -105,6 +99,13 @@ service cloud.firestore {
     match /reports/{reportId} {
       allow create: if isSignedIn() && request.resource.data.reporterId == request.auth.uid;
       allow read, update, delete: if isAdmin();
+    }
+
+    // Reviews - Public read, creator write, admin moderation
+    match /reviews/{reviewId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
+      allow update, delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
     }
 
     // Verification Requests
