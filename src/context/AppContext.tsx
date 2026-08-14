@@ -21,6 +21,9 @@ interface AppContextType {
   switchUserRole: (userId: string) => void;
   switchActiveMode: (mode: 'CLIENT' | 'PROFESSIONAL' | 'ADMIN') => boolean;
   authLoading: boolean;
+  isAuthPortalOpen: boolean;
+  openAuthPortal: () => void;
+  closeAuthPortal: () => void;
   
   isAdmin: () => boolean;
   hasRole: (roles: Role[]) => boolean;
@@ -127,6 +130,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [conversations, setConversations] = useState<Conversation[]>(INITIAL_CONVERSATIONS);
   const [messages, setMessages] = useState<Record<string, Message[]>>(INITIAL_MESSAGES);
   const [favorites, setFavorites] = useState<string[]>(['pro-1']);
+  const [isAuthPortalOpen, setIsAuthPortalOpen] = useState<boolean>(false);
+  const openAuthPortal = () => setIsAuthPortalOpen(true);
+  const closeAuthPortal = () => setIsAuthPortalOpen(false);
   
   const [reports, setReports] = useState<UserReport[]>([
     {
@@ -215,6 +221,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 phonePrivate: '',
                 avatar: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150',
                 role: claimRole,
+                activeMode: claimRole === 'PROFESSIONAL' ? 'PROFESSIONAL' : claimRole === 'ADMIN' ? 'ADMIN' : 'CLIENT',
+                isProfessional: claimRole === 'PROFESSIONAL',
+                hasProfessionalProfile: claimRole === 'PROFESSIONAL',
                 joinedDate: new Date().toLocaleDateString('es-AR'),
                 location: {
                   city: 'Santiago del Estero',
@@ -226,7 +235,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 },
                 isIdentityVerified: firebaseUser.emailVerified || false,
                 identityVerificationStatus: 'NONE',
-                rating: 0,
+                rating: claimRole === 'PROFESSIONAL' ? 5.0 : 0,
                 reviewCount: 0,
                 jobsCompleted: 0,
                 trustScore: 50,
@@ -237,13 +246,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               console.log('[CONEXA AUTH] Perfil por defecto guardado en Firestore.');
             }
             
+            // Core Auth Synch Rules: Firestore is the Source of Truth for Role & Profile (except ADMIN/SUPER_ADMIN checks)
+            const firestoreRole = profileData.role;
+            const isClaimAdmin = claimRole === 'ADMIN' || claimRole === 'SUPER_ADMIN';
+            
+            let effectiveRole: Role = 'USER';
+            if (firestoreRole === 'ADMIN' || firestoreRole === 'SUPER_ADMIN') {
+              if (isClaimAdmin) {
+                effectiveRole = firestoreRole;
+              } else {
+                console.warn(`[CONEXA SECURITY] Se detectó intento de elevación de privilegios en Firestore para UID: ${firebaseUser.uid} sin Custom Claim de Admin correspondiente.`);
+                effectiveRole = 'USER';
+              }
+            } else if (firestoreRole) {
+              effectiveRole = firestoreRole;
+            } else {
+              effectiveRole = claimRole;
+            }
+
+            const finalIsProfessional = profileData.isProfessional === true || 
+                                        profileData.hasProfessionalProfile === true || 
+                                        effectiveRole === 'PROFESSIONAL' || 
+                                        profileData.activeMode === 'PROFESSIONAL';
+            
+            const finalHasProfessionalProfile = profileData.hasProfessionalProfile === true || 
+                                                profileData.isProfessional === true || 
+                                                effectiveRole === 'PROFESSIONAL' || 
+                                                profileData.activeMode === 'PROFESSIONAL';
+
+            const finalActiveMode = profileData.activeMode || 
+                                    (effectiveRole === 'ADMIN' || effectiveRole === 'SUPER_ADMIN' ? 'ADMIN' : (finalIsProfessional ? 'PROFESSIONAL' : 'CLIENT'));
+
+            console.log('[CONEXA DIAGNOSTICS]', {
+              uid: firebaseUser.uid,
+              firestoreRole: firestoreRole || null,
+              claimRole,
+              effectiveRole,
+              isProfessional: finalIsProfessional,
+              hasProfessionalProfile: finalHasProfessionalProfile,
+              activeMode: finalActiveMode
+            });
+
             setCurrentUser({
               ...profileData,
               id: firebaseUser.uid,
               name: profileData.name || firebaseUser.displayName || 'Usuario CONEXA',
               email: profileData.email || firebaseUser.email || '',
               avatar: profileData.avatar || firebaseUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150',
-              role: claimRole,
+              role: effectiveRole,
+              activeMode: finalActiveMode,
+              isProfessional: finalIsProfessional,
+              hasProfessionalProfile: finalHasProfessionalProfile,
               isIdentityVerified: firebaseUser.emailVerified || profileData.isIdentityVerified || false
             } as UserProfile);
           } else {
@@ -460,14 +513,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    setCurrentUser(prev => {
+    if (currentUser) {
       const updated = {
-        ...prev,
+        ...currentUser,
         activeMode: mode
       };
-      setUsers(uList => uList.map(u => u.id === prev.id ? updated : u));
-      return updated;
-    });
+      setCurrentUser(updated);
+      setUsers(uList => uList.map(u => u.id === currentUser.id ? updated : u));
+
+      if (isFirebaseConfigured && db) {
+        const userDocRef = doc(db, 'users', currentUser.id);
+        updateDoc(userDocRef, { activeMode: mode }).catch(err => {
+          console.warn('[CONEXA AUTH] Error saving activeMode to Firestore:', err);
+        });
+      }
+    }
 
     return true;
   };
@@ -1219,6 +1279,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <AppContext.Provider value={{
       currentUser, setCurrentUser, switchUserRole, switchActiveMode, authLoading,
+      isAuthPortalOpen, openAuthPortal, closeAuthPortal,
       isAdmin, hasRole,
       users, categories, professions, reviews, requests, quotes, 
       conversations, messages, reports, verifications, notifications, transactions, favorites,

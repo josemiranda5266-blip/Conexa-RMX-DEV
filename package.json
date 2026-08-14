@@ -9,7 +9,8 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "validate-env": "tsx scripts/validate-env.ts"
+    "validate-env": "tsx scripts/validate-env.ts",
+    "test:persistence": "tsx scripts/test-persistence.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

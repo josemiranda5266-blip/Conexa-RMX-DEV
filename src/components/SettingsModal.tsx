@@ -12,25 +12,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose
 }) => {
-  const { currentUser, deleteAccount, connectMercadoPago, getMercadoPagoStatus, authLoading } = useApp();
+  const { currentUser, deleteAccount, connectMercadoPago, getMercadoPagoStatus, authLoading, openAuthPortal } = useApp();
   const [downloaded, setDownloaded] = useState(false);
   const [mpStatus, setMpStatus] = useState<{ connected: boolean; mpUserId?: string | null; loading?: boolean; unauthenticated?: boolean } | null>(null);
   const [loadingMp, setLoadingMp] = useState(false);
   const [mpError, setMpError] = useState<string | null>(null);
 
+  const isPro =
+    currentUser && (
+      currentUser.role === 'PROFESSIONAL' ||
+      currentUser.isProfessional === true ||
+      currentUser.hasProfessionalProfile === true ||
+      currentUser.activeMode === 'PROFESSIONAL'
+    );
+
   useEffect(() => {
-    if (isOpen && currentUser && (currentUser.role === 'PROFESSIONAL' || currentUser.isProfessional)) {
+    if (isOpen && currentUser && isPro) {
       setLoadingMp(true);
       getMercadoPagoStatus()
         .then(res => setMpStatus(res))
         .catch(err => console.warn('Error al verificar estado de Mercado Pago:', err))
         .finally(() => setLoadingMp(false));
     }
-  }, [isOpen, currentUser, authLoading]);
+  }, [isOpen, currentUser, authLoading, isPro]);
 
   if (!isOpen || !currentUser) return null;
-
-  const isPro = currentUser.role === 'PROFESSIONAL' || currentUser.isProfessional;
 
   const handleExportData = () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(currentUser, null, 2));
@@ -120,6 +126,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <button
                       onClick={() => {
                         onClose();
+                        openAuthPortal();
                       }}
                       className="mt-1 px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
                     >

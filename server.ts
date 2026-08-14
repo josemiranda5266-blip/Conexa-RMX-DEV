@@ -31,7 +31,7 @@ function getFirebaseAdmin(): any {
         const decoded = Buffer.from(saEnv, 'base64').toString('utf8');
         parsedSA = JSON.parse(decoded);
       }
-      credential = firebaseAdmin.credential.cert(parsedSA);
+      credential = firebaseAdmin.cert(parsedSA);
     } catch (err: any) {
       console.error('[FIREBASE ADMIN] Error parseando FIREBASE_SERVICE_ACCOUNT:', err?.message || err);
     }
@@ -39,7 +39,7 @@ function getFirebaseAdmin(): any {
 
   if (!credential && gacEnv) {
     try {
-      credential = firebaseAdmin.credential.applicationDefault();
+      credential = firebaseAdmin.applicationDefault();
     } catch (err: any) {
       console.error('[FIREBASE ADMIN] Error con GOOGLE_APPLICATION_CREDENTIALS:', err?.message || err);
     }
@@ -47,7 +47,7 @@ function getFirebaseAdmin(): any {
 
   if (!credential) {
     try {
-      credential = firebaseAdmin.credential.applicationDefault();
+      credential = firebaseAdmin.applicationDefault();
     } catch {
       // ADC unavailable
     }

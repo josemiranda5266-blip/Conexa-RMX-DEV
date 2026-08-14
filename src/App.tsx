@@ -26,7 +26,7 @@ import {
   Search, SlidersHorizontal, MapPin, Briefcase, Star, 
   ShieldCheck, MessageSquare, PlusCircle, CheckCircle2, Heart, Award, Sparkles, Filter,
   MessageSquarePlus, HelpCircle, Check, AlertCircle, Wrench, Droplet, Car, Sparkle, Home, Smartphone,
-  Users, User, ArrowRight
+  Users, User, ArrowRight, X
 } from 'lucide-react';
 
 
@@ -35,7 +35,8 @@ const MainAppContent: React.FC = () => {
     currentUser, users, categories, professions, searchQuery, setSearchQuery, 
     selectedCategory, setSelectedCategory, selectedProfession, setSelectedProfession,
     selectedCity, setSelectedCity, maxDistanceKm, setMaxDistanceKm, onlyVerified, setOnlyVerified,
-    conversations, createConversation, favorites, requests, switchActiveMode 
+    conversations, createConversation, favorites, requests, switchActiveMode,
+    isAuthPortalOpen, closeAuthPortal 
   } = useApp();
 
   // Navigation State
@@ -826,6 +827,21 @@ const MainAppContent: React.FC = () => {
           switchActiveMode('PROFESSIONAL');
         }}
       />
+
+      {isAuthPortalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-sm animate-fade-in overflow-y-auto">
+          <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-6 border border-slate-200">
+            <button 
+              onClick={closeAuthPortal}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 p-2 rounded-full hover:bg-slate-100 transition-colors z-50"
+              aria-label="Cerrar autenticación"
+            >
+              <X size={18} />
+            </button>
+            <AuthPortal />
+          </div>
+        </div>
+      )}
 
     </div>
   );

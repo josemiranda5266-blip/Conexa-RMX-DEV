@@ -3,8 +3,9 @@ import { useApp } from '../context/AppContext';
 import { 
   Sparkles, MapPin, Bell, ShieldCheck, UserCheck, 
   Settings as SettingsIcon, ChevronDown, Award, Users,
-  User, Wrench, RefreshCw, PlusCircle, ArrowLeftRight, LogIn
+  User, Wrench, RefreshCw, PlusCircle, ArrowLeftRight, LogIn, LogOut
 } from 'lucide-react';
+import { auth, isFirebaseConfigured } from '../lib/firebase';
 
 interface HeaderProps {
   onOpenAiAssistant: () => void;
@@ -328,6 +329,21 @@ export const Header: React.FC<HeaderProps> = ({
                       <span>Abrir Panel Admin</span>
                     </button>
                   ) : null}
+
+                  {isFirebaseConfigured && (
+                    <button
+                      onClick={async () => {
+                        setShowRoleMenu(false);
+                        if (auth) {
+                          await auth.signOut();
+                        }
+                      }}
+                      className="w-full text-left p-2 hover:bg-rose-50 text-rose-600 rounded-2xl font-bold flex items-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <LogOut size={15} />
+                      <span>Cerrar Sesión</span>
+                    </button>
+                  )}
                 </div>
               </div>
             )}

@@ -10,8 +10,10 @@ import {
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { Shield, KeyRound, Mail, User, Phone, CheckCircle2, AlertCircle, Wrench, Users } from 'lucide-react';
 import { Role } from '../types';
+import { useApp } from '../context/AppContext';
 
 export const AuthPortal: React.FC = () => {
+  const { closeAuthPortal } = useApp();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -79,6 +81,9 @@ export const AuthPortal: React.FC = () => {
       }
 
       setSuccess('Sesión iniciada con Google correctamente.');
+      setTimeout(() => {
+        closeAuthPortal?.();
+      }, 1000);
     } catch (err: any) {
       console.error('[CONEXA GOOGLE AUTH ERROR]', err);
       setError(err.message || 'Error al iniciar sesión con Google.');
@@ -98,6 +103,9 @@ export const AuthPortal: React.FC = () => {
         // Sign In
         await signInWithEmailAndPassword(auth, email, password);
         setSuccess('Sesión iniciada con éxito. Redireccionando...');
+        setTimeout(() => {
+          closeAuthPortal?.();
+        }, 1000);
       } else {
         // Sign Up
         if (!name.trim()) {
@@ -150,6 +158,9 @@ export const AuthPortal: React.FC = () => {
         }
 
         setSuccess('¡Cuenta registrada correctamente!');
+        setTimeout(() => {
+          closeAuthPortal?.();
+        }, 1000);
       }
     } catch (err: any) {
       console.error('[CONEXA AUTH ERROR]', err);
