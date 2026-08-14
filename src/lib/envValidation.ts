@@ -155,9 +155,23 @@ export function validateMercadoPagoEnv(options: { throwOnError?: boolean } = {})
 
   // 8. FIREBASE ADMIN SDK
   if (!saEnv && !gacEnv) {
-    warnings.push('⚠️ [FIREBASE_ADMIN]: No se configuró FIREBASE_SERVICE_ACCOUNT ni GOOGLE_APPLICATION_CREDENTIALS. Firebase Admin dependerá de Application Default Credentials de GCP.');
+    errors.push('🔴 [FIREBASE_ADMIN]: No se configuró FIREBASE_SERVICE_ACCOUNT ni GOOGLE_APPLICATION_CREDENTIALS. Firebase Admin es obligatorio para verificar tokens de autenticación backend.');
+    errorTypes.FIREBASE_ADMIN_CONFIG_ERROR = true;
     details.FIREBASE_ADMIN = false;
-    // Do not fail hard unless needed, but flag in details
+  } else if (saEnv) {
+    try {
+      if (saEnv.startsWith('{')) {
+        JSON.parse(saEnv);
+      } else {
+        const decoded = Buffer.from(saEnv, 'base64').toString('utf8');
+        JSON.parse(decoded);
+      }
+      details.FIREBASE_ADMIN = true;
+    } catch (e: any) {
+      errors.push(`🔴 [FIREBASE_SERVICE_ACCOUNT]: Formato JSON o Base64 inválido para FIREBASE_SERVICE_ACCOUNT: ${e?.message || 'Error de decodificación'}.`);
+      errorTypes.FIREBASE_ADMIN_CONFIG_ERROR = true;
+      details.FIREBASE_ADMIN = false;
+    }
   } else {
     details.FIREBASE_ADMIN = true;
   }
