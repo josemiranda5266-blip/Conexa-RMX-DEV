@@ -222,7 +222,13 @@ export const AuthPortal: React.FC = () => {
           Iniciar Sesión
         </button>
         <button
-          onClick={() => { setIsLogin(false); setError(null); }}
+          onClick={() => {
+            setIsLogin(false);
+            setError(null);
+            if (auth.currentUser) {
+              auth.signOut().catch(e => console.error("Error signing out prior user:", e));
+            }
+          }}
           className={`py-2.5 rounded-xl font-bold transition-all cursor-pointer ${
             !isLogin ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
           }`}

@@ -117,7 +117,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <p className="text-slate-500 text-[11px] animate-pulse">Verificando sesión de autenticación...</p>
               ) : (currentUser && (!auth?.currentUser || !authSessionReady)) ? (
                 <p className="text-slate-500 text-[11px] animate-pulse">Sincronizando sesión...</p>
-              ) : (!auth?.currentUser || !authSessionReady || mpStatus?.unauthenticated) ? (
+              ) : (!auth?.currentUser || !authSessionReady) ? (
                 <div className="p-3 bg-amber-50 border border-amber-200/80 rounded-xl text-amber-900 text-xs flex items-start gap-2">
                   <AlertCircle size={15} className="text-amber-600 shrink-0 mt-0.5" />
                   <div className="space-y-1 flex-1">
@@ -135,6 +135,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <LogIn size={13} />
                       <span>Iniciar sesión</span>
                     </button>
+                  </div>
+                </div>
+              ) : (mpStatus && (mpStatus as any).errorCode) ? (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 text-xs flex items-start gap-2">
+                  <AlertCircle size={15} className="text-rose-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1 flex-1">
+                    <p className="font-bold text-rose-950 text-xs">Error de Diagnóstico del Servidor</p>
+                    <p className="text-[11px] text-rose-850 leading-relaxed">
+                      {(mpStatus as any).errorCode === 'INVALID_FIREBASE_ID_TOKEN' ? (
+                        'Tu sesión está activa, pero el servidor no pudo validar la credencial de Firebase.'
+                      ) : (mpStatus as any).errorCode === 'FIREBASE_ADMIN_NOT_CONFIGURED' ? (
+                        'El backend de Firebase Admin no está configurado en el servidor o el proyecto no coincide.'
+                      ) : (mpStatus as any).errorCode === 'FIREBASE_FIRESTORE_ERROR' ? (
+                        'El servicio de base de datos Firestore del backend no está disponible o devolvió un error de permisos.'
+                      ) : (mpStatus as any).errorCode === 'MERCADO_PAGO_NOT_CONFIGURED' ? (
+                        'Mercado Pago no está correctamente configurado en el servidor.'
+                      ) : (
+                        `Error reportado: ${(mpStatus as any).error || (mpStatus as any).errorCode}`
+                      )}
+                    </p>
+                    <p className="text-[9px] font-mono text-rose-500 mt-1">
+                      Código: {(mpStatus as any).errorCode} {(mpStatus as any).detail ? `| ${(mpStatus as any).detail}` : ''}
+                    </p>
                   </div>
                 </div>
               ) : mpStatus?.connected ? (

@@ -785,19 +785,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { connected: false, loading: true };
     }
     if (!auth?.currentUser || !currentUser) {
-      return { connected: false, unauthenticated: true };
+      return { connected: false, unauthenticated: true, errorCode: 'UNAUTHENTICATED_CLIENT' };
     }
     try {
       const token = await auth.currentUser.getIdToken();
       const response = await fetch('/api/mercadopago/status', { headers: { Authorization: `Bearer ${token}` } });
       const data = await response.json();
-      if (response.status === 401) {
-        return { connected: false, unauthenticated: true };
+      if (!response.ok) {
+        return {
+          connected: false,
+          error: data.error || 'ERROR_UNKNOWN',
+          reason: data.reason || '',
+          detail: data.detail || '',
+          errorCode: data.error || 'ERROR_HTTP_' + response.status
+        };
       }
-      if (!response.ok) throw new Error(data.error || 'No se pudo consultar Mercado Pago.');
       return data;
     } catch (err: any) {
-      return { connected: false, error: err?.message || 'Error de conexión' };
+      return { connected: false, error: err?.message || 'Error de conexión', errorCode: 'NETWORK_ERROR' };
     }
   };
 

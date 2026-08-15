@@ -3,6 +3,7 @@ import path from "path";
 import crypto from "crypto";
 import fs from "fs";
 import * as adminModule from "firebase-admin";
+import { getFirestore as getAdminFirestore } from "firebase-admin/firestore";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { validateMercadoPagoEnv } from "./src/lib/envValidation.js";
@@ -366,9 +367,37 @@ Responde en JSON con:
     return { uid: parsed.uid };
   }
 
+  let cachedDbId: string | null = null;
+  function getFirestoreDatabaseId(): string {
+    if (cachedDbId) return cachedDbId;
+    try {
+      const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+      if (fs.existsSync(configPath)) {
+        const raw = fs.readFileSync(configPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed.firestoreDatabaseId) {
+          cachedDbId = parsed.firestoreDatabaseId;
+          return cachedDbId;
+        }
+      }
+    } catch (err) {
+      console.error('[FIREBASE ADMIN] Error leyendo firestoreDatabaseId:', err);
+    }
+    return '(default)';
+  }
+
   async function getAdminDb(): Promise<any> {
     const adminApp = getFirebaseAdmin();
     if (!adminApp) throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
+    const dbId = getFirestoreDatabaseId();
+    if (dbId && dbId !== '(default)') {
+      try {
+        return getAdminFirestore(adminApp, dbId);
+      } catch (err: any) {
+        console.error(`[FIREBASE ADMIN] Error obteniendo base de datos nombrada '${dbId}', reintentando por defecto:`, err?.message || err);
+        return adminApp.firestore();
+      }
+    }
     return adminApp.firestore();
   }
 
@@ -393,12 +422,75 @@ Responde en JSON con:
 
     const hasAdminEnv = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
 
+    let adminProjectId = null;
+    const saEnv = process.env.FIREBASE_SERVICE_ACCOUNT?.trim();
+    if (saEnv) {
+      try {
+        const raw = saEnv.startsWith('{') ? saEnv : Buffer.from(saEnv, 'base64').toString('utf8');
+        const parsed = JSON.parse(raw);
+        adminProjectId = parsed.project_id || null;
+      } catch {}
+    }
+
+    let clientProjectId = 'smurfy-shelter-kt8c4';
+    try {
+      const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+      if (fs.existsSync(configPath)) {
+        const raw = fs.readFileSync(configPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed.projectId) {
+          clientProjectId = parsed.projectId;
+        }
+      }
+    } catch {}
+
+    const firestoreDatabaseIdBackend = getFirestoreDatabaseId();
+
     return res.json({
       firebaseClientConfigured: clientConfigured,
       firebaseAdminConfigured: hasAdminEnv,
       firebaseAdminInitialized: firebaseAdminApp !== null,
-      mercadoPagoConfigured: mpEnv.isValid
+      mercadoPagoConfigured: mpEnv.isValid,
+      clientProjectIdExpected: clientProjectId,
+      adminProjectIdActual: adminProjectId,
+      projectsMatch: adminProjectId === clientProjectId,
+      firestoreDatabaseIdBackend: firestoreDatabaseIdBackend
     });
+  });
+
+  app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
+    try {
+      const { token } = req.body || {};
+      if (!token || typeof token !== 'string') {
+        return res.status(400).json({ error: 'TOKEN_REQUIRED', message: 'Se requiere un token de Firebase ID en el cuerpo de la solicitud.' });
+      }
+
+      const adminApp = getFirebaseAdmin();
+      if (!adminApp) {
+        return res.status(503).json({ error: 'FIREBASE_ADMIN_NOT_CONFIGURED', message: 'El backend de Firebase Admin no está configurado.' });
+      }
+
+      try {
+        const decodedToken = await adminApp.auth().verifyIdToken(token);
+        return res.json({
+          success: true,
+          uid: decodedToken.uid,
+          email: decodedToken.email || null,
+          role: decodedToken.role || null,
+          projectId: adminApp.options.projectId || '(not specified in options)'
+        });
+      } catch (verifyErr: any) {
+        console.error('[DIAGNOSTIC VERIFY TOKEN ERROR]', verifyErr?.message || verifyErr);
+        return res.status(400).json({
+          success: false,
+          error: 'TOKEN_VERIFICATION_FAILED',
+          message: verifyErr?.message || 'La verificación del token de Firebase falló.',
+          code: verifyErr?.code || null
+        });
+      }
+    } catch (err: any) {
+      return res.status(500).json({ error: 'INTERNAL_ERROR', message: err?.message });
+    }
   });
 
   app.get('/api/mercadopago/oauth/start', async (req: Request, res: Response) => {
@@ -475,15 +567,43 @@ Responde en JSON con:
   app.get('/api/mercadopago/status', async (req: Request, res: Response) => {
     try {
       const auth = await verifyAuthToken(req);
-      if (!auth.isAuthenticated || !auth.userId) return res.status(401).json({ error: 'UNAUTHORIZED' });
+      if (!auth.isAuthenticated) {
+        let errorCode = 'UNAUTHORIZED';
+        let httpStatus = 401;
+        if (auth.errorReason === 'MISSING_BEARER_TOKEN' || auth.errorReason === 'EMPTY_TOKEN') {
+          errorCode = 'UNAUTHENTICATED_CLIENT';
+        } else if (auth.errorReason === 'INVALID_FIREBASE_ID_TOKEN') {
+          errorCode = 'INVALID_FIREBASE_ID_TOKEN';
+        } else if (auth.errorReason === 'FIREBASE_ADMIN_NOT_CONFIGURED') {
+          errorCode = 'FIREBASE_ADMIN_NOT_CONFIGURED';
+          httpStatus = 503;
+        }
+        return res.status(httpStatus).json({ error: errorCode, reason: auth.errorReason });
+      }
 
-      const db = await getAdminDb();
-      const snap = await db.collection('mercadopago_connections').doc(auth.userId).get();
-      if (!snap.exists) return res.json({ connected: false });
-      const data = snap.data() || {};
-      return res.json({ connected: data.connected === true, mpUserId: data.mpUserId || null, publicKey: data.publicKey || null, updatedAt: data.updatedAt || null });
+      if (!auth.userId) {
+        return res.status(401).json({ error: 'UNAUTHENTICATED_CLIENT', reason: 'NO_USER_ID' });
+      }
+
+      let db;
+      try {
+        db = await getAdminDb();
+      } catch (dbErr: any) {
+        return res.status(503).json({ error: 'FIREBASE_ADMIN_NOT_CONFIGURED', detail: dbErr?.message });
+      }
+
+      try {
+        const snap = await db.collection('mercadopago_connections').doc(auth.userId).get();
+        if (!snap.exists) return res.json({ connected: false });
+        const data = snap.data() || {};
+        return res.json({ connected: data.connected === true, mpUserId: data.mpUserId || null, publicKey: data.publicKey || null, updatedAt: data.updatedAt || null });
+      } catch (dbErr: any) {
+        console.error('[MERCADO PAGO STATUS] Error querying Firestore:', dbErr);
+        return res.status(503).json({ error: 'FIREBASE_FIRESTORE_ERROR', detail: dbErr?.message });
+      }
     } catch (err: any) {
-      return res.status(503).json({ error: 'MERCADO_PAGO_NOT_CONFIGURED' });
+      console.error('[MERCADO PAGO STATUS] Top-level error:', err);
+      return res.status(503).json({ error: 'MERCADO_PAGO_NOT_CONFIGURED', detail: err?.message });
     }
   });
 
@@ -671,9 +791,7 @@ Responde en JSON con:
         return res.status(503).json({ success: false, error: "Firebase Admin SDK no está configurado para operaciones comerciales.", code: "FIREBASE_ADMIN_NOT_CONFIGURED" });
       }
 
-      const adminModule = await import("firebase-admin");
-      const admin = (adminModule.default || adminModule) as any;
-      const firestore = admin.firestore();
+      const firestore = await getAdminDb();
 
       const quoteRef = firestore.collection('quotes').doc(quoteId);
       const transactionRef = firestore.collection('transactions').doc(`txn-${quoteId}`);
@@ -787,9 +905,15 @@ Responde en JSON con:
         });
       }
 
-      const adminModule = await import("firebase-admin");
-      const admin = (adminModule.default || adminModule) as any;
-      const db = admin.firestore();
+      const admin = getFirebaseAdmin();
+      if (!admin) {
+        return res.status(503).json({
+          success: false,
+          error: "El servicio de Firebase Admin no está disponible en este momento.",
+          code: "FIREBASE_ADMIN_NOT_CONFIGURED"
+        });
+      }
+      const db = await getAdminDb();
 
       try {
         // Delete user from Firebase Auth
@@ -1319,9 +1443,7 @@ Clasificá la oportunidad y responde ÚNICAMENTE en formato JSON con la siguient
           });
         }
 
-        const adminModule = await import("firebase-admin");
-        const admin = (adminModule.default || adminModule) as any;
-        const db = admin.firestore();
+        const db = await getAdminDb();
 
         try {
           const usersSnap = await db.collection('users')
