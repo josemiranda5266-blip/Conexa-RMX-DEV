@@ -723,14 +723,9 @@ Responde en JSON con:
       }
 
       if (!payment) {
-        const platformToken = process.env.MP_CLIENT_SECRET;
-        if (platformToken) {
-          const paymentResponse = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`, { headers: { Authorization: `Bearer ${platformToken}`, accept: 'application/json' } });
-          if (paymentResponse.ok) payment = await paymentResponse.json();
-        }
+        console.warn(`[MP Webhook] Could not retrieve payment details. Professional connection or payment information unavailable for paymentId=${paymentId}`);
+        return res.status(200).send('ok');
       }
-
-      if (!payment) return res.status(200).send('ok');
 
       // If transaction not found by paymentId, locate by payment.external_reference (transactionId)
       if (!txDocRef && payment.external_reference) {
