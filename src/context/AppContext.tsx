@@ -690,42 +690,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toLocaleDateString('es-AR'),
       status: 'PENDING'
     };
-    setQuotes(prev => [newQuote, ...prev]);
 
-    // Update request status & count locally
-    setRequests(prev => prev.map(r => {
-      if (r.id === quoteData.requestId) {
-        return {
-          ...r,
-          quotesCount: r.quotesCount + 1,
-          status: 'QUOTES_RECEIVED'
-        };
-      }
-      return r;
-    }));
-
+    let quoteToStore = newQuote;
     if (db) {
+      if (!auth?.currentUser) throw new Error('Debés iniciar sesión para enviar un presupuesto.');
       try {
-        await setDoc(doc(db, 'quotes', newQuote.id), newQuote);
-        const reqRef = doc(db, 'service_requests', quoteData.requestId);
-        const reqSnap = await getDoc(reqRef);
-        if (reqSnap.exists()) {
-          const rData = reqSnap.data() as ServiceRequest;
-          await updateDoc(reqRef, {
-            quotesCount: (rData.quotesCount || 0) + 1,
-            status: 'QUOTES_RECEIVED'
-          });
+        const token = await auth.currentUser.getIdToken();
+        const response = await fetch('/api/quotes/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            requestId: newQuote.requestId,
+            priceArs: newQuote.priceArs,
+            description: newQuote.description,
+            materialsIncluded: newQuote.materialsIncluded,
+            estimatedTime: newQuote.estimatedTime,
+            availableStartDate: newQuote.availableStartDate,
+            warrantyInfo: newQuote.warrantyInfo,
+            termsAndConditions: newQuote.termsAndConditions
+          })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success || !data.quote) {
+          throw new Error(data.error || 'No se pudo enviar el presupuesto.');
         }
+        quoteToStore = data.quote as Quote;
       } catch (e) {
         console.warn('[Firestore] Error guardando presupuesto:', e);
+        return;
       }
     }
+
+    setQuotes(prev => [quoteToStore, ...prev.filter(q => q.id !== quoteToStore.id)]);
+    setRequests(prev => prev.map(r => r.id === quoteData.requestId
+      ? { ...r, quotesCount: r.quotesCount + 1, status: 'QUOTES_RECEIVED' }
+      : r
+    ));
 
     // Find request to open chat with client
     const targetReq = requests.find(r => r.id === quoteData.requestId);
     if (targetReq) {
       const convId = createConversation(targetReq.clientId);
-      sendMessage(convId, `Hola! Te envío un presupuesto formal para tu solicitud "${targetReq.title}".`, 'QUOTE_PROPOSAL', newQuote);
+      sendMessage(convId, `Hola! Te envío un presupuesto formal para tu solicitud "${targetReq.title}".`, 'QUOTE_PROPOSAL', quoteToStore);
     }
   };
 
@@ -847,15 +853,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const completeJob = async (requestId: string) => {
-    setRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'REVIEW_PENDING' } : r));
-
     if (db) {
-      try {
-        await updateDoc(doc(db, 'service_requests', requestId), { status: 'REVIEW_PENDING' });
-      } catch (e) {
-        console.warn('[Firestore] Error completando trabajo:', e);
+      if (!auth?.currentUser) throw new Error('Debés iniciar sesión para completar un trabajo.');
+      const token = await auth.currentUser.getIdToken();
+      const response = await fetch('/api/jobs/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ requestId })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'No se pudo completar el trabajo.');
       }
     }
+
+    setRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'REVIEW_PENDING' } : r));
   };
 
   const addReview = async (reviewData: Omit<Review, 'id' | 'createdAt' | 'isVerifiedJob'>) => {

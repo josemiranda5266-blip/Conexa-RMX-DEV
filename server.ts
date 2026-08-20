@@ -767,6 +767,119 @@ Responde en JSON con:
   // ==========================================
   // CONEXA TRANSACTIONS - Commercial Core
   // ==========================================
+  app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const auth = await verifyAuthToken(req);
+      if (!auth.isAuthenticated || !auth.userId) {
+        return res.status(401).json({ success: false, error: "Se requiere autenticación válida.", code: "UNAUTHORIZED" });
+      }
+
+      const {
+        requestId,
+        priceArs,
+        description,
+        materialsIncluded,
+        estimatedTime,
+        availableStartDate,
+        warrantyInfo,
+        termsAndConditions
+      } = req.body || {};
+
+      if (!requestId || typeof requestId !== 'string') {
+        return res.status(400).json({ success: false, error: "requestId es obligatorio.", code: "INVALID_REQUEST_ID" });
+      }
+      if (!Number.isFinite(Number(priceArs)) || Number(priceArs) <= 0 || typeof description !== 'string' || !description.trim()) {
+        return res.status(400).json({ success: false, error: "Los datos del presupuesto son inválidos.", code: "INVALID_QUOTE_DATA" });
+      }
+
+      const firestore = await getAdminDb();
+      const quoteId = `quote-${Date.now()}-${crypto.randomBytes(6).toString('hex')}`;
+      const quoteRef = firestore.collection('quotes').doc(quoteId);
+      const requestRef = firestore.collection('service_requests').doc(requestId);
+      const professionalRef = firestore.collection('users').doc(auth.userId);
+
+      const quote = await firestore.runTransaction(async (tx: any) => {
+        const professionalSnap = await tx.get(professionalRef);
+        const requestSnap = await tx.get(requestRef);
+        const existingQuoteSnap = await tx.get(quoteRef);
+
+        if (existingQuoteSnap.exists) throw new Error('QUOTE_ALREADY_EXISTS');
+        if (!professionalSnap.exists || professionalSnap.data()?.role !== 'PROFESSIONAL') {
+          throw new Error('PROFESSIONAL_ROLE_REQUIRED');
+        }
+        if (!requestSnap.exists) throw new Error('REQUEST_NOT_FOUND');
+
+        const serviceRequest = requestSnap.data() || {};
+        const requestStatus = serviceRequest.status;
+        if (!['REQUEST_CREATED', 'QUOTES_RECEIVED'].includes(requestStatus)) {
+          throw new Error('REQUEST_NOT_OPEN_FOR_QUOTES');
+        }
+        if (serviceRequest.clientId === auth.userId) throw new Error('FORBIDDEN_REQUEST_CONTEXT');
+        if (serviceRequest.assignedProfessionalId && serviceRequest.assignedProfessionalId !== auth.userId) {
+          throw new Error('FORBIDDEN_REQUEST_CONTEXT');
+        }
+        if (Array.isArray(serviceRequest.biddingProfessionalIds)
+          && serviceRequest.biddingProfessionalIds.length > 0
+          && !serviceRequest.biddingProfessionalIds.includes(auth.userId)) {
+          throw new Error('FORBIDDEN_REQUEST_CONTEXT');
+        }
+
+        const existingQuotes = await tx.get(firestore.collection('quotes').where('requestId', '==', requestId));
+        if (existingQuotes.docs.some((quoteDoc: any) => (
+          quoteDoc.data()?.professionalId === auth.userId
+          && ['PENDING', 'ACCEPTED', 'MODIFICATION_REQUESTED'].includes(quoteDoc.data()?.status)
+        ))) {
+          throw new Error('DUPLICATE_QUOTE');
+        }
+
+        const now = new Date().toISOString();
+        const newQuote = {
+          id: quoteId,
+          requestId,
+          professionalId: auth.userId,
+          professionalName: professionalSnap.data()?.name || 'Profesional CONEXA',
+          professionalAvatar: professionalSnap.data()?.avatar || '',
+          professionalRating: Number(professionalSnap.data()?.rating || 0),
+          professionalVerified: Boolean(professionalSnap.data()?.isProfessionalVerified),
+          priceArs: Number(priceArs),
+          description: description.trim(),
+          materialsIncluded: typeof materialsIncluded === 'string' ? materialsIncluded : '',
+          estimatedTime: typeof estimatedTime === 'string' ? estimatedTime : '',
+          availableStartDate: typeof availableStartDate === 'string' ? availableStartDate : '',
+          warrantyInfo: typeof warrantyInfo === 'string' ? warrantyInfo : '',
+          termsAndConditions: typeof termsAndConditions === 'string' ? termsAndConditions : '',
+          status: 'PENDING',
+          createdAt: now
+        };
+
+        tx.set(quoteRef, newQuote);
+        tx.update(requestRef, {
+          quotesCount: Number(serviceRequest.quotesCount || 0) + 1,
+          status: 'QUOTES_RECEIVED'
+        });
+        return newQuote;
+      });
+
+      return res.status(201).json({ success: true, quote });
+    } catch (err: any) {
+      const code = err?.message || 'QUOTE_SUBMIT_ERROR';
+      const map: Record<string, number> = {
+        INVALID_REQUEST_ID: 400,
+        QUOTE_ALREADY_EXISTS: 409,
+        PROFESSIONAL_ROLE_REQUIRED: 403,
+        REQUEST_NOT_FOUND: 404,
+        REQUEST_NOT_OPEN_FOR_QUOTES: 409,
+        FORBIDDEN_REQUEST_CONTEXT: 403,
+        DUPLICATE_QUOTE: 409
+      };
+      return res.status(map[code] || 500).json({
+        success: false,
+        error: map[code] ? `No se puede enviar el presupuesto: ${code}.` : "Error interno al enviar el presupuesto.",
+        code
+      });
+    }
+  });
+
   // Creates the authoritative transaction when a client accepts a quote.
   // The financial values are calculated server-side; the browser cannot set the fee.
   app.post("/api/transactions/create", rateLimiter, async (req: Request, res: Response) => {
@@ -806,9 +919,24 @@ Responde en JSON con:
         if (!requestSnap.exists) throw new Error('REQUEST_NOT_FOUND');
         const serviceRequest = requestSnap.data();
         if (!serviceRequest || serviceRequest.clientId !== auth.userId) throw new Error('FORBIDDEN_REQUEST_OWNER');
+        const clientRef = firestore.collection('users').doc(auth.userId);
+        const clientSnap = await tx.get(clientRef);
+        if (!clientSnap.exists || clientSnap.data()?.role !== 'USER') throw new Error('CLIENT_ROLE_REQUIRED');
+        if (serviceRequest.status !== 'REQUEST_CREATED' && serviceRequest.status !== 'QUOTES_RECEIVED') {
+          throw new Error('REQUEST_NOT_CONTRACTABLE');
+        }
         if (quote.status !== 'PENDING') throw new Error('QUOTE_NOT_AVAILABLE');
         if (serviceRequest.status === 'CANCELLED' || serviceRequest.status === 'COMPLETED' || serviceRequest.status === 'CLOSED') {
           throw new Error('REQUEST_NOT_CONTRACTABLE');
+        }
+
+        const professionalRef = firestore.collection('users').doc(String(quote.professionalId));
+        const professionalSnap = await tx.get(professionalRef);
+        if (!professionalSnap.exists || professionalSnap.data()?.role !== 'PROFESSIONAL') {
+          throw new Error('PROFESSIONAL_ROLE_REQUIRED');
+        }
+        if (serviceRequest.assignedProfessionalId && serviceRequest.assignedProfessionalId !== quote.professionalId) {
+          throw new Error('PROFESSIONAL_CONTEXT_MISMATCH');
         }
 
         const connectionRef = firestore.collection('mercadopago_connections').doc(String(quote.professionalId));
@@ -857,9 +985,93 @@ Responde en JSON con:
         QUOTE_NOT_AVAILABLE: 409,
         REQUEST_NOT_CONTRACTABLE: 409,
         INVALID_QUOTE_AMOUNT: 422,
-        PROFESSIONAL_MERCADO_PAGO_NOT_CONNECTED: 409
+        PROFESSIONAL_MERCADO_PAGO_NOT_CONNECTED: 409,
+        PROFESSIONAL_ROLE_REQUIRED: 403,
+        PROFESSIONAL_CONTEXT_MISMATCH: 409,
+        CLIENT_ROLE_REQUIRED: 403
       };
       return res.status(map[code] || 500).json({ success: false, error: map[code] ? `No se puede crear la contratación: ${code}.` : "Error interno al crear la contratación.", code });
+    }
+  });
+
+  app.post("/api/jobs/complete", rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const auth = await verifyAuthToken(req);
+      if (!auth.isAuthenticated || !auth.userId) {
+        return res.status(401).json({ success: false, error: "Se requiere autenticación válida.", code: "UNAUTHORIZED" });
+      }
+
+      const { requestId } = req.body || {};
+      if (!requestId || typeof requestId !== 'string') {
+        return res.status(400).json({ success: false, error: "requestId es obligatorio.", code: "INVALID_REQUEST_ID" });
+      }
+
+      const firestore = await getAdminDb();
+      const requestRef = firestore.collection('service_requests').doc(requestId);
+      const requestSnap = await requestRef.get();
+      if (!requestSnap.exists) return res.status(404).json({ success: false, error: "Solicitud no encontrada.", code: "REQUEST_NOT_FOUND" });
+
+      const serviceRequest = requestSnap.data() || {};
+      const transactionSnap = await firestore.collection('transactions')
+        .where('serviceRequestId', '==', requestId)
+        .limit(1)
+        .get();
+      if (transactionSnap.empty) {
+        return res.status(409).json({ success: false, error: "No existe una transacción asociada al trabajo.", code: "TRANSACTION_NOT_FOUND" });
+      }
+
+      const transactionDoc = transactionSnap.docs[0];
+      const transaction = transactionDoc.data() || {};
+      const quoteRef = firestore.collection('quotes').doc(String(transaction.quoteId || ''));
+      const [quoteSnap, professionalSnap] = await Promise.all([
+        quoteRef.get(),
+        firestore.collection('users').doc(auth.userId).get()
+      ]);
+
+      if (!professionalSnap.exists || professionalSnap.data()?.role !== 'PROFESSIONAL') {
+        return res.status(403).json({ success: false, error: "Solo un profesional puede completar trabajos.", code: "PROFESSIONAL_ROLE_REQUIRED" });
+      }
+      if (serviceRequest.clientId === auth.userId) {
+        return res.status(403).json({ success: false, error: "El cliente no puede completar este trabajo.", code: "FORBIDDEN" });
+      }
+      if (!quoteSnap.exists) return res.status(404).json({ success: false, error: "Presupuesto no encontrado.", code: "QUOTE_NOT_FOUND" });
+
+      const quote = quoteSnap.data() || {};
+      if (quote.requestId !== requestId || transaction.serviceRequestId !== requestId || transaction.quoteId !== quoteSnap.id) {
+        return res.status(409).json({ success: false, error: "La relación entre solicitud, presupuesto y transacción no es válida.", code: "WORK_RELATIONSHIP_INVALID" });
+      }
+      if (quote.professionalId !== auth.userId || transaction.professionalId !== auth.userId) {
+        return res.status(403).json({ success: false, error: "No estás autorizado a completar este trabajo.", code: "FORBIDDEN" });
+      }
+      if (quote.status !== 'ACCEPTED') return res.status(409).json({ success: false, error: "El presupuesto no está aceptado.", code: "QUOTE_NOT_ACCEPTED" });
+      if (transaction.status !== 'PAID') return res.status(409).json({ success: false, error: "El pago del trabajo no está confirmado.", code: "PAYMENT_NOT_CONFIRMED" });
+      if (serviceRequest.status === 'REVIEW_PENDING') return res.status(409).json({ success: false, error: "El trabajo ya fue completado.", code: "JOB_ALREADY_COMPLETED" });
+      if (serviceRequest.status !== 'PROFESSIONAL_SELECTED') {
+        return res.status(409).json({ success: false, error: "La solicitud no está en un estado válido para completarse.", code: "INVALID_JOB_STATE" });
+      }
+
+      await firestore.runTransaction(async (tx: any) => {
+        const currentRequestSnap = await tx.get(requestRef);
+        const currentTransactionSnap = await tx.get(transactionDoc.ref);
+        const currentQuoteSnap = await tx.get(quoteRef);
+        if (!currentRequestSnap.exists || !currentTransactionSnap.exists || !currentQuoteSnap.exists) throw new Error('RESOURCE_NOT_FOUND');
+        const currentRequest = currentRequestSnap.data() || {};
+        const currentTransaction = currentTransactionSnap.data() || {};
+        const currentQuote = currentQuoteSnap.data() || {};
+        if (currentRequest.status !== 'PROFESSIONAL_SELECTED' || currentTransaction.status !== 'PAID' || currentQuote.status !== 'ACCEPTED') {
+          throw new Error('INVALID_JOB_STATE');
+        }
+        tx.update(requestRef, { status: 'REVIEW_PENDING' });
+      });
+
+      return res.json({ success: true, requestId, status: 'REVIEW_PENDING' });
+    } catch (err: any) {
+      const code = err?.message || 'JOB_COMPLETION_ERROR';
+      const map: Record<string, number> = {
+        RESOURCE_NOT_FOUND: 404,
+        INVALID_JOB_STATE: 409
+      };
+      return res.status(map[code] || 500).json({ success: false, error: map[code] ? `No se puede completar el trabajo: ${code}.` : "Error interno al completar el trabajo.", code });
     }
   });
 

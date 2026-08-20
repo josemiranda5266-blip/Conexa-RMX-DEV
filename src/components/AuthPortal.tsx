@@ -72,7 +72,9 @@ export const AuthPortal: React.FC = () => {
             activeMode: selectedRole,
             isProfessional: selectedRole === 'PROFESSIONAL',
             hasProfessionalProfile: selectedRole === 'PROFESSIONAL',
-            professionName: selectedRole === 'PROFESSIONAL' ? 'Profesional Contratista' : undefined,
+            ...(selectedRole === 'PROFESSIONAL'
+              ? { professionName: 'Profesional Contratista' }
+              : {}),
             location: {
               city: 'Santiago del Estero',
               province: 'Santiago del Estero',
@@ -155,7 +157,9 @@ export const AuthPortal: React.FC = () => {
             activeMode: selectedRole,
             isProfessional: selectedRole === 'PROFESSIONAL',
             hasProfessionalProfile: selectedRole === 'PROFESSIONAL',
-            professionName: selectedRole === 'PROFESSIONAL' ? 'Profesional Contratista' : undefined,
+            ...(selectedRole === 'PROFESSIONAL'
+              ? { professionName: 'Profesional Contratista' }
+              : {}),
             location: {
               city: 'Santiago del Estero',
               province: 'Santiago del Estero',
