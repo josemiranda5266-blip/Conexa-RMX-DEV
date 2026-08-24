@@ -15,7 +15,6 @@ export interface MatchedProfessional {
   matchReasons: string[];
   scoreBreakdown?: { category: string; location: string; availability: string; reputation: string; verification: string; experience: string; responseRate: string };
 }
-
 export interface UserProfile {
   id: string; name: string; email: string; phonePrivate: string; avatar: string; role: Role; joinedDate: string; location: LocationData;
   isIdentityVerified: boolean; identityVerificationStatus: VerificationStatus; identityDocUrl?: string; isBlocked?: boolean;
@@ -25,39 +24,14 @@ export interface UserProfile {
   rating: number; reviewCount: number; jobsCompleted: number; trustScore: number; availabilityStatus: 'DISPONIBLE' | 'OCUPADO' | 'EN_CONSULTA';
   hourlyRateArs?: number; servicesOffered?: ServiceItem[]; portfolioImages?: string[]; workingHours?: string; isProSubscriber?: boolean; isFeatured?: boolean; isDemoData?: boolean;
 }
-
-export interface Review {
-  id: string; jobId?: string; clientId: string; clientName: string; clientAvatar: string; professionalId: string; createdAt: string; comment: string;
-  overallRating: number; qualityRating: number; punctualityRating: number; treatmentRating: number; priceRating: number; complianceRating: number; isVerifiedJob: boolean; isReported?: boolean; isDemoData?: boolean;
-}
-
-export interface ServiceRequest {
-  id: string; clientId: string; clientName: string; clientAvatar: string; title: string; category: string; professionName: string; description: string; images?: string[];
-  approxLocation: string; preferredDate: string; preferredTimeSlot: string; estimatedBudgetArs?: number; urgency: 'NORMAL' | 'ALTA' | 'URGENTE'; status: JobStatus; createdAt: string; quotesCount: number; isDemoData?: boolean;
-}
-
-export interface Quote {
-  id: string; requestId: string; clientId?: string; professionalId: string; professionalName: string; professionalAvatar: string; professionalRating: number; professionalVerified: boolean;
-  priceArs: number; description: string; materialsIncluded: string; estimatedTime: string; availableStartDate: string; warrantyInfo: string; termsAndConditions: string;
-  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'MODIFICATION_REQUESTED'; createdAt: string; isDemoData?: boolean;
-}
-
+export interface Review { id: string; jobId?: string; clientId: string; clientName: string; clientAvatar: string; professionalId: string; createdAt: string; comment: string; overallRating: number; qualityRating: number; punctualityRating: number; treatmentRating: number; priceRating: number; complianceRating: number; isVerifiedJob: boolean; isReported?: boolean; isDemoData?: boolean; }
+export interface ServiceRequest { id: string; clientId: string; clientName: string; clientAvatar: string; title: string; category: string; professionName: string; description: string; images?: string[]; approxLocation: string; preferredDate: string; preferredTimeSlot: string; estimatedBudgetArs?: number; urgency: 'NORMAL' | 'ALTA' | 'URGENTE'; status: JobStatus; createdAt: string; quotesCount: number; isDemoData?: boolean; }
+export interface Quote { id: string; requestId: string; clientId?: string; professionalId: string; professionalName: string; professionalAvatar: string; professionalRating: number; professionalVerified: boolean; priceArs: number; description: string; materialsIncluded: string; estimatedTime: string; availableStartDate: string; warrantyInfo: string; termsAndConditions: string; status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'MODIFICATION_REQUESTED'; createdAt: string; isDemoData?: boolean; }
 export type TransactionStatus = 'CREATED' | 'PAYMENT_PENDING' | 'CHECKOUT_CREATED' | 'PAID' | 'SERVICE_IN_PROGRESS' | 'SERVICE_COMPLETED' | 'SETTLED' | 'REFUNDED' | 'CANCELLED' | 'CHARGEBACK';
-export interface Transaction {
-  id: string; serviceRequestId: string; quoteId: string; clientId: string; professionalId: string; amountArs: number; currency: 'ARS'; platformFeePercent: number;
-  platformFeeArs: number; professionalAmountArs: number; status: TransactionStatus; paymentStatus?: string; mercadoPagoPreferenceId?: string; mercadoPagoPaymentId?: string;
-  mercadoPagoInitPoint?: string | null; mercadoPagoSandboxInitPoint?: string | null; createdAt: string; paidAt?: string; reviewSubmittedAt?: string;
-}
-
-export interface RadarOpportunity {
-  id: string; source: string; sourceType: OpportunitySourceType; environment: 'simulation' | 'production'; is_test: boolean; externalReference?: string;
-  category: string; subcategory: string; description: string; city: string; province: string; neighborhood: string; urgency: string;
-  intentScore: number; confidenceScore: number; status: string; detectedAt: string; lastUpdated: string; assignedOperator: string;
-  matchedProfessionals: MatchedProfessional[]; conversionStatus: string; consentStatus: string; contactMethod: string; aiAnalysis?: any;
-}
-
+export interface Transaction { id: string; serviceRequestId: string; quoteId: string; clientId: string; professionalId: string; amountArs: number; currency: 'ARS'; platformFeePercent: number; platformFeeArs: number; professionalAmountArs: number; status: TransactionStatus; paymentStatus?: string; mercadoPagoPreferenceId?: string; mercadoPagoPaymentId?: string; mercadoPagoInitPoint?: string | null; mercadoPagoSandboxInitPoint?: string | null; createdAt: string; paidAt?: string; reviewSubmittedAt?: string; }
+export interface RadarOpportunity { id: string; source: string; sourceType: OpportunitySourceType; environment: 'simulation' | 'production'; is_test: boolean; externalReference?: string; category: string; subcategory: string; description: string; city: string; province: string; neighborhood: string; urgency: string; intentScore: number; confidenceScore: number; status: string; detectedAt: string; lastUpdated: string; assignedOperator: string; matchedProfessionals: MatchedProfessional[]; conversionStatus: string; consentStatus: string; contactMethod: string; aiAnalysis?: any; }
 export interface Conversation { id: string; participantIds: string[]; lastMessage?: string; lastMessageTime?: string; [key: string]: any; }
-export interface Message { id: string; conversationId: string; senderId: string; recipientId: string; text?: string; content?: string; createdAt?: string; [key: string]: any; }
+export interface Message { id: string; conversationId: string; senderId: string; recipientId?: string; text?: string; content?: string; createdAt?: string; [key: string]: any; }
 export interface UserReport { id: string; reporterId: string; reportedUserId?: string; reason?: string; description?: string; createdAt?: string; [key: string]: any; }
 export interface VerificationRequest { id: string; userId: string; type: 'IDENTITY' | 'PROFESSIONAL'; documentName: string; documentUrl?: string; status: VerificationStatus; createdAt: string; [key: string]: any; }
 export interface NotificationItem { id: string; userId?: string; title?: string; message?: string; read?: boolean; createdAt?: string; [key: string]: any; }
