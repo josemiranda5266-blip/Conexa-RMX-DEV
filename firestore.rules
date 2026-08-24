@@ -1,98 +1,42 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
+    match /{document=**} { allow read, write: if false; }
     function signedIn() { return request.auth != null; }
     function owner(uid) { return signedIn() && request.auth.uid == uid; }
-    function admin() {
-      return signedIn() && (
-        request.auth.token.role == 'ADMIN' ||
-        request.auth.token.role == 'SUPER_ADMIN'
-      );
-    }
-    function immutableUserFields() {
-      return ['role', 'isIdentityVerified', 'isProfessionalVerified', 'rating', 'reviewCount', 'jobsCompleted', 'trustScore'];
-    }
-
+    function admin() { return signedIn() && (request.auth.token.role == 'ADMIN' || request.auth.token.role == 'SUPER_ADMIN'); }
+    function immutableUserFields() { return ['role', 'isIdentityVerified', 'isProfessionalVerified', 'rating', 'reviewCount', 'jobsCompleted', 'trustScore']; }
     match /users/{userId} {
       allow read: if signedIn();
-      allow create: if owner(userId)
-        && (!request.resource.data.keys().hasAny(['role']) || request.resource.data.role == 'USER')
-        && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode in ['CLIENT','PROFESSIONAL']);
-      allow update: if admin() || (
-        owner(userId)
-        && request.resource.data.diff(resource.data).affectedKeys().hasNone(immutableUserFields())
-        && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode in ['CLIENT','PROFESSIONAL'])
-      );
+      allow create: if owner(userId) && (!request.resource.data.keys().hasAny(['role']) || request.resource.data.role == 'USER') && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode in ['CLIENT','PROFESSIONAL']);
+      allow update: if admin() || (owner(userId) && request.resource.data.diff(resource.data).affectedKeys().hasNone(immutableUserFields()) && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode in ['CLIENT','PROFESSIONAL']));
       allow delete: if admin();
       match /private/info { allow read, write: if owner(userId) || admin(); }
     }
-
     match /service_requests/{requestId} {
-      allow read: if signedIn() && (
-        resource.data.clientId == request.auth.uid ||
-        resource.data.status in ['REQUEST_CREATED', 'QUOTES_RECEIVED'] ||
-        (resource.data.assignedProfessionalId != null && resource.data.assignedProfessionalId == request.auth.uid) ||
-        (resource.data.biddingProfessionalIds != null && request.auth.uid in resource.data.biddingProfessionalIds) ||
-        admin()
-      );
+      allow read: if signedIn() && (resource.data.clientId == request.auth.uid || resource.data.status in ['REQUEST_CREATED', 'QUOTES_RECEIVED'] || (resource.data.assignedProfessionalId != null && resource.data.assignedProfessionalId == request.auth.uid) || (resource.data.biddingProfessionalIds != null && request.auth.uid in resource.data.biddingProfessionalIds) || admin());
       allow create: if signedIn() && request.resource.data.clientId == request.auth.uid;
-      allow update: if admin() || (
-        signedIn() && resource.data.clientId == request.auth.uid
-        && request.resource.data.clientId == resource.data.clientId
-      );
+      allow update: if admin() || (signedIn() && resource.data.clientId == request.auth.uid && request.resource.data.clientId == resource.data.clientId);
       allow delete: if admin() || (signedIn() && resource.data.clientId == request.auth.uid);
     }
-
     match /quotes/{quoteId} {
-      allow read: if signedIn() && (
-        resource.data.professionalId == request.auth.uid ||
-        resource.data.clientId == request.auth.uid ||
-        admin()
-      );
+      allow read: if signedIn() && (resource.data.professionalId == request.auth.uid || resource.data.clientId == request.auth.uid || admin());
       allow create, update, delete: if admin();
     }
-
     match /transactions/{transactionId} {
       allow read: if signedIn() && (resource.data.clientId == request.auth.uid || resource.data.professionalId == request.auth.uid || admin());
       allow create, update, delete: if admin();
     }
-
-    match /mercadopago_connections/{userId} {
-      allow read: if owner(userId) || admin();
-      allow create, update, delete: if false;
-    }
-
-    match /conversations/{conversationId} {
-      allow read: if signedIn() && (request.auth.uid in resource.data.participantIds || admin());
-      allow create: if signedIn() && request.auth.uid in request.resource.data.participantIds;
-      allow update: if signedIn() && (request.auth.uid in resource.data.participantIds || admin());
-    }
-
-    match /messages/{messageId} {
-      allow read: if signedIn() && (request.auth.uid == resource.data.senderId || request.auth.uid == resource.data.recipientId || (resource.data.participantIds != null && request.auth.uid in resource.data.participantIds) || admin());
-      allow create: if signedIn() && request.resource.data.senderId == request.auth.uid;
-    }
-
-    match /reports/{reportId} {
-      allow create: if signedIn() && request.resource.data.reporterId == request.auth.uid;
-      allow read, update, delete: if admin();
-    }
-
+    match /mercadopago_connections/{userId} { allow read: if owner(userId) || admin(); allow create, update, delete: if false; }
+    match /conversations/{conversationId} { allow read: if signedIn() && (request.auth.uid in resource.data.participantIds || admin()); allow create: if signedIn() && request.auth.uid in request.resource.data.participantIds; allow update: if signedIn() && (request.auth.uid in resource.data.participantIds || admin()); }
+    match /messages/{messageId} { allow read: if signedIn() && (request.auth.uid == resource.data.senderId || request.auth.uid == resource.data.recipientId || (resource.data.participantIds != null && request.auth.uid in resource.data.participantIds) || admin()); allow create: if signedIn() && request.resource.data.senderId == request.auth.uid; }
+    match /reports/{reportId} { allow create: if signedIn() && request.resource.data.reporterId == request.auth.uid; allow read, update, delete: if admin(); }
     match /reviews/{reviewId} {
       allow read: if signedIn();
-      allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
-      allow update, delete: if admin() || (signedIn() && resource.data.authorId == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.clientId == request.auth.uid;
+      allow update, delete: if admin() || (signedIn() && resource.data.clientId == request.auth.uid);
     }
-
-    match /verifications/{verifId} {
-      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
-      allow read, update, delete: if admin() || (signedIn() && resource.data.userId == request.auth.uid);
-    }
-
+    match /verifications/{verifId} { allow create: if signedIn() && request.resource.data.userId == request.auth.uid; allow read, update, delete: if admin() || (signedIn() && resource.data.userId == request.auth.uid); }
     match /radar_opportunities/{opportunityId} { allow read, create, update, delete: if admin(); }
     match /admin_audit_logs/{logId} { allow read, create: if admin(); allow update, delete: if false; }
     match /beta_config/{configId} { allow read, write: if admin(); }
