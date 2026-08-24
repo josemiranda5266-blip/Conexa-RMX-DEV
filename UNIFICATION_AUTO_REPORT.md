@@ -57,3 +57,5 @@
 - submitQuote routed through authenticated backend authority
 - completeJob routed through authenticated backend authority
 - backend quote validation and job-assignment checks added
+- quote client reference derived server-side for secure client reads
+- Firestore request visibility aligned with REQUEST_CREATED/QUOTES_RECEIVED lifecycle
