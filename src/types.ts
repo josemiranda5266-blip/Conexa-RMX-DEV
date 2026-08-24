@@ -2,7 +2,7 @@ export type Role = 'USER' | 'PROFESSIONAL' | 'MODERATOR' | 'ADMIN' | 'SUPER_ADMI
 
 export type VerificationStatus = 'NONE' | 'PENDING' | 'VERIFIED' | 'REJECTED';
 
-export type JobStatus = 
+export type JobStatus =
   | 'REQUEST_CREATED'
   | 'QUOTES_RECEIVED'
   | 'PROFESSIONAL_SELECTED'
@@ -35,13 +35,10 @@ export interface UserProfile {
   identityVerificationStatus: VerificationStatus;
   identityDocUrl?: string;
   isBlocked?: boolean;
-
-  // Mode is a UI/account preference, not an authorization mechanism.
   activeMode?: 'CLIENT' | 'PROFESSIONAL';
   hasClientProfile?: boolean;
   hasProfessionalProfile?: boolean;
   workHours?: string;
-
   isProfessional?: boolean;
   businessName?: string;
   professionId?: string;
@@ -53,43 +50,23 @@ export interface UserProfile {
   professionalVerificationStatus?: VerificationStatus;
   matriculaOrDegree?: string;
   verificationDocUrl?: string;
-
   rating: number;
   reviewCount: number;
   jobsCompleted: number;
   trustScore: number;
   availabilityStatus: 'DISPONIBLE' | 'OCUPADO' | 'EN_CONSULTA';
-
   hourlyRateArs?: number;
   servicesOffered?: ServiceItem[];
   portfolioImages?: string[];
   workingHours?: string;
-
   isProSubscriber?: boolean;
   isFeatured?: boolean;
   isDemoData?: boolean;
 }
 
-export interface ServiceItem {
-  id: string;
-  title: string;
-  description: string;
-  approxPriceArs?: number;
-}
-
-export interface Category {
-  id: string;
-  name: string;
-  iconName: string;
-  description: string;
-}
-
-export interface Profession {
-  id: string;
-  categoryId: string;
-  name: string;
-  popularSpecialties: string[];
-}
+export interface ServiceItem { id: string; title: string; description: string; approxPriceArs?: number; }
+export interface Category { id: string; name: string; iconName: string; description: string; }
+export interface Profession { id: string; categoryId: string; name: string; popularSpecialties: string[]; }
 
 export interface Review {
   id: string;
@@ -156,6 +133,7 @@ export interface Quote {
 export type TransactionStatus =
   | 'CREATED'
   | 'PAYMENT_PENDING'
+  | 'CHECKOUT_CREATED'
   | 'PAID'
   | 'SERVICE_IN_PROGRESS'
   | 'SERVICE_COMPLETED'
@@ -180,16 +158,15 @@ export interface Transaction {
   status: TransactionStatus;
   mercadoPagoPaymentId?: string;
   mercadoPagoPreferenceId?: string;
+  mercadoPagoInitPoint?: string | null;
+  mercadoPagoSandboxInitPoint?: string | null;
   createdAt: string;
   paidAt?: string;
   completedAt?: string;
   refundedAt?: string;
 }
 
-export interface SharedContactState {
-  phoneSharedWithUserIds: string[];
-  addressSharedWithUserIds: string[];
-}
+export interface SharedContactState { phoneSharedWithUserIds: string[]; addressSharedWithUserIds: string[]; }
 
 export interface Message {
   id: string;
@@ -206,14 +183,7 @@ export interface Message {
 export interface Conversation {
   id: string;
   participantIds: [string, string];
-  otherUser: {
-    id: string;
-    name: string;
-    avatar: string;
-    profession?: string;
-    isIdentityVerified?: boolean;
-    isProfessionalVerified?: boolean;
-  };
+  otherUser: { id: string; name: string; avatar: string; profession?: string; isIdentityVerified?: boolean; isProfessionalVerified?: boolean; };
   lastMessage: string;
   lastMessageTime: string;
   unreadCount: number;
@@ -240,145 +210,13 @@ export interface VerificationRequest {
   id: string;
   userId: string;
   userName: string;
-  userRole: Role;
+  userRole?: Role;
   type: 'IDENTITY' | 'PROFESSIONAL';
   documentName: string;
   documentUrl: string;
   status: VerificationStatus;
   createdAt: string;
-}
-
-export interface NotificationItem {
-  id: string;
-  userId: string;
-  title: string;
-  body: string;
-  type: 'MESSAGE' | 'REQUEST' | 'QUOTE' | 'VERIFICATION' | 'REVIEW' | 'SYSTEM';
-  read: boolean;
-  createdAt: string;
-  targetId?: string;
-}
-
-export interface InviteCode {
-  id: string;
-  code: string;
-  maxUses: number;
-  usedCount: number;
-  expiresAt: string;
-  userRole: Role;
-  isActive: boolean;
-  createdAt: string;
-  createdForNote?: string;
-}
-
-export interface FeedbackItem {
-  id: string;
-  userId: string;
-  userName: string;
-  userRole: Role;
-  category: 'LIKE' | 'PROBLEM' | 'BUG' | 'SUGGESTION';
-  comment: string;
-  createdAt: string;
-  status: 'NEW' | 'REVIEWED' | 'RESOLVED';
-}
-
-export interface AnalyticsEvent {
-  id: string;
-  eventName: string;
-  userId: string;
-  timestamp: string;
-  context?: Record<string, any>;
-}
-
-export interface BetaConfig {
-  isBetaActive: boolean;
-  requireInviteCode: boolean;
-  pilotCity: string;
-  allowNewRegistrations: boolean;
-}
-
-export type OpportunityIntent = 'LOW' | 'MEDIUM' | 'HIGH';
-export type OpportunityUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'EMERGENCY';
-export type OpportunityStatus = 'NEW' | 'ANALYZED' | 'QUALIFIED' | 'READY_TO_CONTACT' | 'CONTACTED' | 'RESPONDED' | 'REGISTERED' | 'MATCHED' | 'SERVICE_REQUESTED' | 'CONVERTED' | 'CLOSED' | 'IGNORED';
-export type OpportunitySourceType = 'API_AUTORIZADA' | 'WEBHOOK' | 'FORMULARIO_CONEXA' | 'META_INTEGRATION_OFFICIAL' | 'CANAL_PROPIO' | 'CAMPAÑA_MARKETING' | 'REFERIDOS' | 'FUENTE_PUBLICA_PERMITIDA';
-export type ContactMethod = 'CANAL_OFICIAL' | 'RESPUESTA_PUBLICA_PERMITIDA' | 'FORMULARIO_LANDING' | 'WHATSAPP_API' | 'EMAIL';
-export type ApprovalMode = 'AUTOMÁTICO' | 'ASISTIDO' | 'MANUAL';
-
-export interface MatchedProfessional {
-  professionalId: string;
-  name: string;
-  professionName: string;
-  avatar: string;
-  matchScore: number;
-  trustScore: number;
-  locationApprox: string;
-  isVerified: boolean;
-  matchReasons: string[];
-}
-
-export interface RadarOpportunity {
-  id: string;
-  source: string;
-  sourceType: OpportunitySourceType;
-  externalReference?: string;
-  category: string;
-  subcategory: string;
-  description: string;
-  city: string;
-  province: string;
-  neighborhood?: string;
-  urgency: OpportunityUrgency;
-  intentScore: number;
-  confidenceScore: number;
-  status: OpportunityStatus;
-  detectedAt: string;
-  lastUpdated: string;
-  assignedOperator?: string;
-  matchedProfessionals: MatchedProfessional[];
-  conversionStatus: 'NOT_STARTED' | 'PENDING' | 'CONVERTED' | 'FAILED';
-  consentStatus: 'PENDING_CONSENT' | 'CONSENT_GRANTED' | 'NOT_REQUIRED';
-  contactMethod: ContactMethod;
-  notes?: string;
-  environment?: 'simulation' | 'production';
-  is_test?: boolean;
-  aiAnalysis: {
-    category: string;
-    subcategory: string;
-    intent: OpportunityIntent;
-    urgency: OpportunityUrgency;
-    intentScore: number;
-    confidenceScore: number;
-    spamRiskScore?: number;
-    reasoning: string;
-    recommendedResponseText?: string;
-  };
-  attribution?: {
-    source: string;
-    campaign?: string;
-    opportunityId: string;
-  };
-}
-
-export interface RadarStats {
-  totalDetected: number;
-  newOpportunities: number;
-  highIntentCount: number;
-  contactedCount: number;
-  convertedUsers: number;
-  requestsGenerated: number;
-  servicesCompleted: number;
-  conversionRate: number;
-  detectionRatePerDay: number;
-  qualificationRate: number;
-  contactRate: number;
-  responseRate: number;
-  registrationRate: number;
-  matchRate: number;
-  serviceRequestRate: number;
-  costPerAcquisitionArs: number;
-  revenuePerSourceArs: number;
-  byCategory: Record<string, number>;
-  byLocation: Record<string, number>;
-  bySource: Record<string, number>;
-  growthInsights: string[];
+  reviewedAt?: string;
+  reviewerId?: string;
+  rejectionReason?: string;
 }
