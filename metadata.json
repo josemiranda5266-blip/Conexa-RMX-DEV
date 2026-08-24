@@ -1,0 +1,10 @@
+{
+  "name": "CONEXA Rmx",
+  "description": "Red privada de conexión de personas, profesionales y servicios locales con protección de teléfono y ubicación.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

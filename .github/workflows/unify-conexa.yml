@@ -1,0 +1,47 @@
+name: Conexa unified build
+
+on:
+  push:
+    branches:
+      - unification/conexa-unified
+  pull_request:
+    branches:
+      - unification/conexa-unified
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: TypeScript check
+        run: npm run lint
+
+      - name: Production build
+        run: npm run build
+
+      - name: Validate repository hygiene
+        run: |
+          test ! -f .env
+          test ! -d Conxa.rmk-main
+          test ! -d Conexa.rmk-main
+          if grep -R -n --exclude-dir=node_modules --exclude-dir=.git --exclude='*.lock' -E 'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}' .; then
+            echo 'Potential secret material detected in repository.'
+            exit 1
+          fi
