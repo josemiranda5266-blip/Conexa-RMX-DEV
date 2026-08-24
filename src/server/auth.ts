@@ -2,7 +2,7 @@ import crypto from "crypto";
 import type { Request } from "express";
 import type { Auth } from "firebase-admin/auth";
 import { getAuth } from "firebase-admin/auth";
-import { isApplicationRole, type ApplicationRole } from "../domain/authPolicy.js";
+import { normalizeRole, type AppRole } from "../domain/authPolicy.js";
 
 export type FirebaseAdminProvider = () => any | null;
 
@@ -10,7 +10,7 @@ export type VerifiedIdentity = {
   isAuthenticated: true;
   isAdmin: boolean;
   userId: string;
-  role: ApplicationRole;
+  role: AppRole;
 };
 
 export type AuthFailure = {
@@ -57,9 +57,10 @@ export async function verifyUserAuthToken(
   try {
     const decoded = await auth.verifyIdToken(token);
     const roleClaim = decoded.role;
-    const role = isApplicationRole(roleClaim) ? roleClaim : "USER";
+    const role = normalizeRole(roleClaim);
 
-    if (roleClaim !== undefined && !isApplicationRole(roleClaim)) {
+    // Unknown role claims are rejected instead of silently becoming USER.
+    if (roleClaim !== undefined && roleClaim !== role) {
       return { isAuthenticated: false, isAdmin: false, errorReason: "INVALID_APPLICATION_ROLE" };
     }
 
