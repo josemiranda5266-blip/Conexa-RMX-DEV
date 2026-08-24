@@ -9,11 +9,11 @@ export interface ServiceItem { id: string; title: string; description: string; a
 export interface Category { id: string; name: string; iconName: string; description: string; }
 export interface Profession { id: string; categoryId: string; name: string; popularSpecialties: string[]; }
 export interface MatchedProfessional {
-  rank: number; rankTag: string; professionalId: string; name: string; professionName: string; avatar: string;
-  matchScore: number; trustScore: number; locationApprox: string; phoneProtected: string;
-  isVerified: boolean; isIdentityVerified: boolean; isProfessionalVerified: boolean;
+  rank?: number; rankTag?: string; professionalId: string; name: string; professionName: string; avatar: string;
+  matchScore: number; trustScore: number; locationApprox: string; phoneProtected?: string;
+  isVerified: boolean; isIdentityVerified?: boolean; isProfessionalVerified?: boolean;
   matchReasons: string[];
-  scoreBreakdown: { category: string; location: string; availability: string; reputation: string; verification: string; experience: string; responseRate: string };
+  scoreBreakdown?: { category: string; location: string; availability: string; reputation: string; verification: string; experience: string; responseRate: string };
 }
 
 export interface UserProfile {
@@ -50,7 +50,7 @@ export interface Transaction {
 }
 
 export interface RadarOpportunity {
-  id: string; source: string; sourceType: OpportunitySourceType; environment: 'simulation' | 'production'; is_test: boolean;
+  id: string; source: string; sourceType: OpportunitySourceType; environment: 'simulation' | 'production'; is_test: boolean; externalReference?: string;
   category: string; subcategory: string; description: string; city: string; province: string; neighborhood: string; urgency: string;
   intentScore: number; confidenceScore: number; status: string; detectedAt: string; lastUpdated: string; assignedOperator: string;
   matchedProfessionals: MatchedProfessional[]; conversionStatus: string; consentStatus: string; contactMethod: string; aiAnalysis?: any;
