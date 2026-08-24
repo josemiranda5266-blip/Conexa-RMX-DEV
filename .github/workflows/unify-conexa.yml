@@ -46,6 +46,9 @@ jobs:
           git commit -m 'security: apply deterministic unified hardening'
           git push
 
+      - name: Authorization regression test
+        run: npm run test:security
+
       - name: TypeScript check
         run: npm run lint
 
