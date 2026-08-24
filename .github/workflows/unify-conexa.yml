@@ -24,7 +24,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -41,7 +41,26 @@ jobs:
           test ! -f .env
           test ! -d Conxa.rmk-main
           test ! -d Conexa.rmk-main
-          if grep -R -n --exclude-dir=node_modules --exclude-dir=.git --exclude='*.lock' -E 'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}' .; then
-            echo 'Potential secret material detected in repository.'
+          if git ls-files -z | grep -z -E '\.env($|\.)' | grep -z -v -E '^\.env\.example$' >/dev/null; then
+            echo 'Unexpected environment file tracked in repository.'
             exit 1
           fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          files = [Path(p) for p in __import__('subprocess').check_output(['git','ls-files','-z']).decode().split('\0') if p]
+          pem = re.compile(rb'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\s*([A-Za-z0-9+/=\r\n]{200,})\s*-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----')
+          token = re.compile(rb'(?:AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,})')
+          findings = []
+          for path in files:
+              try:
+                  data = path.read_bytes()
+              except OSError:
+                  continue
+              if pem.search(data) or token.search(data):
+                  findings.append(str(path))
+          if findings:
+              print('Potential secret material detected in tracked source files:')
+              print('\n'.join(findings))
+              raise SystemExit(1)
+          PY
