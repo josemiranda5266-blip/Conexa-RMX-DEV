@@ -1,17 +1,12 @@
 name: Conexa unified build
-
 on:
   push:
-    branches:
-      - unification/conexa-unified
+    branches: [unification/conexa-unified]
   pull_request:
-    branches:
-      - unification/conexa-unified
+    branches: [unification/conexa-unified]
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -20,59 +15,40 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
+      - run: npm ci --no-audit --no-fund
       - name: Apply deterministic hardening
         run: node scripts/harden-unified.mjs
-
       - name: Apply payment hardening
         run: node scripts/harden-payments.mjs
-
       - name: Authorization regression test
         run: npm run test:security
-
       - name: Firestore rules structural test
-        run: node scripts/validate-firestore-rules.mjs
-
+        run: npm run test:rules
+      - name: Unified frontend/backend contract test
+        run: node scripts/validate-unified-contracts.mjs
       - name: TypeScript check
         run: npm run lint
-
       - name: Production build
         run: npm run build
-
       - name: Validate repository hygiene
         run: |
           test ! -f .env
           test ! -d Conxa.rmk-main
           test ! -d Conexa.rmk-main
-          if git ls-files -z | grep -z -E '\.env($|\.)' | grep -z -v -E '^\.env\.example$' >/dev/null; then
-            echo 'Unexpected environment file tracked in repository.'
-            exit 1
-          fi
+          if git ls-files -z | grep -z -E '\.env($|\.)' | grep -z -v -E '^\.env\.example$' >/dev/null; then echo 'Unexpected environment file tracked in repository.'; exit 1; fi
           python3 - <<'PY'
           from pathlib import Path
-          import re
-          files = [Path(p) for p in __import__('subprocess').check_output(['git','ls-files','-z']).decode().split('\0') if p]
-          pem = re.compile(rb'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\s*([A-Za-z0-9+/=\r\n]{200,})\s*-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----')
-          token = re.compile(rb'(?:AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,})')
-          findings = []
+          import re, subprocess
+          files=[Path(p) for p in subprocess.check_output(['git','ls-files','-z']).decode().split('\0') if p]
+          patterns=[re.compile(rb'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\s*([A-Za-z0-9+/=\r\n]{200,})\s*-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----'),re.compile(rb'(?:AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,})')]
+          findings=[]
           for path in files:
-              try:
-                  data = path.read_bytes()
-              except OSError:
-                  continue
-              if pem.search(data) or token.search(data):
-                  findings.append(str(path))
-          if findings:
-              print('Potential secret material detected in tracked source files:')
-              print('\n'.join(findings))
-              raise SystemExit(1)
+              try: data=path.read_bytes()
+              except OSError: continue
+              if any(p.search(data) for p in patterns): findings.append(str(path))
+          if findings: print('\n'.join(findings)); raise SystemExit(1)
           PY
