@@ -4,7 +4,7 @@ set -euo pipefail
 BASE_REPO="https://github.com/josemiranda5266-blip/Conxa.rmk.git"
 SECONDARY_REPO="https://github.com/josemiranda5266-blip/Conexa-remix.git"
 WORK="/tmp/conexa-unification"
-BASE="$WORK/conxa/Conxa.rmk-main"
+BASE="$WORK/conxa"
 SECONDARY="$WORK/remix"
 
 rm -rf "$WORK"
@@ -14,14 +14,16 @@ git clone --depth 1 "$SECONDARY_REPO" "$SECONDARY"
 
 mkdir -p src scripts
 
-# Conxa.rmk is the canonical implementation. Flatten its nested application root.
-# Keep security-reviewed target files and audit metadata already present in this repo.
-rsync -a --exclude='.git/' --exclude='firestore.rules' --exclude='package.json' \
+# Conxa.rmk root is the canonical/current implementation. The repository also
+# contains an older nested Conxa.rmk-main snapshot; that snapshot is excluded
+# deliberately so it cannot overwrite the current tree.
+rsync -a --exclude='.git/' --exclude='Conxa.rmk-main/' --exclude='firestore.rules' --exclude='package.json' \
   --exclude='UNIFICATION_*.md' --exclude='scripts/unify-repos.sh' \
+  --exclude='node_modules/' --exclude='dist/' --exclude='.env' --exclude='*.zip' \
   "$BASE/" ./
 
 # Bring only files that exist exclusively in Conexa-remix.
-# Conflicting paths are intentionally NOT overwritten; they are recorded for manual review.
+# Conflicting paths are intentionally NOT overwritten; they are recorded for review.
 : > /tmp/conexa-conflicts.txt
 : > /tmp/conexa-unique.txt
 
@@ -48,7 +50,7 @@ done < <(find "$SECONDARY" -type f -print0)
   echo '# Automated unification report'
   echo
   echo '## Canonical source'
-  echo '- Conxa.rmk / Conxa.rmk-main'
+  echo '- Conxa.rmk repository root (current implementation)'
   echo
   echo '## Secondary source'
   echo '- Conexa-remix'
