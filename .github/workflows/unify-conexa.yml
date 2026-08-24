@@ -1,0 +1,41 @@
+name: Unify Conexa repositories
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: unification/conexa-unified
+          fetch-depth: 0
+
+      - name: Install rsync
+        run: sudo apt-get update && sudo apt-get install -y rsync
+
+      - name: Assemble unified tree
+        run: bash scripts/unify-repos.sh
+
+      - name: Validate duplicate dependency keys
+        run: node -e "const p=require('./package.json'); for (const [k,v] of Object.entries(p.dependencies||{})) if(!v) throw new Error('Invalid dependency '+k)"
+
+      - name: Show unification report
+        run: cat UNIFICATION_AUTO_REPORT.md
+
+      - name: Commit unified tree
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No changes to commit.'
+          else
+            git commit -m 'build: assemble unified Conexa tree'
+            git push origin HEAD:unification/conexa-unified
+          fi
