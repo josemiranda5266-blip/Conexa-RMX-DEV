@@ -16,6 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # Always validate the actual PR head on PR events, not the stale rerun SHA.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
       - uses: actions/setup-node@v4
