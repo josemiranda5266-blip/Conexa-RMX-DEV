@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, updateDoc, collection, getDocs, getDoc, onSnapshot, query, where, Unsubscribe } from 'firebase/firestore';
+import { doc, updateDoc, collection, getDoc, onSnapshot, query, where, Unsubscribe } from 'firebase/firestore';
 import { auth, db, isFirebaseConfigured } from '../lib/firebase';
 import { UserProfile, Category, Profession, ServiceRequest, Quote, Conversation, Message, Review, UserReport, VerificationRequest, NotificationItem, LocationData, InviteCode, FeedbackItem, AnalyticsEvent, BetaConfig, RadarOpportunity, RadarStats, ApprovalMode, Role, Transaction } from '../types';
 import { INITIAL_CATEGORIES, INITIAL_PROFESSIONS, INITIAL_PROFILES, INITIAL_REVIEWS, INITIAL_SERVICE_REQUESTS, INITIAL_QUOTES, INITIAL_CONVERSATIONS, INITIAL_MESSAGES } from '../data/mockData';
@@ -57,7 +57,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS);
   const [requests] = useState<ServiceRequest[]>(INITIAL_SERVICE_REQUESTS);
   const [quotes] = useState<Quote[]>(INITIAL_QUOTES);
-  const [conversations, setConversations] = useState<Conversation[]>(INITIAL_CONVERSATIONS);
+  const [conversations] = useState<Conversation[]>(INITIAL_CONVERSATIONS);
   const [messages] = useState<Record<string, Message[]>>(INITIAL_MESSAGES);
   const [reports, setReports] = useState<UserReport[]>([]);
   const [verifications, setVerifications] = useState<VerificationRequest[]>([]);
@@ -81,37 +81,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!firebaseUser) { setCurrentUser(null); setAuthLoading(false); setAuthSessionReady(true); return; }
       try {
         const token = await firebaseUser.getIdTokenResult();
-        const claimRole = token.claims.role as Role | undefined;
-        const effectiveRole: Role = claimRole || 'USER';
+        const effectiveRole: Role = (token.claims.role as Role | undefined) || 'USER';
         const snap = db ? await getDoc(doc(db, 'users', firebaseUser.uid)) : null;
         const data = (snap?.exists() ? snap.data() : {}) as Partial<UserProfile>;
         const activeMode: 'CLIENT' | 'PROFESSIONAL' = effectiveRole === 'PROFESSIONAL' && data.activeMode === 'PROFESSIONAL' ? 'PROFESSIONAL' : 'CLIENT';
         const profile: UserProfile = {
-          ...data,
-          id: firebaseUser.uid,
-          name: data.name || firebaseUser.displayName || 'Usuario CONEXA',
-          email: firebaseUser.email || data.email || '',
-          phonePrivate: data.phonePrivate || '',
-          avatar: data.avatar || firebaseUser.photoURL || '',
-          role: effectiveRole,
-          joinedDate: data.joinedDate || new Date().toISOString(),
-          location: data.location || ({ city: '', province: '', country: 'Argentina', lat: 0, lng: 0, approxZone: '' } as LocationData),
-          isIdentityVerified: data.isIdentityVerified === true,
-          identityVerificationStatus: data.identityVerificationStatus || 'NONE',
-          activeMode,
-          hasClientProfile: true,
-          hasProfessionalProfile: effectiveRole === 'PROFESSIONAL',
-          isProfessional: effectiveRole === 'PROFESSIONAL',
-          isProfessionalVerified: effectiveRole === 'PROFESSIONAL' && data.isProfessionalVerified === true,
-          professionalVerificationStatus: data.professionalVerificationStatus || 'NONE',
-          rating: Number(data.rating || 0),
-          reviewCount: Number(data.reviewCount || 0),
-          jobsCompleted: Number(data.jobsCompleted || 0),
-          trustScore: Number(data.trustScore || 0),
-          availabilityStatus: data.availabilityStatus || 'DISPONIBLE'
+          ...data, id: firebaseUser.uid, name: data.name || firebaseUser.displayName || 'Usuario CONEXA', email: firebaseUser.email || data.email || '', phonePrivate: data.phonePrivate || '', avatar: data.avatar || firebaseUser.photoURL || '', role: effectiveRole, joinedDate: data.joinedDate || new Date().toISOString(), location: data.location || ({ city: '', province: '', country: 'Argentina', lat: 0, lng: 0, approxZone: '' } as LocationData), isIdentityVerified: data.isIdentityVerified === true, identityVerificationStatus: data.identityVerificationStatus || 'NONE', activeMode, hasClientProfile: true, hasProfessionalProfile: effectiveRole === 'PROFESSIONAL', isProfessional: effectiveRole === 'PROFESSIONAL', isProfessionalVerified: effectiveRole === 'PROFESSIONAL' && data.isProfessionalVerified === true, professionalVerificationStatus: data.professionalVerificationStatus || 'NONE', rating: Number(data.rating || 0), reviewCount: Number(data.reviewCount || 0), jobsCompleted: Number(data.jobsCompleted || 0), trustScore: Number(data.trustScore || 0), availabilityStatus: data.availabilityStatus || 'DISPONIBLE'
         };
-        setCurrentUser(profile);
-        setUsers(prev => prev.map(u => u.id === profile.id ? { ...u, ...profile } : u));
+        setCurrentUser(profile); setUsers(prev => prev.map(u => u.id === profile.id ? { ...u, ...profile } : u));
       } catch (error) { console.error('[CONEXA AUTH] profile:', error); setCurrentUser(null); }
       finally { setAuthLoading(false); setAuthSessionReady(true); }
     });
@@ -141,8 +118,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return true;
   };
   const toggleFavorite = (id: string) => setFavorites(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  const sharePhoneWithUser = (conversationId: string, _recipientId: string) => { if (!currentUser) return; setConversations(prev => prev.map(c => c.id === conversationId ? { ...c, sharedPhoneBySender: c.participantIds[0] === currentUser.id ? true : c.sharedPhoneBySender, sharedPhoneByReceiver: c.participantIds[1] === currentUser.id ? true : c.sharedPhoneByReceiver } : c)); };
-  const shareAddressWithUser = (conversationId: string, _recipientId: string) => { if (!currentUser) return; setConversations(prev => prev.map(c => c.id === conversationId ? c : c)); };
+  const sharePhoneWithUser = (conversationId: string, _recipientId: string) => { if (!currentUser) return; /* UI state only; authoritative messaging endpoint persists shares. */ };
+  const shareAddressWithUser = (conversationId: string, _recipientId: string) => { if (!currentUser) return; /* UI state only; authoritative messaging endpoint persists shares. */ };
   const addReview = async (reviewData: Omit<Review, 'id' | 'createdAt' | 'isVerifiedJob'> & { quoteId: string }) => {
     if (!auth?.currentUser) throw new Error('Debés iniciar sesión para dejar una reseña.');
     const token = await auth.currentUser.getIdToken(); const { quoteId, ...payload } = reviewData;
@@ -158,7 +135,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const saved = data.verification as VerificationRequest; setVerifications(prev => [saved, ...prev.filter(v => v.id !== saved.id)]); return saved;
   };
   const deleteAccount = async (userId: string) => {
-    try { const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null; const response = await fetch('/api/user/delete-account', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ userId }) }); const data = await response.json(); if (!response.ok || !data.success) return false; await auth?.signOut(); setCurrentUser(null); return true; } catch { return false; }
+    if (!auth?.currentUser || userId !== auth.currentUser.uid) return false;
+    try { const token = await auth.currentUser.getIdToken(); const response = await fetch('/api/user/delete-account', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ userId }) }); const data = await response.json(); if (!response.ok || !data.success) return false; await auth.signOut(); setCurrentUser(null); return true; } catch { return false; }
   };
 
   const value: AppContextType = { currentUser, setCurrentUser, switchUserRole, switchActiveMode, authLoading, authSessionReady, isAuthPortalOpen, openAuthPortal: () => setIsAuthPortalOpen(true), closeAuthPortal: () => setIsAuthPortalOpen(false), isAdmin, hasRole, users, categories, professions, reviews, requests, quotes, conversations, messages, reports, verifications, notifications, transactions, favorites, betaConfig, inviteCodes, feedbacks, analyticsEvents, radarOpportunities, radarStats, approvalMode, setApprovalMode, toggleFavorite, sharePhoneWithUser, shareAddressWithUser, addReview, submitVerification, deleteAccount };
