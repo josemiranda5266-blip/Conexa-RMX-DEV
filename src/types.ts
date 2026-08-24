@@ -2,6 +2,7 @@ export type Role = 'USER' | 'PROFESSIONAL' | 'MODERATOR' | 'ADMIN' | 'SUPER_ADMI
 export type VerificationStatus = 'NONE' | 'PENDING' | 'VERIFIED' | 'REJECTED';
 export type JobStatus = 'REQUEST_CREATED' | 'QUOTES_RECEIVED' | 'PROFESSIONAL_SELECTED' | 'IN_PROGRESS' | 'COMPLETED' | 'REVIEW_PENDING' | 'CLOSED' | 'CANCELLED';
 export type ApprovalMode = 'AUTO' | 'MANUAL';
+export type OpportunitySourceType = 'META_INTEGRATION_OFFICIAL' | 'CANAL_PROPIO' | 'FORMULARIO_CONEXA' | 'RADAR_TEST' | 'WHATSAPP_OFICIAL' | 'API_OFICIAL' | string;
 
 export interface LocationData { city: string; province: string; country: string; lat: number; lng: number; approxZone: string; exactAddressPrivate?: string; }
 export interface ServiceItem { id: string; title: string; description: string; approxPriceArs?: number; }
@@ -42,6 +43,13 @@ export interface Transaction {
   createdAt: string; paidAt?: string; completedAt?: string; refundedAt?: string;
 }
 
+export interface MatchedProfessional {
+  rank: number; rankTag: string; professionalId: string; name: string; professionName: string; avatar: string;
+  matchScore: number; trustScore: number; locationApprox: string; phoneProtected: string;
+  isVerified: boolean; isIdentityVerified: boolean; isProfessionalVerified: boolean; matchReasons: string[];
+  scoreBreakdown: { category: string; location: string; availability: string; reputation: string; verification: string; experience: string; responseRate: string };
+}
+
 export interface Message {
   id: string; conversationId: string; senderId: string; senderName: string; createdAt: string;
   type: 'TEXT' | 'IMAGE' | 'VOICE' | 'SYSTEM' | 'SHARED_PHONE' | 'SHARED_ADDRESS' | 'QUOTE_PROPOSAL'; content: string; attachmentUrl?: string; quoteData?: Quote;
@@ -52,7 +60,6 @@ export interface Conversation {
 }
 export interface UserReport { id: string; reporterId: string; reporterName: string; reportedUserId: string; reportedUserName: string; reason: 'SPAM' | 'ESTAFA' | 'ACOSO' | 'PERFIL_FALSO' | 'SUPLANTACION' | 'INAPROPIADO' | 'OTRO'; description: string; createdAt: string; status: 'PENDING' | 'REVIEWED' | 'DISMISSED' | 'ACTION_TAKEN'; adminNotes?: string; }
 export interface VerificationRequest { id: string; userId: string; userName: string; userRole?: Role; type: 'IDENTITY' | 'PROFESSIONAL'; documentName: string; documentUrl: string; status: VerificationStatus; createdAt: string; reviewedAt?: string; reviewerId?: string; rejectionReason?: string; }
-
 export interface NotificationItem { id: string; userId?: string; type?: string; title?: string; message?: string; createdAt?: string; read?: boolean; [key: string]: unknown; }
 export interface InviteCode { id: string; code?: string; createdAt?: string; expiresAt?: string; used?: boolean; usedBy?: string; [key: string]: unknown; }
 export interface FeedbackItem { id: string; userId?: string; message?: string; rating?: number; createdAt?: string; [key: string]: unknown; }
