@@ -14,10 +14,7 @@ service cloud.firestore {
       );
     }
     function immutableUserFields() {
-      return [
-        'role', 'isIdentityVerified', 'isProfessionalVerified',
-        'rating', 'reviewCount', 'jobsCompleted', 'trustScore'
-      ];
+      return ['role', 'isIdentityVerified', 'isProfessionalVerified', 'rating', 'reviewCount', 'jobsCompleted', 'trustScore'];
     }
 
     match /users/{userId} {
@@ -31,22 +28,18 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode in ['CLIENT','PROFESSIONAL'])
       );
       allow delete: if admin();
-
-      match /private/info {
-        allow read, write: if owner(userId) || admin();
-      }
+      match /private/info { allow read, write: if owner(userId) || admin(); }
     }
 
     match /service_requests/{requestId} {
       allow read: if signedIn() && (
         resource.data.clientId == request.auth.uid ||
-        resource.data.status == 'OPEN' ||
+        resource.data.status in ['REQUEST_CREATED', 'QUOTES_RECEIVED'] ||
         (resource.data.assignedProfessionalId != null && resource.data.assignedProfessionalId == request.auth.uid) ||
         (resource.data.biddingProfessionalIds != null && request.auth.uid in resource.data.biddingProfessionalIds) ||
         admin()
       );
       allow create: if signedIn() && request.resource.data.clientId == request.auth.uid;
-      // Critical status/assignment transitions must be performed by trusted backend.
       allow update: if admin() || (
         signedIn() && resource.data.clientId == request.auth.uid
         && request.resource.data.clientId == resource.data.clientId
@@ -60,16 +53,11 @@ service cloud.firestore {
         resource.data.clientId == request.auth.uid ||
         admin()
       );
-      // Quote creation/acceptance is a business operation and must use the backend.
       allow create, update, delete: if admin();
     }
 
     match /transactions/{transactionId} {
-      allow read: if signedIn() && (
-        resource.data.clientId == request.auth.uid ||
-        resource.data.professionalId == request.auth.uid ||
-        admin()
-      );
+      allow read: if signedIn() && (resource.data.clientId == request.auth.uid || resource.data.professionalId == request.auth.uid || admin());
       allow create, update, delete: if admin();
     }
 
@@ -85,12 +73,7 @@ service cloud.firestore {
     }
 
     match /messages/{messageId} {
-      allow read: if signedIn() && (
-        request.auth.uid == resource.data.senderId ||
-        request.auth.uid == resource.data.recipientId ||
-        (resource.data.participantIds != null && request.auth.uid in resource.data.participantIds) ||
-        admin()
-      );
+      allow read: if signedIn() && (request.auth.uid == resource.data.senderId || request.auth.uid == resource.data.recipientId || (resource.data.participantIds != null && request.auth.uid in resource.data.participantIds) || admin());
       allow create: if signedIn() && request.resource.data.senderId == request.auth.uid;
     }
 
@@ -110,21 +93,9 @@ service cloud.firestore {
       allow read, update, delete: if admin() || (signedIn() && resource.data.userId == request.auth.uid);
     }
 
-    match /radar_opportunities/{opportunityId} {
-      allow read, create, update, delete: if admin();
-    }
-
-    match /admin_audit_logs/{logId} {
-      allow read, create: if admin();
-      allow update, delete: if false;
-    }
-
-    match /beta_config/{configId} {
-      allow read, write: if admin();
-    }
-
-    match /invite_codes/{codeId} {
-      allow read, write: if admin();
-    }
+    match /radar_opportunities/{opportunityId} { allow read, create, update, delete: if admin(); }
+    match /admin_audit_logs/{logId} { allow read, create: if admin(); allow update, delete: if false; }
+    match /beta_config/{configId} { allow read, write: if admin(); }
+    match /invite_codes/{codeId} { allow read, write: if admin(); }
   }
 }
