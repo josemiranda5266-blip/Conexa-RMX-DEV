@@ -2,8 +2,9 @@ import crypto from "crypto";
 import type { Request } from "express";
 import type { Auth } from "firebase-admin/auth";
 import { getAuth } from "firebase-admin/auth";
-import { getFirebaseAdmin } from "../lib/firebaseAdmin.js";
 import { isApplicationRole, type ApplicationRole } from "../domain/authPolicy.js";
+
+export type FirebaseAdminProvider = () => any | null;
 
 export type VerifiedIdentity = {
   isAuthenticated: true;
@@ -25,8 +26,8 @@ export type AuthFailure = {
 
 export type VerifiedAuth = VerifiedIdentity | AuthFailure;
 
-function getFirebaseAuth(): Auth | null {
-  const app = getFirebaseAdmin();
+function getFirebaseAuth(getAdminApp: FirebaseAdminProvider): Auth | null {
+  const app = getAdminApp();
   return app ? getAuth(app) : null;
 }
 
@@ -34,7 +35,10 @@ function getFirebaseAuth(): Auth | null {
  * User authentication is intentionally based only on a Firebase ID token.
  * Operator/webhook secrets MUST NOT become a user identity or SUPER_ADMIN claim.
  */
-export async function verifyUserAuthToken(req: Request): Promise<VerifiedAuth> {
+export async function verifyUserAuthToken(
+  req: Request,
+  getAdminApp: FirebaseAdminProvider
+): Promise<VerifiedAuth> {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return { isAuthenticated: false, isAdmin: false, errorReason: "MISSING_BEARER_TOKEN" };
@@ -45,7 +49,7 @@ export async function verifyUserAuthToken(req: Request): Promise<VerifiedAuth> {
     return { isAuthenticated: false, isAdmin: false, errorReason: "EMPTY_TOKEN" };
   }
 
-  const auth = getFirebaseAuth();
+  const auth = getFirebaseAuth(getAdminApp);
   if (!auth) {
     return { isAuthenticated: false, isAdmin: false, errorReason: "FIREBASE_ADMIN_NOT_CONFIGURED" };
   }
@@ -55,8 +59,6 @@ export async function verifyUserAuthToken(req: Request): Promise<VerifiedAuth> {
     const roleClaim = decoded.role;
     const role = isApplicationRole(roleClaim) ? roleClaim : "USER";
 
-    // A legacy `admin: true` claim is not accepted as an application role.
-    // Role elevation must happen through the canonical `role` custom claim.
     if (roleClaim !== undefined && !isApplicationRole(roleClaim)) {
       return { isAuthenticated: false, isAdmin: false, errorReason: "INVALID_APPLICATION_ROLE" };
     }
@@ -73,8 +75,8 @@ export async function verifyUserAuthToken(req: Request): Promise<VerifiedAuth> {
 }
 
 /**
- * Server-to-server/operator authentication. This is deliberately separate
- * from user authentication and can never produce a Firebase user identity.
+ * Server-to-server/operator authentication is deliberately separate from
+ * user authentication and can never produce a Firebase user identity.
  */
 export function verifyS2SSecret(
   req: Request,
