@@ -52,3 +52,8 @@
 - src/components/radar/RadarTestLab.tsx
 - .env.example
 - server.ts
+
+## Hardening applied
+- submitQuote routed through authenticated backend authority
+- completeJob routed through authenticated backend authority
+- backend quote validation and job-assignment checks added

@@ -2231,6 +2231,78 @@ Responde en JSON:
     }
   });
 
+  // ==========================================
+  // CONEXA QUOTE + JOB AUTHORITY ENDPOINTS
+  // ==========================================
+
+  app.post('/api/quotes/submit', rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const auth = await verifyAuthToken(req);
+      if (!auth.isAuthenticated || !auth.userId) return res.status(401).json({ success: false, error: 'UNAUTHORIZED' });
+      const body = req.body || {};
+      if (!body.requestId || typeof body.requestId !== 'string') return res.status(400).json({ success: false, error: 'INVALID_REQUEST_ID' });
+      const priceArs = Number(body.priceArs);
+      if (!Number.isFinite(priceArs) || priceArs <= 0 || priceArs > 1000000000) return res.status(422).json({ success: false, error: 'INVALID_QUOTE_AMOUNT' });
+      if (typeof body.description !== 'string' || body.description.trim().length < 3 || body.description.length > 4000) return res.status(422).json({ success: false, error: 'INVALID_QUOTE_DESCRIPTION' });
+      const db = await getAdminDb();
+      const userSnap = await db.collection('users').doc(auth.userId).get();
+      const user = userSnap.exists ? (userSnap.data() || {}) : {};
+      const effectiveProfessional = auth.role === 'PROFESSIONAL' || user.role === 'PROFESSIONAL' || user.isProfessional === true;
+      if (!effectiveProfessional) return res.status(403).json({ success: false, error: 'PROFESSIONAL_ROLE_REQUIRED' });
+      const requestRef = db.collection('service_requests').doc(body.requestId);
+      const result = await db.runTransaction(async (tx: any) => {
+        const requestSnap = await tx.get(requestRef);
+        if (!requestSnap.exists) throw new Error('REQUEST_NOT_FOUND');
+        const request = requestSnap.data() || {};
+        if (['CANCELLED', 'COMPLETED', 'CLOSED'].includes(String(request.status))) throw new Error('REQUEST_NOT_AVAILABLE');
+        if (request.clientId === auth.userId) throw new Error('SELF_QUOTE_FORBIDDEN');
+        const quoteId = `quote-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`;
+        const quoteRef = db.collection('quotes').doc(quoteId);
+        const quote = { id: quoteId, requestId: body.requestId, professionalId: auth.userId, professionalName: String(user.name || body.professionalName || 'Profesional CONEXA').slice(0, 160), professionalAvatar: String(user.avatar || body.professionalAvatar || '').slice(0, 1000), professionalRating: Number(user.rating || 0), professionalVerified: user.isProfessionalVerified === true, priceArs, description: body.description.trim(), materialsIncluded: String(body.materialsIncluded || '').slice(0, 1000), estimatedTime: String(body.estimatedTime || '').slice(0, 500), availableStartDate: String(body.availableStartDate || '').slice(0, 100), warrantyInfo: String(body.warrantyInfo || '').slice(0, 1000), termsAndConditions: String(body.termsAndConditions || '').slice(0, 2000), status: 'PENDING', createdAt: new Date().toISOString() };
+        tx.set(quoteRef, quote);
+        tx.update(requestRef, { quotesCount: Number(request.quotesCount || 0) + 1, status: 'QUOTES_RECEIVED' });
+        return quote;
+      });
+      return res.status(201).json({ success: true, quote: result });
+    } catch (err: any) {
+      const code = err?.message || 'QUOTE_SUBMIT_ERROR';
+      const statuses: Record<string, number> = { REQUEST_NOT_FOUND: 404, REQUEST_NOT_AVAILABLE: 409, SELF_QUOTE_FORBIDDEN: 403 };
+      return res.status(statuses[code] || 500).json({ success: false, error: code });
+    }
+  });
+
+  app.post('/api/jobs/complete', rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const auth = await verifyAuthToken(req);
+      if (!auth.isAuthenticated || !auth.userId) return res.status(401).json({ success: false, error: 'UNAUTHORIZED' });
+      const requestId = req.body?.requestId;
+      if (!requestId || typeof requestId !== 'string') return res.status(400).json({ success: false, error: 'INVALID_REQUEST_ID' });
+      const db = await getAdminDb();
+      const requestRef = db.collection('service_requests').doc(requestId);
+      const result = await db.runTransaction(async (tx: any) => {
+        const requestSnap = await tx.get(requestRef);
+        if (!requestSnap.exists) throw new Error('REQUEST_NOT_FOUND');
+        const request = requestSnap.data() || {};
+        if (request.clientId === auth.userId) throw new Error('CLIENT_CANNOT_COMPLETE_JOB');
+        const txQuery = db.collection('transactions').where('serviceRequestId', '==', requestId).where('professionalId', '==', auth.userId).limit(1);
+        const txSnap = await tx.get(txQuery);
+        if (txSnap.empty) throw new Error('ASSIGNED_PROFESSIONAL_REQUIRED');
+        const transactionDoc = txSnap.docs[0];
+        if (!['PROFESSIONAL_SELECTED', 'IN_PROGRESS', 'REVIEW_PENDING'].includes(String(request.status))) throw new Error('INVALID_JOB_STATE');
+        if (request.status !== 'REVIEW_PENDING') tx.update(requestRef, { status: 'REVIEW_PENDING' });
+        const transaction = transactionDoc.data() || {};
+        const completedAt = transaction.completedAt || new Date().toISOString();
+        if (transaction.status !== 'SERVICE_COMPLETED') tx.update(transactionDoc.ref, { status: 'SERVICE_COMPLETED', completedAt });
+        return { ...transaction, id: transactionDoc.id, status: 'SERVICE_COMPLETED', completedAt };
+      });
+      return res.json({ success: true, requestId, status: 'REVIEW_PENDING', transaction: result });
+    } catch (err: any) {
+      const code = err?.message || 'JOB_COMPLETE_ERROR';
+      const statuses: Record<string, number> = { REQUEST_NOT_FOUND: 404, CLIENT_CANNOT_COMPLETE_JOB: 403, ASSIGNED_PROFESSIONAL_REQUIRED: 403, INVALID_JOB_STATE: 409 };
+      return res.status(statuses[code] || 500).json({ success: false, error: code });
+    }
+  });
+
   // Global Error Handler Middleware: Never exposes stack traces or internal errors
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     console.error("Internal Server Error:", err?.message || "Unknown error");

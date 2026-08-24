@@ -803,49 +803,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const submitQuote = async (quoteData: Omit<Quote, 'id' | 'createdAt' | 'status'>) => {
-    const newQuote: Quote = {
-      ...quoteData,
-      id: `quote-${Date.now()}`,
-      createdAt: new Date().toLocaleDateString('es-AR'),
-      status: 'PENDING'
-    };
-    setQuotes(prev => [newQuote, ...prev]);
-
-    // Update request status & count locally
-    setRequests(prev => prev.map(r => {
-      if (r.id === quoteData.requestId) {
-        return {
-          ...r,
-          quotesCount: r.quotesCount + 1,
-          status: 'QUOTES_RECEIVED'
-        };
-      }
-      return r;
-    }));
-
-    if (db) {
-      try {
-        await setDoc(doc(db, 'quotes', newQuote.id), cleanFirestoreData(newQuote));
-        const reqRef = doc(db, 'service_requests', quoteData.requestId);
-        const reqSnap = await getDoc(reqRef);
-        if (reqSnap.exists()) {
-          const rData = reqSnap.data() as ServiceRequest;
-          await updateDoc(reqRef, {
-            quotesCount: (rData.quotesCount || 0) + 1,
-            status: 'QUOTES_RECEIVED'
-          });
-        }
-      } catch (e) {
-        console.warn('[Firestore] Error guardando presupuesto:', e);
-      }
-    }
-
-    // Find request to open chat with client
-    const targetReq = requests.find(r => r.id === quoteData.requestId);
+    if (!auth?.currentUser || !currentUser) throw new Error('Debés iniciar sesión como profesional.');
+    const token = await auth.currentUser.getIdToken();
+    const response = await fetch('/api/quotes/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(quoteData)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success || !data.quote) throw new Error(data.error || 'No se pudo enviar el presupuesto.');
+    const savedQuote = data.quote as Quote;
+    setQuotes(prev => [savedQuote, ...prev.filter(q => q.id !== savedQuote.id)]);
+    setRequests(prev => prev.map(r => r.id === savedQuote.requestId ? { ...r, quotesCount: (r.quotesCount || 0) + 1, status: 'QUOTES_RECEIVED' } : r));
+    const targetReq = requests.find(r => r.id === savedQuote.requestId);
     if (targetReq) {
       const convId = createConversation(targetReq.clientId);
-      sendMessage(convId, `Hola! Te envío un presupuesto formal para tu solicitud "${targetReq.title}".`, 'QUOTE_PROPOSAL', newQuote);
+      sendMessage(convId, `Hola! Te envío un presupuesto formal para tu solicitud "${targetReq.title}".`, 'QUOTE_PROPOSAL', savedQuote);
     }
+    return savedQuote;
   };
 
   const connectMercadoPago = async () => {
@@ -966,15 +941,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const completeJob = async (requestId: string) => {
+    if (!auth?.currentUser || !currentUser) throw new Error('Debés iniciar sesión para completar el trabajo.');
+    const token = await auth.currentUser.getIdToken();
+    const response = await fetch('/api/jobs/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ requestId })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) throw new Error(data.error || 'No se pudo completar el trabajo.');
     setRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'REVIEW_PENDING' } : r));
-
-    if (db) {
-      try {
-        await updateDoc(doc(db, 'service_requests', requestId), { status: 'REVIEW_PENDING' });
-      } catch (e) {
-        console.warn('[Firestore] Error completando trabajo:', e);
-      }
+    if (data.transaction) {
+      const transaction = data.transaction as Transaction;
+      setTransactions(prev => [transaction, ...prev.filter(t => t.id !== transaction.id)]);
     }
+    return true;
   };
 
   const addReview = async (reviewData: Omit<Review, 'id' | 'createdAt' | 'isVerifiedJob'>) => {
