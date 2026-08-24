@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   unify:
-    if: github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, 'build: assemble unified Conexa tree')
+    if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, 'build: assemble unified Conexa tree') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout target branch
