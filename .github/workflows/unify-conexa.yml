@@ -1,13 +1,17 @@
-name: Unify Conexa repositories
+name: Unify and validate Conexa repositories
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - unification/conexa-unified
 
 permissions:
   contents: write
 
 jobs:
   unify:
+    if: github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, 'build: assemble unified Conexa tree')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout target branch
@@ -16,19 +20,28 @@ jobs:
           ref: unification/conexa-unified
           fetch-depth: 0
 
-      - name: Install rsync
-        run: sudo apt-get update && sudo apt-get install -y rsync
-
-      - name: Assemble unified tree
+      - name: Assemble unified tree from canonical and secondary repositories
         run: bash scripts/unify-repos.sh
 
-      - name: Validate duplicate dependency keys
-        run: node -e "const p=require('./package.json'); for (const [k,v] of Object.entries(p.dependencies||{})) if(!v) throw new Error('Invalid dependency '+k)"
+      - name: Install Node dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: TypeScript validation
+        run: npm run lint
+
+      - name: Production build validation
+        run: npm run build
+
+      - name: Validate dependency manifest
+        run: node -e "const p=require('./package.json'); for (const [section,obj] of Object.entries({dependencies:p.dependencies||{},devDependencies:p.devDependencies||{}})) for (const [k,v] of Object.entries(obj)) if(typeof v!=='string'||!v.trim()) throw new Error('Invalid '+section+' dependency '+k)"
+
+      - name: Remove generated files and local secrets
+        run: rm -rf node_modules dist .env
 
       - name: Show unification report
         run: cat UNIFICATION_AUTO_REPORT.md
 
-      - name: Commit unified tree
+      - name: Commit unified tree only after validation passes
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
