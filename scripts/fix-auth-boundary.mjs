@@ -1,7 +1,7 @@
 import fs from "node:fs";
 
 const file = "server.ts";
-const source = fs.readFileSync(file, "utf8");
+let source = fs.readFileSync(file, "utf8");
 
 const importLine = 'import { verifyUserAuthToken } from "./src/server/auth.js";';
 if (!source.includes(importLine)) {
