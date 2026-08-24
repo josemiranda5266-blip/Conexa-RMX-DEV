@@ -1,7 +1,10 @@
 import fs from 'node:fs';
 
 function replaceOnce(text, regex, replacement, label) {
-  if (!regex.test(text)) throw new Error(`Pattern not found: ${label}`);
+  if (!regex.test(text)) {
+    if (typeof replacement === 'string' && text.includes(replacement.trim().slice(0, 80))) return text;
+    throw new Error(`Pattern not found: ${label}`);
+  }
   return text.replace(regex, replacement);
 }
 
@@ -88,7 +91,6 @@ fs.writeFileSync(ctxPath, ctx);
 const serverPath = 'server.ts';
 let server = fs.readFileSync(serverPath, 'utf8');
 
-// Existing unified endpoint: authorization must come from the verified claim, never mutable profile fields.
 server = replaceOnce(
   server,
   /const effectiveProfessional = auth\.role === 'PROFESSIONAL' \|\| user\.role === 'PROFESSIONAL' \|\| user\.isProfessional === true;\n      if \(!effectiveProfessional\)/,
@@ -102,7 +104,6 @@ server = replaceOnce(
   'server-derived quote clientId'
 );
 
-// The endpoint may already exist from an earlier consolidation. Only add it when absent.
 const marker = '  // Global Error Handler Middleware';
 if (!server.includes(marker)) throw new Error('Server insertion marker not found');
 if (!server.includes("app.post('/api/quotes/submit'")) {
