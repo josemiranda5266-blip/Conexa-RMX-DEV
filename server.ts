@@ -7,6 +7,7 @@ import { getFirestore as getAdminFirestore } from "firebase-admin/firestore";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { validateMercadoPagoEnv } from "./src/lib/envValidation.js";
+import { verifyUserAuthToken } from "./src/server/auth.js";
 
 const firebaseAdmin: any = (adminModule as any).default || adminModule;
 let firebaseAdminApp: any = null;
@@ -258,6 +259,9 @@ Responde en JSON con:
   });
 
   // Centralized Auth Verification & Middleware
+  // IMPORTANT: user authentication is Firebase-ID-token-only.
+  // S2S/operator secrets are handled separately by verifyS2SSecret() in src/server/auth.ts
+  // and MUST NEVER create a user identity or SUPER_ADMIN session.
   async function verifyAuthToken(req: Request): Promise<{
     isAuthenticated: boolean;
     isAdmin: boolean;
@@ -265,47 +269,7 @@ Responde en JSON con:
     role?: string;
     errorReason?: string;
   }> {
-    const authHeader = req.headers.authorization;
-    const adminKeyHeader = req.headers['x-admin-key'] || req.headers['x-radar-secret'];
-    const expectedSecret = process.env.ADMIN_SECRET_KEY || process.env.RADAR_WEBHOOK_SECRET;
-
-    // Check operator secret key (ONLY if expectedSecret is explicitly configured and non-empty)
-    if (adminKeyHeader && expectedSecret && adminKeyHeader === expectedSecret) {
-      return { isAuthenticated: true, isAdmin: true, userId: 'admin_secret_operator', role: 'SUPER_ADMIN' };
-    }
-
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return { isAuthenticated: false, isAdmin: false, errorReason: "MISSING_BEARER_TOKEN" };
-    }
-
-    const token = authHeader.split('Bearer ')[1].trim();
-    if (!token) {
-      return { isAuthenticated: false, isAdmin: false, errorReason: "EMPTY_TOKEN" };
-    }
-
-    const adminApp = getFirebaseAdmin();
-    if (!adminApp) {
-      return {
-        isAuthenticated: false,
-        isAdmin: false,
-        errorReason: "FIREBASE_ADMIN_NOT_CONFIGURED"
-      };
-    }
-
-    try {
-      const decodedToken = await adminApp.auth().verifyIdToken(token);
-      const role = (decodedToken.role as string) || 'USER';
-      const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN' || decodedToken.admin === true;
-
-      return {
-        isAuthenticated: true,
-        isAdmin,
-        userId: decodedToken.uid,
-        role
-      };
-    } catch (err: any) {
-      return { isAuthenticated: false, isAdmin: false, errorReason: "INVALID_FIREBASE_ID_TOKEN" };
-    }
+    return verifyUserAuthToken(req, getFirebaseAdmin);
   }
 
   // ==========================================
