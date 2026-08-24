@@ -1,10 +1,25 @@
 import fs from 'node:fs';
+
 const ctx = fs.readFileSync('src/context/AppContext.tsx', 'utf8');
 const types = fs.readFileSync('src/types.ts', 'utf8');
 const rules = fs.readFileSync('firestore.rules', 'utf8');
 const server = fs.readFileSync('server.ts', 'utf8');
-for (const token of ["'CLIENT' | 'PROFESSIONAL' | 'ADMIN'", "activeMode === 'ADMIN'", "activeMode: 'ADMIN'"]) if (ctx.includes(token)) throw new Error(`Legacy admin UI mode remains: ${token}`);
-for (const token of ['PAYMENT_PENDING', 'CHECKOUT_CREATED', 'SERVICE_COMPLETED']) if (!types.includes(token)) throw new Error(`Transaction state missing: ${token}`);
-for (const token of ["request.auth.token.role == 'ADMIN'", "match /transactions/{transactionId}", "match /reviews/{reviewId}"]) if (!rules.includes(token)) throw new Error(`Security contract missing: ${token}`);
-for (const token of ["/api/reviews/create", 'external_reference', 'mercadoPagoPreferenceId']) if (!server.includes(token)) throw new Error(`Backend contract missing: ${token}`);
+const workflow = fs.readFileSync('.github/workflows/unify-conexa.yml', 'utf8');
+
+for (const token of ["'CLIENT' | 'PROFESSIONAL' | 'ADMIN'", "activeMode === 'ADMIN'", "activeMode: 'ADMIN'"]) {
+  if (ctx.includes(token)) throw new Error(`Legacy admin UI mode remains: ${token}`);
+}
+for (const token of ['PAYMENT_PENDING', 'CHECKOUT_CREATED', 'SERVICE_COMPLETED']) {
+  if (!types.includes(token)) throw new Error(`Transaction state missing: ${token}`);
+}
+for (const token of ["request.auth.token.role == 'ADMIN'", "match /transactions/{transactionId}", "match /reviews/{reviewId}", "match /verifications/{verifId}"]) {
+  if (!rules.includes(token)) throw new Error(`Security contract missing: ${token}`);
+}
+for (const token of ["/api/reviews/create", '/api/verifications/create', 'external_reference', 'mercadoPagoPreferenceId']) {
+  if (!server.includes(token)) throw new Error(`Backend contract missing: ${token}`);
+}
+for (const token of ['npm run test:security', 'npm run test:rules', 'npm run lint', 'npm run build']) {
+  if (!workflow.includes(token)) throw new Error(`CI gate missing: ${token}`);
+}
+
 console.log('Unified application/security contract checks: PASS');
