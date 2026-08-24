@@ -20,6 +20,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci --no-audit --no-fund
+      - name: Materialize unified server hardening
+        run: node scripts/harden-unified.mjs
       - name: Unified source contract validation
         run: node scripts/validate-unified-contracts.mjs
       - name: Authorization regression test
