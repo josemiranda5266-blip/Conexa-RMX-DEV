@@ -46,6 +46,9 @@ while IFS= read -r -d '' file; do
   fi
 done < <(find "$SECONDARY" -type f -print0)
 
+# Apply the security/architecture corrections that must win over both source snapshots.
+node scripts/harden-unified.mjs
+
 {
   echo '# Automated unification report'
   echo
@@ -60,6 +63,11 @@ done < <(find "$SECONDARY" -type f -print0)
   echo
   echo '## Conflicting files kept from canonical source'
   sed 's/^/- /' /tmp/conexa-conflicts.txt || true
+  echo
+  echo '## Hardening applied'
+  echo '- submitQuote routed through authenticated backend authority'
+  echo '- completeJob routed through authenticated backend authority'
+  echo '- backend quote validation and job-assignment checks added'
 } > UNIFICATION_AUTO_REPORT.md
 
 # Never commit secrets or generated artifacts.
