@@ -11,6 +11,7 @@
     "lint": "tsc --noEmit",
     "test:security": "tsx scripts/test-persistence.ts",
     "test:rules": "node scripts/validate-firestore-rules.mjs",
+    "test:contracts": "node scripts/validate-unified-contracts.mjs",
     "harden": "node scripts/harden-unified.mjs && node scripts/harden-payments.mjs"
   },
   "dependencies": {
