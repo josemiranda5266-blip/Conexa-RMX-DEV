@@ -18,8 +18,8 @@ export interface LocationData {
   country: string;
   lat: number;
   lng: number;
-  approxZone: string; // e.g. "Santiago del Estero - Centro", "Banda Norte"
-  exactAddressPrivate?: string; // Strictly confidential, for internal radius calculation
+  approxZone: string;
+  exactAddressPrivate?: string;
 }
 
 export interface UserProfile {
@@ -31,44 +31,43 @@ export interface UserProfile {
   role: Role;
   joinedDate: string;
   location: LocationData;
-  isIdentityVerified: boolean; // 🟢 Identidad verificada
+  isIdentityVerified: boolean;
   identityVerificationStatus: VerificationStatus;
   identityDocUrl?: string;
   isBlocked?: boolean;
-  
-  // Mode & Capabilities (Unified CONEXA Account)
-  activeMode?: 'CLIENT' | 'PROFESSIONAL' | 'ADMIN';
+
+  // Mode is a UI/account preference, not an authorization mechanism.
+  activeMode?: 'CLIENT' | 'PROFESSIONAL';
   hasClientProfile?: boolean;
   hasProfessionalProfile?: boolean;
-  workHours?: string; // e.g. "Lun - Vie: 08:00 a 18:00"
+  workHours?: string;
 
-  // Specific to Professional role
   isProfessional?: boolean;
   businessName?: string;
   professionId?: string;
   professionName?: string;
   specialties?: string[];
   description?: string;
-  workZoneRadiusKm?: number; // e.g. 20 km around city
-  isProfessionalVerified?: boolean; // 🔵 Profesional verificado
+  workZoneRadiusKm?: number;
+  isProfessionalVerified?: boolean;
   professionalVerificationStatus?: VerificationStatus;
   matriculaOrDegree?: string;
   verificationDocUrl?: string;
-  
-  rating: number; // e.g. 4.9
-  reviewCount: number; // e.g. 82
-  jobsCompleted: number; // e.g. 87
-  trustScore: number; // 0 - 100 calculated score
+
+  rating: number;
+  reviewCount: number;
+  jobsCompleted: number;
+  trustScore: number;
   availabilityStatus: 'DISPONIBLE' | 'OCUPADO' | 'EN_CONSULTA';
-  
+
   hourlyRateArs?: number;
   servicesOffered?: ServiceItem[];
   portfolioImages?: string[];
-  workingHours?: string; // e.g. "Lun - Vie 8:00 a 18:00"
-  
-  isProSubscriber?: boolean; // Subscription badge
-  isFeatured?: boolean; // Featured promotion tag
-  isDemoData?: boolean; // Tag for demo profiles during Beta
+  workingHours?: string;
+
+  isProSubscriber?: boolean;
+  isFeatured?: boolean;
+  isDemoData?: boolean;
 }
 
 export interface ServiceItem {
@@ -107,7 +106,7 @@ export interface Review {
   treatmentRating: number;
   priceRating: number;
   complianceRating: number;
-  isVerifiedJob: boolean; // Verified interaction on CONEXA
+  isVerifiedJob: boolean;
   isReported?: boolean;
   isDemoData?: boolean;
 }
@@ -188,8 +187,8 @@ export interface Transaction {
 }
 
 export interface SharedContactState {
-  phoneSharedWithUserIds: string[]; // List of user IDs with whom phone was shared
-  addressSharedWithUserIds: string[]; // List of user IDs with whom exact address was shared
+  phoneSharedWithUserIds: string[];
+  addressSharedWithUserIds: string[];
 }
 
 export interface Message {
@@ -262,7 +261,7 @@ export interface NotificationItem {
 
 export interface InviteCode {
   id: string;
-  code: string; // e.g. CONEXA-SDE-001
+  code: string;
   maxUses: number;
   usedCount: number;
   expiresAt: string;
@@ -294,42 +293,15 @@ export interface AnalyticsEvent {
 export interface BetaConfig {
   isBetaActive: boolean;
   requireInviteCode: boolean;
-  pilotCity: string; // e.g. "Santiago del Estero"
+  pilotCity: string;
   allowNewRegistrations: boolean;
 }
 
-// ==========================================
-// CONEXA RADAR - Demanda & Conversión Types
-// ==========================================
-
 export type OpportunityIntent = 'LOW' | 'MEDIUM' | 'HIGH';
 export type OpportunityUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'EMERGENCY';
-export type OpportunityStatus = 
-  | 'NEW'
-  | 'ANALYZED'
-  | 'QUALIFIED'
-  | 'READY_TO_CONTACT'
-  | 'CONTACTED'
-  | 'RESPONDED'
-  | 'REGISTERED'
-  | 'MATCHED'
-  | 'SERVICE_REQUESTED'
-  | 'CONVERTED'
-  | 'CLOSED'
-  | 'IGNORED';
-
-export type OpportunitySourceType = 
-  | 'API_AUTORIZADA'
-  | 'WEBHOOK'
-  | 'FORMULARIO_CONEXA'
-  | 'META_INTEGRATION_OFFICIAL'
-  | 'CANAL_PROPIO'
-  | 'CAMPAÑA_MARKETING'
-  | 'REFERIDOS'
-  | 'FUENTE_PUBLICA_PERMITIDA';
-
+export type OpportunityStatus = 'NEW' | 'ANALYZED' | 'QUALIFIED' | 'READY_TO_CONTACT' | 'CONTACTED' | 'RESPONDED' | 'REGISTERED' | 'MATCHED' | 'SERVICE_REQUESTED' | 'CONVERTED' | 'CLOSED' | 'IGNORED';
+export type OpportunitySourceType = 'API_AUTORIZADA' | 'WEBHOOK' | 'FORMULARIO_CONEXA' | 'META_INTEGRATION_OFFICIAL' | 'CANAL_PROPIO' | 'CAMPAÑA_MARKETING' | 'REFERIDOS' | 'FUENTE_PUBLICA_PERMITIDA';
 export type ContactMethod = 'CANAL_OFICIAL' | 'RESPUESTA_PUBLICA_PERMITIDA' | 'FORMULARIO_LANDING' | 'WHATSAPP_API' | 'EMAIL';
-
 export type ApprovalMode = 'AUTOMÁTICO' | 'ASISTIDO' | 'MANUAL';
 
 export interface MatchedProfessional {
@@ -337,7 +309,7 @@ export interface MatchedProfessional {
   name: string;
   professionName: string;
   avatar: string;
-  matchScore: number; // 0 - 100
+  matchScore: number;
   trustScore: number;
   locationApprox: string;
   isVerified: boolean;
@@ -346,7 +318,7 @@ export interface MatchedProfessional {
 
 export interface RadarOpportunity {
   id: string;
-  source: string; // e.g. "Meta Graph API (Página Oficial)", "Landing Campaña Electricistas", "Webhook N8n"
+  source: string;
   sourceType: OpportunitySourceType;
   externalReference?: string;
   category: string;
@@ -356,8 +328,8 @@ export interface RadarOpportunity {
   province: string;
   neighborhood?: string;
   urgency: OpportunityUrgency;
-  intentScore: number; // 0 - 100
-  confidenceScore: number; // 0 - 100
+  intentScore: number;
+  confidenceScore: number;
   status: OpportunityStatus;
   detectedAt: string;
   lastUpdated: string;
@@ -395,14 +367,14 @@ export interface RadarStats {
   convertedUsers: number;
   requestsGenerated: number;
   servicesCompleted: number;
-  conversionRate: number; // %
+  conversionRate: number;
   detectionRatePerDay: number;
-  qualificationRate: number; // %
-  contactRate: number; // %
-  responseRate: number; // %
-  registrationRate: number; // %
-  matchRate: number; // %
-  serviceRequestRate: number; // %
+  qualificationRate: number;
+  contactRate: number;
+  responseRate: number;
+  registrationRate: number;
+  matchRate: number;
+  serviceRequestRate: number;
   costPerAcquisitionArs: number;
   revenuePerSourceArs: number;
   byCategory: Record<string, number>;
@@ -410,4 +382,3 @@ export interface RadarStats {
   bySource: Record<string, number>;
   growthInsights: string[];
 }
-
