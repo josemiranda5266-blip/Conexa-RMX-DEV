@@ -8,6 +8,13 @@ export interface LocationData { city: string; province: string; country: string;
 export interface ServiceItem { id: string; title: string; description: string; approxPriceArs?: number; }
 export interface Category { id: string; name: string; iconName: string; description: string; }
 export interface Profession { id: string; categoryId: string; name: string; popularSpecialties: string[]; }
+export interface MatchedProfessional {
+  rank: number; rankTag: string; professionalId: string; name: string; professionName: string; avatar: string;
+  matchScore: number; trustScore: number; locationApprox: string; phoneProtected: string;
+  isVerified: boolean; isIdentityVerified: boolean; isProfessionalVerified: boolean;
+  matchReasons: string[];
+  scoreBreakdown: { category: string; location: string; availability: string; reputation: string; verification: string; experience: string; responseRate: string };
+}
 
 export interface UserProfile {
   id: string; name: string; email: string; phonePrivate: string; avatar: string; role: Role; joinedDate: string; location: LocationData;
@@ -38,32 +45,24 @@ export interface Quote {
 export type TransactionStatus = 'CREATED' | 'PAYMENT_PENDING' | 'CHECKOUT_CREATED' | 'PAID' | 'SERVICE_IN_PROGRESS' | 'SERVICE_COMPLETED' | 'SETTLED' | 'REFUNDED' | 'CANCELLED' | 'CHARGEBACK';
 export interface Transaction {
   id: string; serviceRequestId: string; quoteId: string; clientId: string; professionalId: string; amountArs: number; currency: 'ARS'; platformFeePercent: number;
-  platformFeeAmountArs: number; professionalAmountArs: number; paymentProcessingFeeArs?: number; netPlatformRevenueArs?: number; status: TransactionStatus;
-  mercadoPagoPaymentId?: string; mercadoPagoPreferenceId?: string; mercadoPagoInitPoint?: string | null; mercadoPagoSandboxInitPoint?: string | null;
-  createdAt: string; paidAt?: string; completedAt?: string; refundedAt?: string;
+  platformFeeArs: number; professionalAmountArs: number; status: TransactionStatus; paymentStatus?: string; mercadoPagoPreferenceId?: string; mercadoPagoPaymentId?: string;
+  mercadoPagoInitPoint?: string | null; mercadoPagoSandboxInitPoint?: string | null; createdAt: string; paidAt?: string; reviewSubmittedAt?: string;
 }
 
-export interface MatchedProfessional {
-  rank: number; rankTag: string; professionalId: string; name: string; professionName: string; avatar: string;
-  matchScore: number; trustScore: number; locationApprox: string; phoneProtected: string;
-  isVerified: boolean; isIdentityVerified: boolean; isProfessionalVerified: boolean; matchReasons: string[];
-  scoreBreakdown: { category: string; location: string; availability: string; reputation: string; verification: string; experience: string; responseRate: string };
+export interface RadarOpportunity {
+  id: string; source: string; sourceType: OpportunitySourceType; environment: 'simulation' | 'production'; is_test: boolean;
+  category: string; subcategory: string; description: string; city: string; province: string; neighborhood: string; urgency: string;
+  intentScore: number; confidenceScore: number; status: string; detectedAt: string; lastUpdated: string; assignedOperator: string;
+  matchedProfessionals: MatchedProfessional[]; conversionStatus: string; consentStatus: string; contactMethod: string; aiAnalysis?: any;
 }
 
-export interface Message {
-  id: string; conversationId: string; senderId: string; senderName: string; createdAt: string;
-  type: 'TEXT' | 'IMAGE' | 'VOICE' | 'SYSTEM' | 'SHARED_PHONE' | 'SHARED_ADDRESS' | 'QUOTE_PROPOSAL'; content: string; attachmentUrl?: string; quoteData?: Quote;
-}
-export interface Conversation {
-  id: string; participantIds: [string, string]; otherUser: { id: string; name: string; avatar: string; profession?: string; isIdentityVerified?: boolean; isProfessionalVerified?: boolean };
-  lastMessage: string; lastMessageTime: string; unreadCount: number; sharedPhoneBySender: boolean; sharedPhoneByReceiver: boolean; sharedAddressBySender: boolean; sharedAddressByReceiver: boolean;
-}
-export interface UserReport { id: string; reporterId: string; reporterName: string; reportedUserId: string; reportedUserName: string; reason: 'SPAM' | 'ESTAFA' | 'ACOSO' | 'PERFIL_FALSO' | 'SUPLANTACION' | 'INAPROPIADO' | 'OTRO'; description: string; createdAt: string; status: 'PENDING' | 'REVIEWED' | 'DISMISSED' | 'ACTION_TAKEN'; adminNotes?: string; }
-export interface VerificationRequest { id: string; userId: string; userName: string; userRole?: Role; type: 'IDENTITY' | 'PROFESSIONAL'; documentName: string; documentUrl: string; status: VerificationStatus; createdAt: string; reviewedAt?: string; reviewerId?: string; rejectionReason?: string; }
-export interface NotificationItem { id: string; userId?: string; type?: string; title?: string; message?: string; createdAt?: string; read?: boolean; [key: string]: unknown; }
-export interface InviteCode { id: string; code?: string; createdAt?: string; expiresAt?: string; used?: boolean; usedBy?: string; [key: string]: unknown; }
-export interface FeedbackItem { id: string; userId?: string; message?: string; rating?: number; createdAt?: string; [key: string]: unknown; }
-export interface AnalyticsEvent { id: string; name?: string; userId?: string; createdAt?: string; properties?: Record<string, unknown>; [key: string]: unknown; }
-export interface BetaConfig { [key: string]: unknown; }
-export interface RadarOpportunity { id: string; [key: string]: unknown; }
-export interface RadarStats { [key: string]: unknown; }
+export interface Conversation { id: string; participantIds: string[]; lastMessage?: string; lastMessageTime?: string; [key: string]: any; }
+export interface Message { id: string; conversationId: string; senderId: string; recipientId: string; text?: string; content?: string; createdAt?: string; [key: string]: any; }
+export interface UserReport { id: string; reporterId: string; reportedUserId?: string; reason?: string; description?: string; createdAt?: string; [key: string]: any; }
+export interface VerificationRequest { id: string; userId: string; type: 'IDENTITY' | 'PROFESSIONAL'; documentName: string; documentUrl?: string; status: VerificationStatus; createdAt: string; [key: string]: any; }
+export interface NotificationItem { id: string; userId?: string; title?: string; message?: string; read?: boolean; createdAt?: string; [key: string]: any; }
+export interface InviteCode { id: string; code?: string; [key: string]: any; }
+export interface FeedbackItem { id: string; userId?: string; message?: string; createdAt?: string; [key: string]: any; }
+export interface AnalyticsEvent { id: string; type?: string; userId?: string; createdAt?: string; [key: string]: any; }
+export interface BetaConfig { [key: string]: any; }
+export interface RadarStats { [key: string]: any; }
