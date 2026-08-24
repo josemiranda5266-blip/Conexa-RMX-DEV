@@ -2,10 +2,17 @@ export type Role = 'USER' | 'PROFESSIONAL' | 'MODERATOR' | 'ADMIN' | 'SUPER_ADMI
 
 export type VerificationStatus = 'NONE' | 'PENDING' | 'VERIFIED' | 'REJECTED';
 
-export type JobStatus = 'REQUEST_CREATED' | 'QUOTES_RECEIVED' | 'PROFESSIONAL_SELECTED' | 'IN_PROGRESS' | 'COMPLETED' | 'REVIEW_PENDING' | 'CLOSED' | 'CANCELLED';
+export type JobStatus = 
+  | 'REQUEST_CREATED'
+  | 'QUOTES_RECEIVED'
+  | 'PROFESSIONAL_SELECTED'
+  | 'IN_PROGRESS'
+  | 'COMPLETED'
+  | 'REVIEW_PENDING'
+  | 'CLOSED'
+  | 'CANCELLED';
 
 export interface LocationData { city: string; province: string; country: string; lat: number; lng: number; approxZone: string; exactAddressPrivate?: string; }
-
 export interface UserProfile {
   id: string; name: string; email: string; phonePrivate: string; avatar: string; role: Role; joinedDate: string; location: LocationData;
   isIdentityVerified: boolean; identityVerificationStatus: VerificationStatus; identityDocUrl?: string; isBlocked?: boolean;
@@ -30,5 +37,19 @@ export interface Transaction { id: string; serviceRequestId: string; quoteId: st
 export interface SharedContactState { phoneSharedWithUserIds: string[]; addressSharedWithUserIds: string[]; }
 export interface Message { id: string; conversationId: string; senderId: string; senderName: string; createdAt: string; type: 'TEXT' | 'IMAGE' | 'VOICE' | 'SYSTEM' | 'SHARED_PHONE' | 'SHARED_ADDRESS' | 'QUOTE_PROPOSAL'; content: string; attachmentUrl?: string; quoteData?: Quote; }
 export interface Conversation { id: string; participantIds: [string, string]; otherUser: { id: string; name: string; avatar: string; profession?: string; isIdentityVerified?: boolean; isProfessionalVerified?: boolean; }; lastMessage: string; lastMessageTime: string; unreadCount: number; sharedPhoneBySender: boolean; sharedPhoneByReceiver: boolean; sharedAddressBySender: boolean; sharedAddressByReceiver: boolean; }
+export interface UserReport { id: string; reporterId: string; reporterName: string; reportedUserId: string; reportedUserName: string; reason: 'SPAM' | 'ESTAFA' | 'ACOSO' | 'PERFIL_FALSO' | 'SUPLANTACION' | 'INAPROPIADO' | 'OTRO'; description: string; createdAt: string; status: 'PENDING' | 'REVIEWED' | 'DISMISSED' | 'ACTION_TAKEN'; adminNotes?: string; }
 export interface VerificationRequest { id: string; userId: string; userName: string; userRole: Role; type: 'IDENTITY' | 'PROFESSIONAL'; documentName: string; documentUrl: string; status: VerificationStatus; createdAt: string; }
-export interface UserReport { id: string; reporterId: string; reportedUserId: string; reason: string; details: string; status: 'PENDING' | 'REVIEWED' | 'RESOLVED'; createdAt: string; }
+export interface NotificationItem { id: string; userId: string; title: string; body: string; type: 'MESSAGE' | 'REQUEST' | 'QUOTE' | 'VERIFICATION' | 'REVIEW' | 'SYSTEM'; read: boolean; createdAt: string; targetId?: string; }
+export interface InviteCode { id: string; code: string; maxUses: number; usedCount: number; expiresAt: string; userRole: Role; isActive: boolean; createdAt: string; createdForNote?: string; }
+export interface FeedbackItem { id: string; userId: string; userName: string; userRole: Role; category: 'LIKE' | 'PROBLEM' | 'BUG' | 'SUGGESTION'; comment: string; createdAt: string; status: 'NEW' | 'REVIEWED' | 'RESOLVED'; }
+export interface AnalyticsEvent { id: string; eventName: string; userId: string; timestamp: string; context?: Record<string, any>; }
+export interface BetaConfig { isBetaActive: boolean; requireInviteCode: boolean; pilotCity: string; allowNewRegistrations: boolean; }
+export type OpportunityIntent = 'LOW' | 'MEDIUM' | 'HIGH';
+export type OpportunityUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'EMERGENCY';
+export type OpportunityStatus = 'NEW' | 'ANALYZED' | 'QUALIFIED' | 'READY_TO_CONTACT' | 'CONTACTED' | 'RESPONDED' | 'REGISTERED' | 'MATCHED' | 'SERVICE_REQUESTED' | 'CONVERTED' | 'CLOSED' | 'IGNORED';
+export type OpportunitySourceType = 'API_AUTORIZADA' | 'WEBHOOK' | 'FORMULARIO_CONEXA' | 'META_INTEGRATION_OFFICIAL' | 'CANAL_PROPIO' | 'CAMPAÑA_MARKETING' | 'REFERIDOS' | 'FUENTE_PUBLICA_PERMITIDA';
+export type ContactMethod = 'CANAL_OFICIAL' | 'RESPUESTA_PUBLICA_PERMITIDA' | 'FORMULARIO_LANDING' | 'WHATSAPP_API' | 'EMAIL';
+export type ApprovalMode = 'AUTOMÁTICO' | 'ASISTIDO' | 'MANUAL';
+export interface MatchedProfessional { professionalId: string; name: string; professionName: string; avatar: string; matchScore: number; trustScore: number; locationApprox: string; isVerified: boolean; matchReasons: string[]; }
+export interface RadarOpportunity { id: string; source: string; sourceType: OpportunitySourceType; externalReference?: string; category: string; subcategory: string; description: string; city: string; province: string; neighborhood?: string; urgency: OpportunityUrgency; intentScore: number; confidenceScore: number; status: OpportunityStatus; detectedAt: string; lastUpdated: string; assignedOperator?: string; matchedProfessionals: MatchedProfessional[]; conversionStatus: 'NOT_STARTED' | 'PENDING' | 'CONVERTED' | 'FAILED'; consentStatus: 'PENDING_CONSENT' | 'CONSENT_GRANTED' | 'NOT_REQUIRED'; contactMethod: ContactMethod; notes?: string; environment?: 'simulation' | 'production'; is_test?: boolean; aiAnalysis: { category: string; subcategory: string; intent: OpportunityIntent; urgency: OpportunityUrgency; intentScore: number; confidenceScore: number; spamRiskScore?: number; reasoning: string; recommendedResponseText?: string; }; attribution?: { source: string; campaign?: string; opportunityId: string; }; }
+export interface RadarStats { totalDetected: number; newOpportunities: number; highIntentCount: number; contactedCount: number; convertedUsers: number; requestsGenerated: number; servicesCompleted: number; conversionRate: number; detectionRatePerDay: number; qualificationRate: number; contactRate: number; responseRate: number; registrationRate: number; matchRate: number; serviceRequestRate: number; costPerAcquisitionArs: number; revenuePerSourceArs: number; byCategory: Record<string, number>; byLocation: Record<string, number>; bySource: Record<string, number>; growthInsights: string[]; }
