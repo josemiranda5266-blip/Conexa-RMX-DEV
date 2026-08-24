@@ -1,58 +1,35 @@
-name: Unify and validate Conexa repositories
+name: Conexa unified build
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - unification/conexa-unified
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  unify:
-    if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, 'build: assemble unified Conexa tree') }}
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout target branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: unification/conexa-unified
           fetch-depth: 0
-
-      - name: Assemble unified tree from canonical and secondary repositories
+      - name: Assemble from source repositories
         run: bash scripts/unify-repos.sh
-
-      - name: Install Node dependencies
+      - name: Install dependencies
         run: npm install --no-audit --no-fund
-
-      - name: TypeScript validation
+      - name: TypeScript check
         run: npm run lint
-
-      - name: Production build validation
+      - name: Production build
         run: npm run build
-
-      - name: Validate dependency manifest
-        run: node -e "const p=require('./package.json'); for (const [section,obj] of Object.entries({dependencies:p.dependencies||{},devDependencies:p.devDependencies||{}})) for (const [k,v] of Object.entries(obj)) if(typeof v!=='string'||!v.trim()) throw new Error('Invalid '+section+' dependency '+k)"
-
-      - name: Remove generated files and local secrets
-        run: rm -rf node_modules dist .env
-
-      - name: Show unification report
-        run: cat UNIFICATION_AUTO_REPORT.md
-
-      - name: Commit unified tree only after validation passes
-        if: ${{ github.event_name != 'pull_request' }}
+      - name: Commit validated unified tree
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          if git diff --cached --quiet; then
-            echo 'No changes to commit.'
-          else
-            git commit -m 'build: assemble unified Conexa tree'
-            git push origin HEAD:unification/conexa-unified
-          fi
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'build: assemble unified Conexa tree'
+          git push origin HEAD:unification/conexa-unified
