@@ -6,18 +6,21 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function owner(uid) { return signedIn() && request.auth.uid == uid; }
     function admin() { return signedIn() && (request.auth.token.role == 'ADMIN' || request.auth.token.role == 'SUPER_ADMIN'); }
-    function immutableUserFields() { return ['role', 'isIdentityVerified', 'isProfessionalVerified', 'rating', 'reviewCount', 'jobsCompleted', 'trustScore']; }
+    function immutableUserFields() { return ['role', 'isProfessional', 'isIdentityVerified', 'isProfessionalVerified', 'rating', 'reviewCount', 'jobsCompleted', 'trustScore']; }
     function immutableRequestFields() { return ['clientId', 'status', 'assignedProfessionalId', 'biddingProfessionalIds', 'quotesCount']; }
 
     match /users/{userId} {
       allow read: if signedIn();
       allow create: if owner(userId)
         && (!request.resource.data.keys().hasAny(['role']) || request.resource.data.role == 'USER')
+        && (!request.resource.data.keys().hasAny(['isProfessional']) || request.resource.data.isProfessional == false)
+        && (!request.resource.data.keys().hasAny(['isIdentityVerified']) || request.resource.data.isIdentityVerified == false)
+        && (!request.resource.data.keys().hasAny(['isProfessionalVerified']) || request.resource.data.isProfessionalVerified == false)
         && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode in ['CLIENT','PROFESSIONAL']);
       allow update: if admin()
         || (owner(userId)
           && request.resource.data.diff(resource.data).affectedKeys().hasNone(immutableUserFields())
-          && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode in ['CLIENT','PROFESSIONAL'])));
+          && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode in ['CLIENT','PROFESSIONAL']));
       allow delete: if admin();
       match /private/info { allow read, write: if owner(userId) || admin(); }
     }
@@ -31,8 +34,6 @@ service cloud.firestore {
         || admin()
       );
       allow create: if signedIn() && request.resource.data.clientId == request.auth.uid;
-      // Critical lifecycle fields are server-authoritative. Clients may edit request content,
-      // but cannot self-assign, change status, alter client ownership, or forge quote counts.
       allow update: if admin()
         || (signedIn()
           && resource.data.clientId == request.auth.uid
@@ -43,7 +44,6 @@ service cloud.firestore {
 
     match /quotes/{quoteId} {
       allow read: if signedIn() && (resource.data.professionalId == request.auth.uid || resource.data.clientId == request.auth.uid || admin());
-      // Quotes are created/updated by authenticated backend endpoints, never by the browser.
       allow create, update, delete: if admin();
     }
 
@@ -52,9 +52,9 @@ service cloud.firestore {
       allow create, update, delete: if admin();
     }
 
+    // OAuth tokens are server-only. Clients must use /api/mercadopago/status.
     match /mercadopago_connections/{userId} {
-      allow read: if owner(userId) || admin();
-      allow create, update, delete: if false;
+      allow read, create, update, delete: if admin();
     }
 
     match /conversations/{conversationId} {
@@ -71,17 +71,17 @@ service cloud.firestore {
         || admin()
       );
       allow create: if signedIn() && request.resource.data.senderId == request.auth.uid;
+      allow update: if admin()
+        || (signedIn() && resource.data.senderId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text','content','isDeleted','updatedAt']));
     }
 
-    match /reports/{reportId} {
-      allow create: if signedIn() && request.resource.data.reporterId == request.auth.uid;
-      allow read, update, delete: if admin();
-    }
+    match /reports/{reportId} { allow create: if signedIn() && request.resource.data.reporterId == request.auth.uid; allow read, update, delete: if admin(); }
 
     match /reviews/{reviewId} {
       allow read: if signedIn();
-      allow create: if signedIn() && request.resource.data.clientId == request.auth.uid;
-      allow update, delete: if admin() || (signedIn() && resource.data.clientId == request.auth.uid);
+      allow create: if admin();
+      allow update, delete: if admin();
     }
 
     match /verifications/{verifId} {
