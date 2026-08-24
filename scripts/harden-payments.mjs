@@ -4,17 +4,13 @@ const path = 'server.ts';
 let server = fs.readFileSync(path, 'utf8');
 
 function replaceOnce(regex, replacement, label) {
-  if (!regex.test(server)) {
-    if (typeof replacement === 'string' && server.includes(replacement.trim().slice(0, 80))) return;
-    throw new Error(`Payment hardening pattern not found: ${label}`);
-  }
+  if (!regex.test(server)) throw new Error(`Payment hardening pattern not found: ${label}`);
   server = server.replace(regex, replacement);
 }
 
 replaceOnce(
-  /      const transaction = txSnap\.data\(\) \|\| \{\};\n      if \(transaction\.clientId !== auth\.userId\) return res\.status\(403\)\.json\(\{ error: 'FORBIDDEN' \}\);\n      if \(transaction\.status !== 'PAYMENT_PENDING'\) return res\.status\(409\)\.json\(\{ error: 'TRANSACTION_NOT_PAYABLE' \}\);/,
-  `      const transaction = txSnap.data() || {};
-      if (transaction.clientId !== auth.userId) return res.status(403).json({ error: 'FORBIDDEN' });
+  /      if \(transaction\.clientId !== auth\.userId\) return res\.status\(403\)\.json\(\{ error: 'FORBIDDEN' \}\);\n      if \(transaction\.status !== 'PAYMENT_PENDING'\) return res\.status\(409\)\.json\(\{ error: 'TRANSACTION_NOT_PAYABLE' \}\);/,
+  `      if (transaction.clientId !== auth.userId) return res.status(403).json({ error: 'FORBIDDEN' });
       if (!['PAYMENT_PENDING', 'CHECKOUT_CREATED'].includes(String(transaction.status))) return res.status(409).json({ error: 'TRANSACTION_NOT_PAYABLE' });
       if (transaction.mercadoPagoPreferenceId && transaction.mercadoPagoInitPoint) {
         return res.json({ success: true, transactionId: transaction.id, preferenceId: transaction.mercadoPagoPreferenceId, initPoint: transaction.mercadoPagoInitPoint, sandboxInitPoint: transaction.mercadoPagoSandboxInitPoint || null });
@@ -46,14 +42,20 @@ replaceOnce(
 );
 
 replaceOnce(
-  /      const reviewId = `review-\$\{Date\.now\(\)\}-\$\{crypto\.randomBytes\(5\)\.toString\('hex'\)\}`;\n      const review = \{/,
-  '      const reviewId = `review-${txDoc.id}`;\n      const reviewRef = db.collection(\'reviews\').doc(reviewId);\n      const review = {',
-  'deterministic review id'
+  /      const update: any = \{ mercadoPagoPaymentId: paymentId, paymentStatus: payment\.status, paymentUpdatedAt: new Date\(\)\.toISOString\(\) \};\n      if \(payment\.status === 'approved'\) \{ update\.status = 'PAID'; update\.paidAt = new Date\(\)\.toISOString\(\); \}/,
+  `      const update: any = { mercadoPagoPaymentId: paymentId, paymentStatus: payment.status, paymentUpdatedAt: new Date().toISOString() };
+      if (payment.status === 'approved') {
+        update.status = 'PAID';
+        update.paidAt = transactionData.paidAt || new Date().toISOString();
+      }`,
+  'idempotent paid timestamp'
 );
+
 replaceOnce(
-  /      batch\.set\(db\.collection\('reviews'\)\.doc\(reviewId\), review\);/,
-  '      batch.create(reviewRef, review);',
-  'atomic review creation'
+  /const transaction = \{\n          id: transactionRef\.id,/,
+  `const transaction = {
+          id: transactionRef.id,`,
+  'transaction declaration guard'
 );
 
 fs.writeFileSync(path, server);
