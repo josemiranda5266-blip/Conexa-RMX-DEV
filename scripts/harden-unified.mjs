@@ -15,5 +15,106 @@ const checkoutGuard = /      if \(transaction\.status !== 'PAYMENT_PENDING'\) re
 if (checkoutGuard.test(server)) server = server.replace(checkoutGuard, `      if (!['PAYMENT_PENDING', 'CHECKOUT_CREATED'].includes(String(transaction.status))) return res.status(409).json({ error: 'TRANSACTION_NOT_PAYABLE' });\n      if (transaction.mercadoPagoPreferenceId && transaction.mercadoPagoInitPoint) return res.json({ success: true, transactionId: transaction.id, preferenceId: transaction.mercadoPagoPreferenceId, initPoint: transaction.mercadoPagoInitPoint, sandboxInitPoint: transaction.mercadoPagoSandboxInitPoint || null });`);
 server = server.replace(/await txRef\.update\(\{ mercadoPagoPreferenceId: preference\.id, status: 'PAYMENT_PENDING', paymentCheckoutCreatedAt: new Date\(\)\.toISOString\(\) \}\);/, "await txRef.update({ mercadoPagoPreferenceId: preference.id, mercadoPagoInitPoint: preference.init_point || null, mercadoPagoSandboxInitPoint: preference.sandbox_init_point || null, status: 'CHECKOUT_CREATED', paymentCheckoutCreatedAt: new Date().toISOString() });");
 
+// Harden the authoritative quote-acceptance transition. This replacement is deliberately bounded
+// between the transaction endpoint and the next account endpoint so it cannot alter unrelated routes.
+const transactionEndpointPattern = /  app\.post\("\/api\/transactions\/create"[\s\S]*?\n  \}\);\n\n  \/\/ Account Deletion API Endpoint/;
+if (transactionEndpointPattern.test(server)) {
+  const hardenedTransactionEndpoint = `  app.post("/api/transactions/create", rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const auth = await verifyAuthToken(req);
+      if (!auth.isAuthenticated || !auth.userId) return res.status(401).json({ success: false, error: "UNAUTHORIZED", code: "UNAUTHORIZED" });
+      const { quoteId } = req.body || {};
+      if (!quoteId || typeof quoteId !== 'string') return res.status(400).json({ success: false, error: "INVALID_QUOTE_ID", code: "INVALID_QUOTE_ID" });
+
+      const firestore = await getAdminDb();
+      const quoteRef = firestore.collection('quotes').doc(quoteId);
+      const transactionRef = firestore.collection('transactions').doc(\`txn-\${quoteId}\`);
+      const now = new Date().toISOString();
+      const feePercentRaw = Number(process.env.CONEXA_PLATFORM_FEE_PERCENT || '8');
+      const feePercent = Number.isFinite(feePercentRaw) && feePercentRaw >= 0 && feePercentRaw <= 20 ? feePercentRaw : 8;
+
+      const result = await firestore.runTransaction(async (tx: any) => {
+        const quoteSnap = await tx.get(quoteRef);
+        if (!quoteSnap.exists) throw new Error('QUOTE_NOT_FOUND');
+        const quote = quoteSnap.data() || {};
+        if (typeof quote.priceArs !== 'number' || quote.priceArs <= 0) throw new Error('INVALID_QUOTE_AMOUNT');
+
+        const requestRef = firestore.collection('service_requests').doc(String(quote.requestId));
+        const requestSnap = await tx.get(requestRef);
+        if (!requestSnap.exists) throw new Error('REQUEST_NOT_FOUND');
+        const serviceRequest = requestSnap.data() || {};
+
+        if (serviceRequest.clientId !== auth.userId) throw new Error('FORBIDDEN_REQUEST_OWNER');
+        if (!['REQUEST_CREATED', 'QUOTES_RECEIVED'].includes(String(serviceRequest.status))) throw new Error('REQUEST_NOT_CONTRACTABLE');
+        if (quote.status !== 'PENDING') throw new Error('QUOTE_NOT_AVAILABLE');
+        if (serviceRequest.assignedProfessionalId && serviceRequest.assignedProfessionalId !== quote.professionalId) throw new Error('PROFESSIONAL_CONTEXT_MISMATCH');
+
+        const clientRef = firestore.collection('users').doc(auth.userId);
+        const clientSnap = await tx.get(clientRef);
+        if (!clientSnap.exists || !['USER'].includes(String(clientSnap.data()?.role || auth.role))) throw new Error('CLIENT_ROLE_REQUIRED');
+
+        const professionalRef = firestore.collection('users').doc(String(quote.professionalId));
+        const professionalSnap = await tx.get(professionalRef);
+        if (!professionalSnap.exists || professionalSnap.data()?.role !== 'PROFESSIONAL') throw new Error('PROFESSIONAL_ROLE_REQUIRED');
+
+        const connectionRef = firestore.collection('mercadopago_connections').doc(String(quote.professionalId));
+        const connectionSnap = await tx.get(connectionRef);
+        if (!connectionSnap.exists || connectionSnap.data()?.connected !== true || !connectionSnap.data()?.accessTokenEnc) throw new Error('PROFESSIONAL_MERCADO_PAGO_NOT_CONNECTED');
+
+        const existing = await tx.get(transactionRef);
+        if (existing.exists) {
+          const existingData = existing.data() || {};
+          if (existingData.clientId !== auth.userId || existingData.quoteId !== quoteId || existingData.serviceRequestId !== quote.requestId) throw new Error('TRANSACTION_CONTEXT_MISMATCH');
+          return existingData;
+        }
+
+        const amountArs = Number(quote.priceArs);
+        const platformFeeArs = Number((amountArs * feePercent / 100).toFixed(2));
+        const professionalAmountArs = Number((amountArs - platformFeeArs).toFixed(2));
+        const transaction = {
+          id: transactionRef.id,
+          serviceRequestId: quote.requestId,
+          quoteId,
+          clientId: serviceRequest.clientId,
+          professionalId: quote.professionalId,
+          amountArs,
+          currency: 'ARS',
+          platformFeePercent: feePercent,
+          platformFeeArs,
+          professionalAmountArs,
+          status: 'PAYMENT_PENDING',
+          createdAt: now
+        };
+
+        tx.set(transactionRef, transaction);
+        tx.update(quoteRef, { status: 'ACCEPTED' });
+        tx.update(requestRef, { status: 'PROFESSIONAL_SELECTED', assignedProfessionalId: quote.professionalId });
+        return transaction;
+      });
+
+      return res.status(201).json({ success: true, transaction: result });
+    } catch (err: any) {
+      const code = err?.message || 'TRANSACTION_CREATE_ERROR';
+      const map: Record<string, number> = {
+        QUOTE_NOT_FOUND: 404,
+        REQUEST_NOT_FOUND: 404,
+        FORBIDDEN_REQUEST_OWNER: 403,
+        CLIENT_ROLE_REQUIRED: 403,
+        PROFESSIONAL_ROLE_REQUIRED: 403,
+        QUOTE_NOT_AVAILABLE: 409,
+        REQUEST_NOT_CONTRACTABLE: 409,
+        PROFESSIONAL_CONTEXT_MISMATCH: 409,
+        PROFESSIONAL_MERCADO_PAGO_NOT_CONNECTED: 409,
+        TRANSACTION_CONTEXT_MISMATCH: 409,
+        INVALID_QUOTE_AMOUNT: 422
+      };
+      return res.status(map[code] || 500).json({ success: false, error: code, code });
+    }
+  });
+
+  // Account Deletion API Endpoint`;
+  server = server.replace(transactionEndpointPattern, hardenedTransactionEndpoint);
+}
+
 fs.writeFileSync(path, server);
 console.log('Unified server hardening applied.');
