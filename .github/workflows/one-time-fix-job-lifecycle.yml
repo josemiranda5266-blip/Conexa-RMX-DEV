@@ -1,0 +1,176 @@
+name: One-time job lifecycle fix
+
+on:
+  push:
+    branches: [unification/conexa-unified]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: unification/conexa-unified
+          fetch-depth: 0
+
+      - name: Patch review and close lifecycle
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('server.ts')
+          text = p.read_text(encoding='utf-8')
+          marker = '  // Account Deletion API Endpoint (GDPR/ARCO Compliance)'
+          if marker not in text:
+              raise SystemExit('Insertion marker not found')
+          if 'app.post("/api/reviews/create"' in text:
+              raise SystemExit('Review endpoint already exists')
+
+          block = r'''  // Authoritative review + close lifecycle: REVIEW_PENDING -> CLOSED.
+  // The client who owns the request submits the review; the server atomically
+  // verifies the completed transaction, creates the verified review, and closes
+  // both the request and transaction. This prevents local-only state transitions.
+  app.post("/api/reviews/create", rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const auth = await verifyAuthToken(req);
+      if (!auth.isAuthenticated || !auth.userId) {
+        return res.status(401).json({ success: false, error: "Se requiere autenticación válida.", code: "UNAUTHORIZED" });
+      }
+
+      const {
+        quoteId,
+        professionalId,
+        comment,
+        overallRating,
+        qualityRating,
+        punctualityRating,
+        treatmentRating,
+        priceRating,
+        complianceRating
+      } = req.body || {};
+
+      if (!quoteId || typeof quoteId !== 'string') {
+        return res.status(400).json({ success: false, error: "quoteId es obligatorio.", code: "INVALID_QUOTE_ID" });
+      }
+      if (!comment || typeof comment !== 'string' || !comment.trim()) {
+        return res.status(400).json({ success: false, error: "La reseña requiere un comentario.", code: "INVALID_REVIEW_COMMENT" });
+      }
+
+      const ratings = {
+        overallRating: Number(overallRating),
+        qualityRating: Number(qualityRating),
+        punctualityRating: Number(punctualityRating),
+        treatmentRating: Number(treatmentRating),
+        priceRating: Number(priceRating),
+        complianceRating: Number(complianceRating)
+      };
+      if (Object.values(ratings).some(v => !Number.isFinite(v) || v < 1 || v > 5)) {
+        return res.status(422).json({ success: false, error: "Las calificaciones deben estar entre 1 y 5.", code: "INVALID_REVIEW_RATING" });
+      }
+
+      const firestore = await getAdminDb();
+      const quoteRef = firestore.collection('quotes').doc(quoteId);
+      const quoteSnap = await quoteRef.get();
+      if (!quoteSnap.exists) return res.status(404).json({ success: false, error: "Presupuesto no encontrado.", code: "QUOTE_NOT_FOUND" });
+      const quote = quoteSnap.data() || {};
+
+      if (professionalId && professionalId !== quote.professionalId) {
+        return res.status(409).json({ success: false, error: "El profesional no coincide con el presupuesto contratado.", code: "PROFESSIONAL_CONTEXT_MISMATCH" });
+      }
+
+      const requestId = String(quote.requestId || '');
+      if (!requestId) return res.status(422).json({ success: false, error: "El presupuesto no está asociado a una solicitud válida.", code: "REQUEST_CONTEXT_INVALID" });
+
+      const requestRef = firestore.collection('service_requests').doc(requestId);
+      const transactionQuery = await firestore.collection('transactions').where('quoteId', '==', quoteId).limit(1).get();
+      if (transactionQuery.empty) return res.status(409).json({ success: false, error: "No existe una transacción asociada al presupuesto.", code: "TRANSACTION_NOT_FOUND" });
+
+      const transactionRef = transactionQuery.docs[0].ref;
+      const reviewRef = firestore.collection('reviews').doc(`review-${quoteId}-${auth.userId}`);
+      const now = new Date().toISOString();
+
+      const result = await firestore.runTransaction(async (tx: any) => {
+        const requestSnap = await tx.get(requestRef);
+        const transactionSnap = await tx.get(transactionRef);
+        const existingReviewSnap = await tx.get(reviewRef);
+        if (!requestSnap.exists) throw new Error('REQUEST_NOT_FOUND');
+        if (existingReviewSnap.exists) return { review: existingReviewSnap.data(), alreadyExists: true };
+
+        const request = requestSnap.data() || {};
+        const transaction = transactionSnap.data() || {};
+        if (request.clientId !== auth.userId || transaction.clientId !== auth.userId) throw new Error('FORBIDDEN_REVIEW_ACTOR');
+        if (transaction.quoteId !== quoteId || transaction.professionalId !== quote.professionalId) throw new Error('PROFESSIONAL_CONTEXT_MISMATCH');
+        if (request.status !== 'REVIEW_PENDING') throw new Error('JOB_NOT_REVIEWABLE');
+        if (transaction.status !== 'SERVICE_COMPLETED') throw new Error('TRANSACTION_NOT_COMPLETED');
+
+        const clientSnap = await tx.get(firestore.collection('users').doc(auth.userId));
+        const professionalSnap = await tx.get(firestore.collection('users').doc(String(quote.professionalId)));
+        const client = clientSnap.data() || {};
+        const professional = professionalSnap.data() || {};
+
+        const review = {
+          id: reviewRef.id,
+          jobId: requestId,
+          quoteId,
+          clientId: auth.userId,
+          clientName: client.name || 'Cliente CONEXA',
+          clientAvatar: client.avatar || '',
+          professionalId: quote.professionalId,
+          createdAt: now,
+          comment: comment.trim().slice(0, 2000),
+          ...ratings,
+          isVerifiedJob: true
+        };
+
+        const oldRating = Number(professional.rating || 0);
+        const oldCount = Number(professional.reviewCount || 0);
+        const newCount = oldCount + 1;
+        const newRating = Number(((oldRating * oldCount + ratings.overallRating) / newCount).toFixed(1));
+
+        tx.create(reviewRef, review);
+        tx.update(requestRef, { status: 'CLOSED', closedAt: now, reviewSubmittedAt: now });
+        tx.update(transactionRef, { status: 'SETTLED', reviewSubmittedAt: now, settledAt: now });
+        if (professionalSnap.exists) {
+          tx.update(firestore.collection('users').doc(String(quote.professionalId)), {
+            rating: newRating,
+            reviewCount: newCount,
+            jobsCompleted: Number(professional.jobsCompleted || 0) + 1,
+            availabilityStatus: 'DISPONIBLE'
+          });
+        }
+
+        return { review, alreadyExists: false };
+      });
+
+      return res.status(result.alreadyExists ? 200 : 201).json({ success: true, review: result.review, status: 'CLOSED' });
+    } catch (err: any) {
+      const code = err?.message || 'REVIEW_CREATE_ERROR';
+      const map: Record<string, number> = {
+        REQUEST_NOT_FOUND: 404,
+        FORBIDDEN_REVIEW_ACTOR: 403,
+        JOB_NOT_REVIEWABLE: 409,
+        TRANSACTION_NOT_COMPLETED: 409,
+        TRANSACTION_NOT_FOUND: 409,
+        PROFESSIONAL_CONTEXT_MISMATCH: 409,
+        REQUEST_CONTEXT_INVALID: 422
+      };
+      return res.status(map[code] || 500).json({ success: false, error: map[code] ? `No se puede cerrar el trabajo: ${code}.` : "Error interno al guardar la reseña.", code });
+    }
+  });
+
+'''
+          text = text.replace(marker, block + marker, 1)
+          p.write_text(text, encoding='utf-8')
+
+      - name: Commit lifecycle fix and remove one-time workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.ts
+          git commit -m "fix: make review and job closure authoritative" || exit 1
+          git rm .github/workflows/one-time-fix-job-lifecycle.yml
+          git commit -m "chore: remove one-time lifecycle patch workflow"
+          git push origin HEAD:unification/conexa-unified
