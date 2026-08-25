@@ -14,13 +14,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Apply lifecycle patch
-        run: python3 scripts/apply_job_lifecycle_patch.py
+        run: |
+          python3 scripts/apply_job_lifecycle_patch.py
+          python3 scripts/finish_job_context.py
       - name: Validate source changes
         run: |
           test -s server.ts
           test -s src/context/AppContext.tsx
           grep -q '/api/jobs/start' server.ts
           grep -q '/api/jobs/complete' server.ts
+          grep -q 'startJob' src/context/AppContext.tsx
           grep -q 'completeJob' src/context/AppContext.tsx
       - name: Commit generated changes
         run: |
