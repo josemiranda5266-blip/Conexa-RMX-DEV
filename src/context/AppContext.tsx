@@ -43,7 +43,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     if (!db || !currentUser) return; const uid = currentUser.id; const admin = currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN'; const unsubscribers: Unsubscribe[] = [];
-    const trans = admin ? collection(db, 'transactions') : query(collection(db, 'transactions'), where('clientId', '==', uid)); unsubscribers.push(onSnapshot(trans, s => setTransactions(s.docs.map(d => d.data() as Transaction)), e => console.warn('[CONEXA SYNC] transactions:', e.message)));
+    const mergeTransactions = (incoming: Transaction[]) => setTransactions(prev => { const map = new Map(prev.map(t => [t.id, t])); incoming.forEach(t => map.set(t.id, t)); return Array.from(map.values()); });
+    if (admin) {
+      unsubscribers.push(onSnapshot(collection(db, 'transactions'), s => setTransactions(s.docs.map(d => d.data() as Transaction)), e => console.warn('[CONEXA SYNC] transactions:', e.message)));
+    } else {
+      const clientTrans = query(collection(db, 'transactions'), where('clientId', '==', uid));
+      const professionalTrans = query(collection(db, 'transactions'), where('professionalId', '==', uid));
+      unsubscribers.push(onSnapshot(clientTrans, s => mergeTransactions(s.docs.map(d => d.data() as Transaction)), e => console.warn('[CONEXA SYNC] client transactions:', e.message)));
+      unsubscribers.push(onSnapshot(professionalTrans, s => mergeTransactions(s.docs.map(d => d.data() as Transaction)), e => console.warn('[CONEXA SYNC] professional transactions:', e.message)));
+    }
     const verif = admin ? collection(db, 'verifications') : query(collection(db, 'verifications'), where('userId', '==', uid)); unsubscribers.push(onSnapshot(verif, s => setVerifications(s.docs.map(d => d.data() as VerificationRequest)), e => console.warn('[CONEXA SYNC] verifications:', e.message)));
     if (admin) unsubscribers.push(onSnapshot(collection(db, 'reports'), s => setReports(s.docs.map(d => d.data() as UserReport)), e => console.warn('[CONEXA SYNC] reports:', e.message)));
     return () => unsubscribers.forEach(u => u());
@@ -86,7 +94,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const transaction = data.transaction as Transaction;
     setTransactions(prev => [transaction, ...prev.filter(t => t.id !== transaction.id)]);
     setQuotes(prev => prev.map(q => q.id === quoteId ? { ...q, status: 'ACCEPTED' } : q));
-    setRequests(prev => prev.map(r => r.id === targetQuote.requestId ? { ...r, status: 'PAYMENT_PENDING' } : r));
+    setRequests(prev => prev.map(r => r.id === targetQuote.requestId ? { ...r, status: 'PROFESSIONAL_SELECTED' } : r));
     return transaction;
   };
 
