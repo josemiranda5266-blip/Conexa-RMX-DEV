@@ -88,7 +88,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const connectMercadoPago = async () => { if (!auth?.currentUser || !currentUser) throw new Error('Usuario no autenticado.'); const oauthWindow = window.open('about:blank', 'mercadopago_oauth', 'width=600,height=700,scrollbars=yes,resizable=yes'); if (!oauthWindow) throw new Error('El navegador bloqueó la ventana emergente de Mercado Pago.'); try { const token = await auth.currentUser.getIdToken(); const response = await fetch('/api/mercadopago/oauth/start', { headers: { Authorization: `Bearer ${token}` } }); const data = await response.json().catch(() => ({})); if (!response.ok || !data.authorizationUrl) { oauthWindow.close(); throw new Error(data.error || 'No se pudo iniciar la conexión con Mercado Pago.'); } oauthWindow.location.href = data.authorizationUrl; } catch (error) { if (!oauthWindow.closed) oauthWindow.close(); throw error; } };
 
   const acceptQuote = async (quoteId: string): Promise<Transaction | null> => {
-    const targetQuote = quotes.find(q => q.id === quoteId); if (!targetQuote) throw new Error('Presupuesto no disponible.'); if (!currentUser || currentUser.role !== 'USER') throw new Error('Solo el cliente puede aceptar un presupuesto.'); if (!auth?.currentUser) throw new Error('Debés iniciar sesión para aceptar el presupuesto.');
+    const targetQuote = quotes.find(q => q.id === quoteId);
+    if (!targetQuote) throw new Error('Presupuesto no disponible.');
+    if (!currentUser) throw new Error('Usuario no disponible.');
+    if (currentUser.activeMode !== 'CLIENT') throw new Error('Cambiá al modo Cliente para aceptar un presupuesto.');
+    if (!currentUser.hasClientProfile) throw new Error('La cuenta no tiene perfil de cliente.');
+    if (!auth?.currentUser) throw new Error('Debés iniciar sesión para aceptar el presupuesto.');
     const token = await auth.currentUser.getIdToken(); const response = await fetch('/api/transactions/create', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ quoteId }) });
     const data = await response.json().catch(() => ({})); if (!response.ok || !data.success || !data.transaction) throw new Error(data.error || 'No se pudo crear la contratación.');
     const transaction = data.transaction as Transaction;
