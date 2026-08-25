@@ -14,7 +14,7 @@ interface AppContextType {
   feedbacks: FeedbackItem[]; analyticsEvents: AnalyticsEvent[]; radarOpportunities: RadarOpportunity[]; radarStats: RadarStats; approvalMode: ApprovalMode; setApprovalMode: (mode: ApprovalMode) => void;
   toggleFavorite: (proId: string) => void; sharePhoneWithUser: (conversationId: string, recipientId: string) => void; shareAddressWithUser: (conversationId: string, recipientId: string) => void;
   addReview: (reviewData: Omit<Review, 'id' | 'createdAt' | 'isVerifiedJob'> & { quoteId: string }) => Promise<Review>; submitVerification: (type: 'IDENTITY' | 'PROFESSIONAL', documentName: string, docUrl: string) => Promise<VerificationRequest>;
-  submitQuote: (quote: Omit<Quote, 'id' | 'createdAt' | 'status'>) => Promise<Quote>; deleteAccount: (userId: string) => Promise<boolean>; completeJob: (requestId: string) => Promise<void>; deleteAccount: (userId: string) => Promise<boolean>; acceptQuote: (quoteId: string) => Promise<Transaction | null>; createMercadoPagoCheckout: (transactionId: string) => Promise<string>; connectMercadoPago: () => Promise<void>;
+  submitQuote: (quote: Omit<Quote, 'id' | 'createdAt' | 'status'>) => Promise<Quote>; deleteAccount: (userId: string) => Promise<boolean>; startJob: (requestId: string) => Promise<void>; completeJob: (requestId: string) => Promise<void>; acceptQuote: (quoteId: string) => Promise<Transaction | null>; createMercadoPagoCheckout: (transactionId: string) => Promise<string>; connectMercadoPago: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -92,6 +92,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const createMercadoPagoCheckout = async (transactionId: string): Promise<string> => { if (!auth?.currentUser) throw new Error('Debés iniciar sesión para pagar.'); const token = await auth.currentUser.getIdToken(); const response = await fetch('/api/mercadopago/checkout/create', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ transactionId }) }); const data = await response.json().catch(() => ({})); if (!response.ok || !data.success || !data.initPoint) throw new Error(data.error || 'No se pudo crear el checkout de Mercado Pago.'); return data.initPoint as string; };
 
+  const startJob = async (requestId: string): Promise<void> => {
+    if (!auth?.currentUser) throw new Error('Debés iniciar sesión para comenzar el trabajo.');
+    if (!currentUser || currentUser.role !== 'PROFESSIONAL') throw new Error('Solo el profesional contratado puede iniciar el trabajo.');
+    const token = await auth.currentUser.getIdToken();
+    const response = await fetch('/api/jobs/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ requestId })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) throw new Error(data.error || 'No se pudo iniciar el trabajo.');
+    setRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'IN_PROGRESS' } : r));
+    setTransactions(prev => prev.map(t => t.serviceRequestId === requestId ? { ...t, status: 'SERVICE_IN_PROGRESS' } : t));
+  };
+
   const completeJob = async (requestId: string): Promise<void> => {
     if (!auth?.currentUser) throw new Error('Debés iniciar sesión para completar el trabajo.');
     if (!currentUser || currentUser.role !== 'PROFESSIONAL') throw new Error('Solo el profesional contratado puede completar el trabajo.');
@@ -107,7 +122,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTransactions(prev => prev.map(t => t.serviceRequestId === requestId ? { ...t, status: 'SERVICE_COMPLETED' } : t));
   };
 
-  const value: AppContextType = { currentUser, setCurrentUser, switchUserRole, switchActiveMode, authLoading, authSessionReady, isAuthPortalOpen, openAuthPortal: () => setIsAuthPortalOpen(true), closeAuthPortal: () => setIsAuthPortalOpen(false), isAdmin, hasRole, users, categories, professions, reviews, requests, quotes, conversations, messages, reports, verifications, notifications, transactions, favorites, betaConfig, inviteCodes, feedbacks, analyticsEvents, radarOpportunities, radarStats, approvalMode, setApprovalMode, toggleFavorite, sharePhoneWithUser, shareAddressWithUser, addReview, submitVerification, submitQuote, deleteAccount, acceptQuote, completeJob, createMercadoPagoCheckout, connectMercadoPago };
+  const value: AppContextType = { currentUser, setCurrentUser, switchUserRole, switchActiveMode, authLoading, authSessionReady, isAuthPortalOpen, openAuthPortal: () => setIsAuthPortalOpen(true), closeAuthPortal: () => setIsAuthPortalOpen(false), isAdmin, hasRole, users, categories, professions, reviews, requests, quotes, conversations, messages, reports, verifications, notifications, transactions, favorites, betaConfig, inviteCodes, feedbacks, analyticsEvents, radarOpportunities, radarStats, approvalMode, setApprovalMode, toggleFavorite, sharePhoneWithUser, shareAddressWithUser, addReview, submitVerification, submitQuote, deleteAccount, acceptQuote, startJob, completeJob, createMercadoPagoCheckout, connectMercadoPago };
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };
 export const useApp = () => { const context = useContext(AppContext); if (!context) throw new Error('useApp must be used within AppProvider'); return context; };
