@@ -999,6 +999,90 @@ Responde en JSON con:
     }
   });
 
+  // Authoritative job lifecycle: paid contract -> in progress.
+  app.post("/api/jobs/start", rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const auth = await verifyAuthToken(req);
+      if (!auth.isAuthenticated || !auth.userId) return res.status(401).json({ success: false, error: "Se requiere autenticación válida.", code: "UNAUTHORIZED" });
+      const { requestId } = req.body || {};
+      if (!requestId || typeof requestId !== 'string') return res.status(400).json({ success: false, error: "requestId es obligatorio.", code: "INVALID_REQUEST_ID" });
+
+      const firestore = await getAdminDb();
+      const requestRef = firestore.collection('service_requests').doc(requestId);
+      const requestSnap = await requestRef.get();
+      if (!requestSnap.exists) return res.status(404).json({ success: false, error: "Solicitud no encontrada.", code: "REQUEST_NOT_FOUND" });
+      const txSnap = await firestore.collection('transactions').where('serviceRequestId', '==', requestId).limit(1).get();
+      if (txSnap.empty) return res.status(409).json({ success: false, error: "No existe una transacción asociada al trabajo.", code: "TRANSACTION_NOT_FOUND" });
+
+      const transactionRef = txSnap.docs[0].ref;
+      const transaction = txSnap.docs[0].data() || {};
+      const request = requestSnap.data() || {};
+      if (transaction.professionalId !== auth.userId) return res.status(403).json({ success: false, error: "Solo el profesional contratado puede iniciar el trabajo.", code: "FORBIDDEN_JOB_ACTOR" });
+      if (request.status !== 'PROFESSIONAL_SELECTED') return res.status(409).json({ success: false, error: "El trabajo no está listo para iniciarse.", code: "JOB_NOT_STARTABLE" });
+      if (transaction.status !== 'PAID') return res.status(409).json({ success: false, error: "El pago del trabajo todavía no está confirmado.", code: "PAYMENT_NOT_CONFIRMED" });
+
+      await firestore.runTransaction(async (tx: any) => {
+        const currentRequest = await tx.get(requestRef);
+        const currentTransaction = await tx.get(transactionRef);
+        const currentRequestData = currentRequest.data() || {};
+        const currentTransactionData = currentTransaction.data() || {};
+        if (currentTransactionData.professionalId !== auth.userId) throw new Error('FORBIDDEN_JOB_ACTOR');
+        if (currentRequestData.status !== 'PROFESSIONAL_SELECTED') throw new Error('JOB_NOT_STARTABLE');
+        if (currentTransactionData.status !== 'PAID') throw new Error('PAYMENT_NOT_CONFIRMED');
+        const startedAt = new Date().toISOString();
+        tx.update(requestRef, { status: 'IN_PROGRESS', startedAt });
+        tx.update(transactionRef, { status: 'SERVICE_IN_PROGRESS', serviceStartedAt: startedAt });
+      });
+      return res.json({ success: true, requestId, status: 'IN_PROGRESS' });
+    } catch (err: any) {
+      const code = err?.message || 'JOB_START_ERROR';
+      const map: Record<string, number> = { FORBIDDEN_JOB_ACTOR: 403, JOB_NOT_STARTABLE: 409, PAYMENT_NOT_CONFIRMED: 409, REQUEST_NOT_FOUND: 404, TRANSACTION_NOT_FOUND: 409 };
+      return res.status(map[code] || 500).json({ success: false, error: map[code] ? `No se puede iniciar el trabajo: ${code}.` : "Error interno al iniciar el trabajo.", code });
+    }
+  });
+
+  // Authoritative job completion: only the contracted professional can close the service.
+  app.post("/api/jobs/complete", rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const auth = await verifyAuthToken(req);
+      if (!auth.isAuthenticated || !auth.userId) return res.status(401).json({ success: false, error: "Se requiere autenticación válida.", code: "UNAUTHORIZED" });
+      const { requestId } = req.body || {};
+      if (!requestId || typeof requestId !== 'string') return res.status(400).json({ success: false, error: "requestId es obligatorio.", code: "INVALID_REQUEST_ID" });
+
+      const firestore = await getAdminDb();
+      const requestRef = firestore.collection('service_requests').doc(requestId);
+      const requestSnap = await requestRef.get();
+      if (!requestSnap.exists) return res.status(404).json({ success: false, error: "Solicitud no encontrada.", code: "REQUEST_NOT_FOUND" });
+      const txSnap = await firestore.collection('transactions').where('serviceRequestId', '==', requestId).limit(1).get();
+      if (txSnap.empty) return res.status(409).json({ success: false, error: "No existe una transacción asociada al trabajo.", code: "TRANSACTION_NOT_FOUND" });
+
+      const transactionRef = txSnap.docs[0].ref;
+      const transaction = txSnap.docs[0].data() || {};
+      const request = requestSnap.data() || {};
+      if (transaction.professionalId !== auth.userId) return res.status(403).json({ success: false, error: "Solo el profesional contratado puede completar el trabajo.", code: "FORBIDDEN_JOB_ACTOR" });
+      if (request.status !== 'IN_PROGRESS') return res.status(409).json({ success: false, error: "El trabajo no está en ejecución.", code: "JOB_NOT_COMPLETABLE" });
+      if (transaction.status !== 'SERVICE_IN_PROGRESS') return res.status(409).json({ success: false, error: "La transacción no está en estado de servicio en curso.", code: "TRANSACTION_NOT_IN_PROGRESS" });
+
+      await firestore.runTransaction(async (tx: any) => {
+        const currentRequest = await tx.get(requestRef);
+        const currentTransaction = await tx.get(transactionRef);
+        const currentRequestData = currentRequest.data() || {};
+        const currentTransactionData = currentTransaction.data() || {};
+        if (currentTransactionData.professionalId !== auth.userId) throw new Error('FORBIDDEN_JOB_ACTOR');
+        if (currentRequestData.status !== 'IN_PROGRESS') throw new Error('JOB_NOT_COMPLETABLE');
+        if (currentTransactionData.status !== 'SERVICE_IN_PROGRESS') throw new Error('TRANSACTION_NOT_IN_PROGRESS');
+        const completedAt = new Date().toISOString();
+        tx.update(requestRef, { status: 'REVIEW_PENDING', completedAt });
+        tx.update(transactionRef, { status: 'SERVICE_COMPLETED', serviceCompletedAt: completedAt });
+      });
+      return res.json({ success: true, requestId, status: 'REVIEW_PENDING' });
+    } catch (err: any) {
+      const code = err?.message || 'JOB_COMPLETE_ERROR';
+      const map: Record<string, number> = { FORBIDDEN_JOB_ACTOR: 403, JOB_NOT_COMPLETABLE: 409, TRANSACTION_NOT_IN_PROGRESS: 409, REQUEST_NOT_FOUND: 404, TRANSACTION_NOT_FOUND: 409 };
+      return res.status(map[code] || 500).json({ success: false, error: map[code] ? `No se puede completar el trabajo: ${code}.` : "Error interno al completar el trabajo.", code });
+    }
+  });
+
   // Account Deletion API Endpoint (GDPR/ARCO Compliance)
   // Requires authenticated user (own account) or Firebase Admin ID Token with ADMIN claim
   app.post("/api/user/delete-account", rateLimiter, async (req: Request, res: Response) => {
