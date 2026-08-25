@@ -1,0 +1,169 @@
+name: Complete Firestore sync migration
+
+on:
+  push:
+    branches:
+      - unification/conexa-unified
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply unified Firestore persistence patch
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          ctx = Path('src/context/AppContext.tsx')
+          text = ctx.read_text(encoding='utf-8')
+
+          old = '''  useEffect(() => {
+    if (!db || !currentUser) return; const uid = currentUser.id; const admin = currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN'; const unsubscribers: Unsubscribe[] = [];
+    const mergeTransactions = (incoming: Transaction[]) => setTransactions(prev => { const map = new Map(prev.map(t => [t.id, t])); incoming.forEach(t => map.set(t.id, t)); return Array.from(map.values()); });
+    if (admin) {
+      unsubscribers.push(onSnapshot(collection(db, 'transactions'), s => setTransactions(s.docs.map(d => d.data() as Transaction)), e => console.warn('[CONEXA SYNC] transactions:', e.message)));
+    } else {
+      const clientTrans = query(collection(db, 'transactions'), where('clientId', '==', uid));
+      const professionalTrans = query(collection(db, 'transactions'), where('professionalId', '==', uid));
+      unsubscribers.push(onSnapshot(clientTrans, s => mergeTransactions(s.docs.map(d => d.data() as Transaction)), e => console.warn('[CONEXA SYNC] client transactions:', e.message)));
+      unsubscribers.push(onSnapshot(professionalTrans, s => mergeTransactions(s.docs.map(d => d.data() as Transaction)), e => console.warn('[CONEXA SYNC] professional transactions:', e.message)));
+    }
+    const verif = admin ? collection(db, 'verifications') : query(collection(db, 'verifications'), where('userId', '==', uid)); unsubscribers.push(onSnapshot(verif, s => setVerifications(s.docs.map(d => d.data() as VerificationRequest)), e => console.warn('[CONEXA SYNC] verifications:', e.message)));
+    if (admin) unsubscribers.push(onSnapshot(collection(db, 'reports'), s => setReports(s.docs.map(d => d.data() as UserReport)), e => console.warn('[CONEXA SYNC] reports:', e.message)));
+    return () => unsubscribers.forEach(u => u());
+  }, [currentUser?.id, currentUser?.role]);'''
+
+          new = '''  useEffect(() => {
+    if (!db || !currentUser) return;
+
+    const uid = currentUser.id;
+    const admin = currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN';
+    const unsubscribers: Unsubscribe[] = [];
+
+    const mergeById = <T extends { id: string }>(setter: React.Dispatch<React.SetStateAction<T[]>>, incoming: T[]) => {
+      setter(prev => {
+        const map = new Map(prev.map(item => [item.id, item]));
+        incoming.forEach(item => map.set(item.id, item));
+        return Array.from(map.values());
+      });
+    };
+
+    const mergeTransactions = (incoming: Transaction[]) => mergeById(setTransactions, incoming);
+
+    // AUTHORITATIVE SERVICE REQUEST SYNC
+    // Mock requests remain only as the unauthenticated fallback. Once authenticated,
+    // Firestore becomes the source of truth for the active user's requests.
+    if (admin) {
+      unsubscribers.push(onSnapshot(
+        collection(db, 'service_requests'),
+        snapshot => setRequests(snapshot.docs.map(d => d.data() as ServiceRequest)),
+        error => console.warn('[CONEXA SYNC] service_requests(admin):', error.message)
+      ));
+    } else if (currentUser.role === 'USER') {
+      const ownRequests = query(collection(db, 'service_requests'), where('clientId', '==', uid));
+      unsubscribers.push(onSnapshot(
+        ownRequests,
+        snapshot => setRequests(snapshot.docs.map(d => d.data() as ServiceRequest)),
+        error => console.warn('[CONEXA SYNC] service_requests(client):', error.message)
+      ));
+    } else if (currentUser.role === 'PROFESSIONAL') {
+      const mergeRequests = (incoming: ServiceRequest[]) => mergeById(setRequests, incoming);
+      const openRequests = query(collection(db, 'service_requests'), where('status', 'in', ['REQUEST_CREATED', 'QUOTES_RECEIVED']));
+      const assignedRequests = query(collection(db, 'service_requests'), where('assignedProfessionalId', '==', uid));
+      const biddingRequests = query(collection(db, 'service_requests'), where('biddingProfessionalIds', 'array-contains', uid));
+      unsubscribers.push(onSnapshot(openRequests, s => mergeRequests(s.docs.map(d => d.data() as ServiceRequest)), e => console.warn('[CONEXA SYNC] service_requests(open):', e.message)));
+      unsubscribers.push(onSnapshot(assignedRequests, s => mergeRequests(s.docs.map(d => d.data() as ServiceRequest)), e => console.warn('[CONEXA SYNC] service_requests(assigned):', e.message)));
+      unsubscribers.push(onSnapshot(biddingRequests, s => mergeRequests(s.docs.map(d => d.data() as ServiceRequest)), e => console.warn('[CONEXA SYNC] service_requests(bidding):', e.message)));
+    }
+
+    // AUTHORITATIVE QUOTE SYNC
+    // Quotes are visible to their professional and to the client that owns the request.
+    // The backend stamps clientId on newly created quotes so the client-side query is secure.
+    if (admin) {
+      unsubscribers.push(onSnapshot(
+        collection(db, 'quotes'),
+        snapshot => setQuotes(snapshot.docs.map(d => d.data() as Quote)),
+        error => console.warn('[CONEXA SYNC] quotes(admin):', error.message)
+      ));
+    } else if (currentUser.role === 'USER') {
+      const ownQuotes = query(collection(db, 'quotes'), where('clientId', '==', uid));
+      unsubscribers.push(onSnapshot(
+        ownQuotes,
+        snapshot => setQuotes(snapshot.docs.map(d => d.data() as Quote)),
+        error => console.warn('[CONEXA SYNC] quotes(client):', error.message)
+      ));
+    } else if (currentUser.role === 'PROFESSIONAL') {
+      const ownQuotes = query(collection(db, 'quotes'), where('professionalId', '==', uid));
+      unsubscribers.push(onSnapshot(
+        ownQuotes,
+        snapshot => setQuotes(snapshot.docs.map(d => d.data() as Quote)),
+        error => console.warn('[CONEXA SYNC] quotes(professional):', error.message)
+      ));
+    }
+
+    // Existing authoritative commercial synchronizations.
+    if (admin) {
+      unsubscribers.push(onSnapshot(collection(db, 'transactions'), s => setTransactions(s.docs.map(d => d.data() as Transaction)), e => console.warn('[CONEXA SYNC] transactions:', e.message)));
+    } else {
+      const clientTrans = query(collection(db, 'transactions'), where('clientId', '==', uid));
+      const professionalTrans = query(collection(db, 'transactions'), where('professionalId', '==', uid));
+      unsubscribers.push(onSnapshot(clientTrans, s => mergeTransactions(s.docs.map(d => d.data() as Transaction)), e => console.warn('[CONEXA SYNC] client transactions:', e.message)));
+      unsubscribers.push(onSnapshot(professionalTrans, s => mergeTransactions(s.docs.map(d => d.data() as Transaction)), e => console.warn('[CONEXA SYNC] professional transactions:', e.message)));
+    }
+
+    const verif = admin ? collection(db, 'verifications') : query(collection(db, 'verifications'), where('userId', '==', uid));
+    unsubscribers.push(onSnapshot(verif, s => setVerifications(s.docs.map(d => d.data() as VerificationRequest)), e => console.warn('[CONEXA SYNC] verifications:', e.message)));
+    if (admin) unsubscribers.push(onSnapshot(collection(db, 'reports'), s => setReports(s.docs.map(d => d.data() as UserReport)), e => console.warn('[CONEXA SYNC] reports:', e.message)));
+
+    return () => unsubscribers.forEach(unsubscribe => unsubscribe());
+  }, [currentUser?.id, currentUser?.role]);'''
+
+          if old not in text:
+              raise SystemExit('Expected AppContext Firestore sync block was not found; aborting without modification.')
+          ctx.write_text(text.replace(old, new), encoding='utf-8')
+
+          types = Path('src/types.ts')
+          t = types.read_text(encoding='utf-8')
+          marker = "export interface Quote {\n  id: string;\n  requestId: string;"
+          replacement = "export interface Quote {\n  id: string;\n  requestId: string;\n  clientId?: string;"
+          if marker not in t:
+              raise SystemExit('Expected Quote type marker was not found.')
+          types.write_text(t.replace(marker, replacement, 1), encoding='utf-8')
+
+          server = Path('server.ts')
+          s = server.read_text(encoding='utf-8')
+          marker = "          requestId,\n          professionalId: auth.userId,"
+          replacement = "          requestId,\n          clientId: serviceRequest.clientId,\n          professionalId: auth.userId,"
+          if marker not in s:
+              raise SystemExit('Expected server quote creation marker was not found.')
+          server.write_text(s.replace(marker, replacement, 1), encoding='utf-8')
+
+      - name: Build validation
+        run: |
+          if [ -f package.json ]; then
+            corepack enable || true
+            bun --version || npm install -g bun
+            bun install --frozen-lockfile
+            bun run build
+          fi
+
+      - name: Commit migration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/context/AppContext.tsx src/types.ts server.ts
+          if git diff --cached --quiet; then
+            echo "No migration changes required."
+            exit 0
+          fi
+          git commit -m "feat: persist service requests and quotes in Firestore"
+          git push origin HEAD:unification/conexa-unified
