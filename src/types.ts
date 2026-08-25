@@ -1,6 +1,6 @@
 export type Role = 'USER' | 'PROFESSIONAL' | 'MODERATOR' | 'ADMIN' | 'SUPER_ADMIN';
 export type VerificationStatus = 'NONE' | 'PENDING' | 'VERIFIED' | 'REJECTED';
-export type JobStatus = 'REQUEST_CREATED' | 'QUOTES_RECEIVED' | 'PROFESSIONAL_SELECTED' | 'IN_PROGRESS' | 'COMPLETED' | 'REVIEW_PENDING' | 'CLOSED' | 'CANCELLED';
+export type JobStatus = 'REQUEST_CREATED' | 'QUOTES_RECEIVED' | 'PROFESSIONAL_SELECTED' | 'PAYMENT_PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'REVIEW_PENDING' | 'CLOSED' | 'CANCELLED';
 export type ApprovalMode = 'AUTO' | 'MANUAL';
 export type OpportunitySourceType = 'META_INTEGRATION_OFFICIAL' | 'CANAL_PROPIO' | 'FORMULARIO_CONEXA' | 'RADAR_TEST' | 'WHATSAPP_OFICIAL' | 'API_OFICIAL' | string;
 export interface LocationData { city: string; province: string; country: string; lat: number; lng: number; approxZone: string; exactAddressPrivate?: string; }
