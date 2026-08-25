@@ -15,6 +15,7 @@ const requestStatusLabel: Record<ServiceRequest['status'], string> = {
   REQUEST_CREATED: 'Solicitud abierta',
   QUOTES_RECEIVED: 'Presupuestos recibidos',
   PROFESSIONAL_SELECTED: 'Profesional seleccionado',
+  PAYMENT_PENDING: 'Pago pendiente',
   IN_PROGRESS: 'Trabajo en curso',
   COMPLETED: 'Completado',
   REVIEW_PENDING: 'Esperando reseña',
@@ -105,7 +106,7 @@ export const RequestsList: React.FC<RequestsListProps> = ({
         {requests.map(req => {
           const reqQuotes = quotes.filter(q => q.requestId === req.id);
           const transaction = transactions.find(t => t.serviceRequestId === req.id);
-          const isMyReq = req.clientId === currentUser.id;
+          const isMyRequest = req.clientId === currentUser.id;
           const isAssignedPro = isPro && transaction?.professionalId === currentUser.id;
           const canStart = isAssignedPro && req.status === 'PROFESSIONAL_SELECTED' && transaction?.status === 'PAID';
           const canComplete = isAssignedPro && req.status === 'IN_PROGRESS' && transaction?.status === 'SERVICE_IN_PROGRESS';
@@ -187,7 +188,7 @@ export const RequestsList: React.FC<RequestsListProps> = ({
               </div>
 
               <div className="flex gap-2">
-                {isPro && !isMyReq && !isAssignedPro ? (
+                {isPro && !isMyRequest && !isAssignedPro ? (
                   <button onClick={() => onSendQuoteForRequest(req)} className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md">Enviar Presupuesto</button>
                 ) : (
                   <button onClick={() => setSelectedRequest(req)} className="flex-1 py-2 border border-white/80 bg-white/60 hover:bg-white text-slate-800 font-bold text-xs rounded-xl shadow-2xs">Ver detalle</button>
