@@ -56,7 +56,7 @@ export const RadarDashboard: React.FC<RadarDashboardProps> = ({ onOpenLandingPre
   const checkBackendHealth = async () => {
     setIsCheckingHealth(true);
     try {
-      const res = await fetch('/api/radar/stats');
+      const res = await fetch('/api/health');
       if (res.ok) {
         setBackendHealth('OPERATIVE');
       } else {
