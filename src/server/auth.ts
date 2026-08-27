@@ -87,13 +87,19 @@ export function verifyS2SSecret(
   if (!expectedSecret) return false;
 
   for (const headerName of acceptedHeaders) {
-    const presented = req.headers[headerName];
-    if (typeof presented !== "string") continue;
-    const presentedBuffer = Buffer.from(presented);
-    const expectedBuffer = Buffer.from(expectedSecret);
-    if (presentedBuffer.length !== expectedBuffer.length) continue;
-    if (crypto.timingSafeEqual(presentedBuffer, expectedBuffer)) return true;
+  const presented = req.headers[headerName];
+
+  if (typeof presented !== "string") continue;
+
+  const presentedBuffer = Buffer.from(presented);
+  const expectedBuffer = Buffer.from(expectedSecret);
+
+  if (presentedBuffer.length !== expectedBuffer.length) continue;
+
+  if (crypto.timingSafeEqual(presentedBuffer, expectedBuffer)) {
+    return true;
   }
+}
 
   return false;
 }
