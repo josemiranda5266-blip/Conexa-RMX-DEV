@@ -1628,27 +1628,63 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const convertRadarOpportunity = (opportunityId: string, userId?: string) => {
-    setRadarOpportunities(prev => prev.map(o => {
-      if (o.id === opportunityId) {
-        return {
-          ...o,
-          status: 'CONVERTED',
-          conversionStatus: 'CONVERTED',
-          lastUpdated: 'Hace un instante'
-        };
-      }
-      return o;
-    }));
+    const opportunity = radarOpportunities.find(o => o.id === opportunityId);
 
-    if (isFirebaseConfigured && db) {
-      updateDoc(doc(db, 'radar_opportunities', opportunityId), {
-        status: 'CONVERTED',
-        conversionStatus: 'CONVERTED',
-        lastUpdated: 'Hace un instante'
-      }).catch(error => console.warn('[CONEXA RADAR] Error registrando conversión:', error));
+    if (!opportunity) {
+      console.warn('[CONEXA RADAR] No se encontró la oportunidad a convertir:', opportunityId);
+      return;
     }
 
-    trackEvent('radar_opportunity_converted', { opportunityId, userId });
+    if (opportunity.conversionStatus === 'CONVERTED' || opportunity.status === 'CONVERTED') {
+      console.warn('[CONEXA RADAR] La oportunidad ya fue convertida:', opportunityId);
+      return;
+    }
+
+    if (!canTransitionRadarStatus(opportunity.status, 'CONVERTED')) {
+      console.warn(
+        '[CONEXA RADAR] Conversión no permitida desde el estado:',
+        opportunity.status,
+        'para oportunidad',
+        opportunityId
+      );
+      return;
+    }
+
+    const matchedProfessionalIds = new Set(
+      opportunity.matchedProfessionals.map(match => match.professionalId)
+    );
+
+    if (userId && matchedProfessionalIds.size > 0 && !matchedProfessionalIds.has(userId)) {
+      console.warn(
+        '[CONEXA RADAR] El usuario indicado para la conversión no pertenece al matching de la oportunidad:',
+        opportunityId
+      );
+      return;
+    }
+
+    const conversionUpdates = {
+      status: 'CONVERTED' as OpportunityStatus,
+      conversionStatus: 'CONVERTED' as const,
+      lastUpdated: 'Hace un instante'
+    };
+
+    setRadarOpportunities(prev => prev.map(o =>
+      o.id === opportunityId ? { ...o, ...conversionUpdates } : o
+    ));
+
+    if (isFirebaseConfigured && db) {
+      updateDoc(doc(db, 'radar_opportunities', opportunityId), conversionUpdates)
+        .catch(error => {
+          console.warn('[CONEXA RADAR] Error registrando conversión:', error);
+        });
+    }
+
+    trackEvent('radar_opportunity_converted', {
+      opportunityId,
+      userId,
+      matchedProfessionalCount: matchedProfessionalIds.size,
+      previousStatus: opportunity.status
+    });
   };
 
   return (
