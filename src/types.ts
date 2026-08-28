@@ -162,6 +162,7 @@ export type TransactionStatus =
   | 'PAID'
   | 'SERVICE_IN_PROGRESS'
   | 'SERVICE_COMPLETED'
+  | 'REVIEW_COMPLETED'
   | 'SETTLED'
   | 'REFUNDED'
   | 'CANCELLED'
@@ -188,6 +189,7 @@ export interface Transaction {
   completedAt?: string;
   settledAt?: string;
   reviewCompletedAt?: string;
+  settlementReason?: 'REVIEW_COMPLETED' | 'MANUAL_SETTLEMENT';
   refundedAt?: string;
 }
 
