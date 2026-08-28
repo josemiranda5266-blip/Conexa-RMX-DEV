@@ -843,7 +843,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       clientAvatar: currentUser.avatar,
       createdAt: new Date().toLocaleDateString('es-AR'),
       status: 'REQUEST_CREATED',
-      quotesCount: 0
+      quotesCount: 0,
+      radarOpportunityId: opportunity.id,
+      sourceType: 'RADAR'
     };
     setRequests(prev => [newReq, ...prev]);
 
@@ -1666,13 +1668,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return null;
     }
 
-    const resolvedClientId = clientId || currentUser?.id;
+    const resolvedClientId = clientId || opportunity.clientUserId || currentUser?.id;
     const client = resolvedClientId
       ? users.find(user => user.id === resolvedClientId)
       : null;
 
     if (!client) {
       console.warn('[CONEXA RADAR] No existe un usuario CONEXA asociado a la oportunidad.');
+      return null;
+    }
+
+    if (
+      opportunity.clientUserId &&
+      opportunity.clientUserId !== client.id
+    ) {
+      console.warn('[CONEXA RADAR] La oportunidad ya está vinculada a otro usuario.');
       return null;
     }
 
@@ -1715,7 +1725,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setRequests(prev => [newRequest, ...prev]);
 
     const radarUpdates = {
+      clientUserId: client.id,
+      linkedAt: new Date().toISOString(),
       status: 'SERVICE_REQUESTED' as OpportunityStatus,
+      conversionStatus: 'PENDING' as const,
       lastUpdated: 'Hace un instante'
     };
 
