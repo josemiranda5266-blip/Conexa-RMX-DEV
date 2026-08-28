@@ -1539,8 +1539,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [radarOpportunities]);
 
   const addRadarOpportunity = (opp: RadarOpportunity) => {
+    // Matching is deterministic in every environment. Simulation may provide
+    // fixture matches for visual scenarios, but production data is never trusted
+    // from the incoming payload.
     const matchedProfessionals =
-      opp.environment === 'simulation'
+      opp.environment === 'simulation' && Array.isArray(opp.matchedProfessionals)
         ? opp.matchedProfessionals
         : matchOpportunityWithProfessionals(users, opp);
 
@@ -1600,12 +1603,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lastUpdated: 'Hace un instante'
       };
 
-      const recalculatedOpportunity = updatedOpportunity.environment === 'simulation'
-        ? updatedOpportunity
-        : {
+      const shouldRecalculateMatches = Boolean(
+        updates.category !== undefined ||
+        updates.subcategory !== undefined ||
+        updates.city !== undefined ||
+        updates.province !== undefined ||
+        updates.neighborhood !== undefined
+      );
+
+      const recalculatedOpportunity = shouldRecalculateMatches
+        ? {
             ...updatedOpportunity,
             matchedProfessionals: matchOpportunityWithProfessionals(users, updatedOpportunity)
-          };
+          }
+        : updatedOpportunity;
 
       if (isFirebaseConfigured && db) {
         setDoc(doc(db, 'radar_opportunities', id), recalculatedOpportunity)
