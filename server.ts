@@ -1146,6 +1146,43 @@ Responde en JSON con:
     }
   });
 
+  app.post("/api/jobs/review-complete", rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const auth = await verifyAuthToken(req);
+      if (!auth.isAuthenticated || !auth.userId) {
+        return res.status(401).json({ success: false, error: "Se requiere autenticación válida.", code: "UNAUTHORIZED" });
+      }
+      const { serviceRequestId } = req.body || {};
+      if (!serviceRequestId || typeof serviceRequestId !== 'string') {
+        return res.status(400).json({ success: false, error: "serviceRequestId es obligatorio.", code: "INVALID_REQUEST_ID" });
+      }
+      const firestore = await getAdminDb();
+      const requestRef = firestore.collection('service_requests').doc(serviceRequestId);
+      const result = await firestore.runTransaction(async (tx: any) => {
+        const requestSnap = await tx.get(requestRef);
+        if (!requestSnap.exists) throw new Error('REQUEST_NOT_FOUND');
+        const request = requestSnap.data() || {};
+        if (request.clientId !== auth.userId) throw new Error('FORBIDDEN');
+        if (request.status !== 'REVIEW_PENDING') throw new Error('INVALID_JOB_STATE');
+
+        const transactions = await firestore.collection('transactions')
+          .where('serviceRequestId', '==', serviceRequestId).limit(5).get();
+        const transactionDoc = transactions.docs.find((doc: any) => (doc.data() || {}).status === 'SERVICE_COMPLETED');
+        if (!transactionDoc) throw new Error('SETTLEMENT_NOT_READY');
+
+        const completedAt = new Date().toISOString();
+        tx.update(requestRef, { status: 'CLOSED', closedAt: completedAt });
+        tx.update(transactionDoc.ref, { status: 'REVIEW_COMPLETED', reviewCompletedAt: completedAt });
+        return { transactionId: transactionDoc.id, completedAt };
+      });
+      return res.json({ success: true, serviceRequestId, status: 'CLOSED', ...result });
+    } catch (err: any) {
+      const code = err?.message || 'REVIEW_COMPLETION_ERROR';
+      const status = code === 'REQUEST_NOT_FOUND' ? 404 : ['FORBIDDEN'].includes(code) ? 403 : ['INVALID_JOB_STATE','SETTLEMENT_NOT_READY'].includes(code) ? 409 : 500;
+      return res.status(status).json({ success: false, error: code, code });
+    }
+  });
+
   // Administrative moderation operations are authoritative on the backend.
   // The browser may request an action, but authorization, mutation and audit logging
   // are performed together using Firebase Admin.
