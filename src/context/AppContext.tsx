@@ -1460,6 +1460,64 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem('conexa_radar_opportunities', JSON.stringify(radarOpportunities));
   }, [radarOpportunities]);
 
+  useEffect(() => {
+    setRadarStats(previous => {
+      const totalDetected = radarOpportunities.length;
+      const newOpportunities = radarOpportunities.filter(o => o.status === 'NEW').length;
+      const highIntentCount = radarOpportunities.filter(o => o.intentScore >= 80).length;
+      const contactedCount = radarOpportunities.filter(o =>
+        ['CONTACTED', 'RESPONDED', 'REGISTERED', 'MATCHED', 'SERVICE_REQUESTED', 'CONVERTED', 'CLOSED']
+          .includes(o.status)
+      ).length;
+      const convertedUsers = radarOpportunities.filter(o => o.conversionStatus === 'CONVERTED' || o.status === 'CONVERTED').length;
+      const requestsGenerated = radarOpportunities.filter(o => o.status === 'SERVICE_REQUESTED').length;
+      const matchedCount = radarOpportunities.filter(o => o.matchedProfessionals.length > 0 || o.status === 'MATCHED').length;
+      const respondedCount = radarOpportunities.filter(o =>
+        ['RESPONDED', 'REGISTERED', 'MATCHED', 'SERVICE_REQUESTED', 'CONVERTED', 'CLOSED'].includes(o.status)
+      ).length;
+      const registeredCount = radarOpportunities.filter(o =>
+        ['REGISTERED', 'MATCHED', 'SERVICE_REQUESTED', 'CONVERTED', 'CLOSED'].includes(o.status)
+      ).length;
+
+      const byCategory: Record<string, number> = {};
+      const byLocation: Record<string, number> = {};
+      const bySource: Record<string, number> = {};
+
+      radarOpportunities.forEach(o => {
+        byCategory[o.category] = (byCategory[o.category] || 0) + 1;
+        const locationKey = [o.city, o.province].filter(Boolean).join(', ');
+        byLocation[locationKey] = (byLocation[locationKey] || 0) + 1;
+        bySource[o.source] = (bySource[o.source] || 0) + 1;
+      });
+
+      const rate = (value: number, total = totalDetected) =>
+        total > 0 ? Number(((value / total) * 100).toFixed(1)) : 0;
+
+      return {
+        ...previous,
+        totalDetected,
+        newOpportunities,
+        highIntentCount,
+        contactedCount,
+        convertedUsers,
+        requestsGenerated,
+        conversionRate: rate(convertedUsers),
+        qualificationRate: rate(radarOpportunities.filter(o =>
+          ['QUALIFIED', 'READY_TO_CONTACT', 'CONTACTED', 'RESPONDED', 'REGISTERED', 'MATCHED', 'SERVICE_REQUESTED', 'CONVERTED', 'CLOSED']
+            .includes(o.status)
+        ).length),
+        contactRate: rate(contactedCount),
+        responseRate: contactedCount > 0 ? Number(((respondedCount / contactedCount) * 100).toFixed(1)) : 0,
+        registrationRate: rate(registeredCount),
+        matchRate: rate(matchedCount),
+        serviceRequestRate: rate(requestsGenerated),
+        byCategory,
+        byLocation,
+        bySource
+      };
+    });
+  }, [radarOpportunities]);
+
   const addRadarOpportunity = (opp: RadarOpportunity) => {
     const matchedProfessionals =
       opp.environment === 'simulation'
@@ -1477,16 +1535,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setDoc(doc(db, 'radar_opportunities', opportunity.id), opportunity)
         .catch(error => console.warn('[CONEXA RADAR] Error guardando oportunidad:', error));
     }
-    setRadarStats(prev => ({
-      ...prev,
-      totalDetected: prev.totalDetected + 1,
-      newOpportunities: prev.newOpportunities + 1,
-      highIntentCount: opportunity.intentScore >= 80 ? prev.highIntentCount + 1 : prev.highIntentCount,
-      byCategory: {
-        ...prev.byCategory,
-        [opportunity.category]: (prev.byCategory[opportunity.category] || 0) + 1
-      }
-    }));
     trackEvent('radar_opportunity_detected', { category: opp.category, source: opp.source });
   };
 
@@ -1521,7 +1569,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (isFirebaseConfigured && db) {
       updateDoc(doc(db, 'radar_opportunities', id), {
-        status: 'ARCHIVED',
+        status: 'CLOSED',
         lastUpdated: 'Hace un instante'
       }).catch(error => console.warn('[CONEXA RADAR] Error archivando oportunidad:', error));
     }
@@ -1540,14 +1588,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return o;
     }));
 
-    setRadarStats(prev => {
-      const newConverted = prev.convertedUsers + 1;
-      return {
-        ...prev,
-        convertedUsers: newConverted,
-        conversionRate: Number(((newConverted / (prev.totalDetected || 1)) * 100).toFixed(1))
-      };
-    });
+    if (isFirebaseConfigured && db) {
+      updateDoc(doc(db, 'radar_opportunities', opportunityId), {
+        status: 'CONVERTED',
+        conversionStatus: 'CONVERTED',
+        lastUpdated: 'Hace un instante'
+      }).catch(error => console.warn('[CONEXA RADAR] Error registrando conversión:', error));
+    }
 
     trackEvent('radar_opportunity_converted', { opportunityId, userId });
   };
