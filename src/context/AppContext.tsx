@@ -639,6 +639,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setCurrentUser(updatedUser);
+
+    if (isFirebaseConfigured && db) {
+      void updateDoc(doc(db, 'users', updatedUser.id), {
+        activeMode: updatedUser.activeMode
+      }).catch(error => {
+        console.warn('[CONEXA AUTH] Error sincronizando modo de usuario:', error);
+      });
+    }
   };
 
   const switchActiveMode = (mode: 'CLIENT' | 'PROFESSIONAL' | 'ADMIN'): boolean => {
@@ -654,6 +662,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (mode === 'PROFESSIONAL' && !canUseProfessionalMode(currentUser)) {
       console.warn(`[CONEXA SECURITY] Intento no autorizado de activar MODO PROFESIONAL sin perfil profesional id=${currentUser.id}`);
       return false;
+    }
+
+    if (
+      mode === 'CLIENT' &&
+      (currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN') &&
+      currentUser.activeMode === 'ADMIN'
+    ) {
+      console.warn(`[CONEXA SECURITY] Cambio de MODO ADMIN requiere una transición explícita autorizada id=${currentUser.id}`);
     }
 
     {
