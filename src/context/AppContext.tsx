@@ -14,6 +14,7 @@ import {
   INITIAL_CONVERSATIONS, INITIAL_MESSAGES 
 } from '../data/mockData';
 import { initialRadarOpportunities, initialRadarStats } from '../data/radarMockData';
+import { matchOpportunityWithProfessionals } from '../domain/professionalMatching';
 
 interface AppContextType {
   currentUser: UserProfile | null;
@@ -1303,22 +1304,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [radarOpportunities]);
 
   const addRadarOpportunity = (opp: RadarOpportunity) => {
-    setRadarOpportunities(prev => [opp, ...prev]);
+    const matchedProfessionals =
+      opp.environment === 'simulation'
+        ? opp.matchedProfessionals
+        : matchOpportunityWithProfessionals(users, opp);
+
+    const opportunity = {
+      ...opp,
+      matchedProfessionals
+    };
+
+    setRadarOpportunities(prev => [opportunity, ...prev]);
     setRadarStats(prev => ({
       ...prev,
       totalDetected: prev.totalDetected + 1,
       newOpportunities: prev.newOpportunities + 1,
-      highIntentCount: opp.intentScore >= 80 ? prev.highIntentCount + 1 : prev.highIntentCount,
+      highIntentCount: opportunity.intentScore >= 80 ? prev.highIntentCount + 1 : prev.highIntentCount,
       byCategory: {
         ...prev.byCategory,
-        [opp.category]: (prev.byCategory[opp.category] || 0) + 1
+        [opportunity.category]: (prev.byCategory[opportunity.category] || 0) + 1
       }
     }));
     trackEvent('radar_opportunity_detected', { category: opp.category, source: opp.source });
   };
 
   const updateRadarOpportunity = (id: string, updates: Partial<RadarOpportunity>) => {
-    setRadarOpportunities(prev => prev.map(o => o.id === id ? { ...o, ...updates, lastUpdated: 'Hace un instante' } : o));
+    setRadarOpportunities(prev => prev.map(o => {
+      if (o.id !== id) return o;
+
+      const updatedOpportunity = {
+        ...o,
+        ...updates,
+        lastUpdated: 'Hace un instante'
+      };
+
+      return updatedOpportunity.environment === 'simulation'
+        ? updatedOpportunity
+        : {
+            ...updatedOpportunity,
+            matchedProfessionals: matchOpportunityWithProfessionals(users, updatedOpportunity)
+          };
+    }));
   };
 
   const deleteRadarOpportunity = (id: string) => {
