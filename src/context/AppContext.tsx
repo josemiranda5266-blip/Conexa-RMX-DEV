@@ -14,7 +14,7 @@ import {
   INITIAL_CONVERSATIONS, INITIAL_MESSAGES 
 } from '../data/mockData';
 import { initialRadarOpportunities, initialRadarStats } from '../data/radarMockData';
-import { matchOpportunityWithProfessionals } from '../domain/professionalMatching';
+import { canUseProfessionalMode, getDefaultProfessionalMode, matchOpportunityWithProfessionals } from '../domain/professionalMatching';
 
 interface AppContextType {
   currentUser: UserProfile | null;
@@ -550,28 +550,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const switchUserRole = (userId: string) => {
     const found = users.find(u => u.id === userId);
-    if (found) {
-      // If switching to a non-admin user while activeMode was ADMIN, reset activeMode to CLIENT/PROFESSIONAL
-      const isFoundAdmin = found.role === 'ADMIN' || found.role === 'SUPER_ADMIN';
-      const adjustedMode = (!isFoundAdmin && currentUser.activeMode === 'ADMIN')
-        ? (found.isProfessional ? 'PROFESSIONAL' : 'CLIENT')
-        : found.activeMode || (found.isProfessional ? 'PROFESSIONAL' : 'CLIENT');
-      
-      const updatedUser = { ...found, activeMode: adjustedMode };
-      setCurrentUser(updatedUser);
-    }
+    if (!found) return;
+
+    const updatedUser = {
+      ...found,
+      activeMode: getDefaultProfessionalMode(found)
+    };
+
+    setCurrentUser(updatedUser);
   };
 
   const switchActiveMode = (mode: 'CLIENT' | 'PROFESSIONAL' | 'ADMIN'): boolean => {
-    // SECURITY RULE: ADMIN mode is strictly restricted to ADMIN or SUPER_ADMIN role
-    if (mode === 'ADMIN') {
-      if (!isAdmin()) {
-        console.warn(`[CONEXA SECURITY] Intento no autorizado de activar MODO ADMIN por usuario id=${currentUser?.id} con rol=${currentUser?.role}`);
-        return false;
-      }
+    if (!currentUser) {
+      return false;
     }
 
-    if (currentUser) {
+    if (mode === 'ADMIN' && !isAdmin()) {
+      console.warn(`[CONEXA SECURITY] Intento no autorizado de activar MODO ADMIN por usuario id=${currentUser.id} con rol=${currentUser.role}`);
+      return false;
+    }
+
+    if (mode === 'PROFESSIONAL' && !canUseProfessionalMode(currentUser)) {
+      console.warn(`[CONEXA SECURITY] Intento no autorizado de activar MODO PROFESIONAL sin perfil profesional id=${currentUser.id}`);
+      return false;
+    }
+
+    {
       const updated = {
         ...currentUser,
         activeMode: mode
