@@ -131,7 +131,11 @@ export function matchesLocation(
       opportunityNeighborhood.includes(candidateZone))
   );
 
-  return sameCity || sameNeighborhood || sameProvince;
+  // Province alone is a weak fallback and should not be treated as local proximity.
+  // It is kept only when the opportunity does not provide a city or neighborhood.
+  const opportunityHasLocality = Boolean(opportunityCity || opportunityNeighborhood);
+
+  return sameCity || sameNeighborhood || (!opportunityHasLocality && sameProvince);
 }
 
 export function calculateProfessionalMatchScore(
@@ -172,9 +176,9 @@ export function calculateProfessionalMatchScore(
   } else if (sameNeighborhood) {
     score += 25;
     matchReasons.push('Zona de cobertura compatible');
-  } else if (sameProvince) {
-    score += 10;
-    matchReasons.push('Cobertura en la misma provincia');
+  } else if (!opportunityCity && !opportunityNeighborhood && sameProvince) {
+    score += 5;
+    matchReasons.push('Ubicación compatible a nivel provincial');
   }
 
   const qualityScore = clamp((candidate.rating / 5) * 10);
