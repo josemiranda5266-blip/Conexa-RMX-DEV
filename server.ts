@@ -1136,14 +1136,18 @@ Responde en JSON con:
           throw new Error('INVALID_JOB_STATE');
         }
         const completedAt = new Date().toISOString();
-        tx.update(requestRef, { status: 'REVIEW_PENDING' });
+        tx.update(requestRef, {
+          status: 'SERVICE_COMPLETED',
+          completedAt,
+          completedBy: auth.userId
+        });
         tx.update(transactionDoc.ref, {
           status: 'SERVICE_COMPLETED',
           completedAt
         });
       });
 
-      return res.json({ success: true, requestId, status: 'REVIEW_PENDING' });
+      return res.json({ success: true, requestId, status: 'SERVICE_COMPLETED' });
     } catch (err: any) {
       const code = err?.message || 'JOB_COMPLETION_ERROR';
       const map: Record<string, number> = {
