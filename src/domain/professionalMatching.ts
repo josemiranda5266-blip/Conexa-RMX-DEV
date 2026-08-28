@@ -37,6 +37,24 @@ export function isProfessionalCandidate(user: UserProfile): boolean {
     user.hasProfessionalProfile === true;
 }
 
+export function canUseProfessionalMode(user: UserProfile): boolean {
+  return isProfessionalCandidate(user);
+}
+
+export function getDefaultProfessionalMode(
+  user: UserProfile
+): 'CLIENT' | 'PROFESSIONAL' | 'ADMIN' {
+  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') {
+    return user.activeMode === 'ADMIN' ? 'ADMIN' : 'CLIENT';
+  }
+
+  if (user.activeMode === 'PROFESSIONAL' && canUseProfessionalMode(user)) {
+    return 'PROFESSIONAL';
+  }
+
+  return 'CLIENT';
+}
+
 export function normalizeProfessionalCandidate(user: UserProfile): ProfessionalCandidate | null {
   if (!isProfessionalCandidate(user) || user.isBlocked === true) {
     return null;
