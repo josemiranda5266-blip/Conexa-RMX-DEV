@@ -7,6 +7,7 @@ export type JobStatus =
   | 'QUOTES_RECEIVED'
   | 'PROFESSIONAL_SELECTED'
   | 'IN_PROGRESS'
+  | 'SERVICE_COMPLETED'
   | 'REVIEW_PENDING'
   | 'CLOSED'
   | 'CANCELLED';
