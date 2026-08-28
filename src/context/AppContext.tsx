@@ -1110,25 +1110,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         }
 
-        const completedAt = new Date().toISOString();
-        const transactionSnapshot = await getDocs(
-          query(collection(db, 'transactions'), where('serviceRequestId', '==', reviewData.serviceRequestId))
-        );
-        const activeTransaction = transactionSnapshot.docs.find(
-          transactionDoc => (transactionDoc.data() as Transaction).status === 'SERVICE_COMPLETED'
-        );
-
-        if (activeTransaction) {
-          await updateDoc(activeTransaction.ref, {
-            status: 'REVIEW_COMPLETED',
-            reviewCompletedAt: completedAt
-          });
-          setTransactions(prev => prev.map(transaction =>
-            transaction.id === activeTransaction.id
-              ? { ...transaction, status: 'REVIEW_COMPLETED', reviewCompletedAt: completedAt }
-              : transaction
-          ));
+        if (!auth?.currentUser) {
+          throw new Error('Debés iniciar sesión para cerrar la etapa de reseña.');
         }
+
+        const token = await auth.currentUser.getIdToken();
+        const reviewResponse = await fetch('/api/jobs/review-complete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ serviceRequestId: reviewData.serviceRequestId })
+        });
+        const reviewResult = await reviewResponse.json();
+        if (!reviewResponse.ok || !reviewResult.success) {
+          throw new Error(reviewResult.error || 'No se pudo cerrar el trabajo después de la reseña.');
+        }
+
+        setRequests(prev => prev.map(request =>
+          request.id === reviewData.serviceRequestId
+            ? { ...request, status: 'CLOSED' }
+            : request
+        ));
+        setTransactions(prev => prev.map(transaction =>
+          transaction.id === reviewResult.transactionId
+            ? {
+                ...transaction,
+                status: 'REVIEW_COMPLETED',
+                reviewCompletedAt: reviewResult.completedAt
+              }
+            : transaction
+        ));
       } catch (e) {
         console.warn('[Firestore] Error guardando reseña:', e);
       }
