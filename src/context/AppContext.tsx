@@ -1409,6 +1409,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // CONEXA RADAR System State
   const [radarOpportunities, setRadarOpportunities] = useState<RadarOpportunity[]>(() => {
+    if (isFirebaseConfigured) return [];
     const saved = localStorage.getItem('conexa_radar_opportunities');
     return saved ? JSON.parse(saved) : initialRadarOpportunities;
   });
@@ -1417,6 +1418,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>('ASISTIDO');
 
   useEffect(() => {
+    if (!isFirebaseConfigured || !db) return;
+
+    const unsubRadarOpportunities = onSnapshot(
+      collection(db, 'radar_opportunities'),
+      snapshot => {
+        const opportunities = snapshot.docs.map(radarDoc => {
+          const data = radarDoc.data() as RadarOpportunity;
+          return {
+            ...data,
+            id: data.id || radarDoc.id
+          };
+        });
+        setRadarOpportunities(opportunities);
+      },
+      error => {
+        console.warn('[CONEXA RADAR] Error sincronizando oportunidades:', error);
+      }
+    );
+
+    const unsubRadarConfig = onSnapshot(
+      doc(db, 'system_config', 'radar'),
+      snapshot => {
+        if (!snapshot.exists()) return;
+        const config = snapshot.data() as { approvalMode?: ApprovalMode };
+        if (config.approvalMode) setApprovalMode(config.approvalMode);
+      },
+      error => {
+        console.warn('[CONEXA RADAR] Error sincronizando configuración:', error);
+      }
+    );
+
+    return () => {
+      unsubRadarOpportunities();
+      unsubRadarConfig();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isFirebaseConfigured) return;
     localStorage.setItem('conexa_radar_opportunities', JSON.stringify(radarOpportunities));
   }, [radarOpportunities]);
 
@@ -1432,6 +1472,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setRadarOpportunities(prev => [opportunity, ...prev]);
+
+    if (isFirebaseConfigured && db) {
+      setDoc(doc(db, 'radar_opportunities', opportunity.id), opportunity)
+        .catch(error => console.warn('[CONEXA RADAR] Error guardando oportunidad:', error));
+    }
     setRadarStats(prev => ({
       ...prev,
       totalDetected: prev.totalDetected + 1,
@@ -1455,17 +1500,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lastUpdated: 'Hace un instante'
       };
 
-      return updatedOpportunity.environment === 'simulation'
+      const recalculatedOpportunity = updatedOpportunity.environment === 'simulation'
         ? updatedOpportunity
         : {
             ...updatedOpportunity,
             matchedProfessionals: matchOpportunityWithProfessionals(users, updatedOpportunity)
           };
+
+      if (isFirebaseConfigured && db) {
+        setDoc(doc(db, 'radar_opportunities', id), recalculatedOpportunity)
+          .catch(error => console.warn('[CONEXA RADAR] Error actualizando oportunidad:', error));
+      }
+
+      return recalculatedOpportunity;
     }));
   };
 
   const deleteRadarOpportunity = (id: string) => {
     setRadarOpportunities(prev => prev.filter(o => o.id !== id));
+
+    if (isFirebaseConfigured && db) {
+      updateDoc(doc(db, 'radar_opportunities', id), {
+        status: 'ARCHIVED',
+        lastUpdated: 'Hace un instante'
+      }).catch(error => console.warn('[CONEXA RADAR] Error archivando oportunidad:', error));
+    }
   };
 
   const convertRadarOpportunity = (opportunityId: string, userId?: string) => {
