@@ -388,39 +388,89 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     seedAll();
 
     // Set up real-time sub subscriptions
+
     const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       const uList: UserProfile[] = [];
-      snapshot.forEach(doc => {
-        uList.push(doc.data() as UserProfile);
+
+      snapshot.forEach(userDoc => {
+        const data = userDoc.data() as UserProfile;
+
+        uList.push({
+          ...data,
+          id: data.id || userDoc.id
+        });
       });
-      if (uList.length > 0) {
-        setUsers(uList);
+
+      setUsers(uList);
+
+      const authenticatedUid = auth.currentUser?.uid;
+
+      if (authenticatedUid) {
+        const updatedCurrentUser = uList.find(
+          user => user.id === authenticatedUid
+        );
+
+        if (updatedCurrentUser) {
+          setCurrentUser(previousUser => {
+            if (!previousUser) {
+              return updatedCurrentUser;
+            }
+
+            return {
+              ...previousUser,
+              ...updatedCurrentUser,
+              id: authenticatedUid
+            };
+          });
+        }
       }
     });
 
     const unsubReviews = onSnapshot(collection(db, 'reviews'), (snapshot) => {
       const list: Review[] = [];
-      snapshot.forEach(doc => list.push(doc.data() as Review));
+
+      snapshot.forEach(doc => {
+        list.push(doc.data() as Review);
+      });
+
       setReviews(list);
     });
 
-    const unsubRequests = onSnapshot(collection(db, 'service_requests'), (snapshot) => {
-      const list: ServiceRequest[] = [];
-      snapshot.forEach(doc => list.push(doc.data() as ServiceRequest));
-      setRequests(list);
-    });
+    const unsubRequests = onSnapshot(
+      collection(db, 'service_requests'),
+      (snapshot) => {
+        const list: ServiceRequest[] = [];
+
+        snapshot.forEach(doc => {
+          list.push(doc.data() as ServiceRequest);
+        });
+
+        setRequests(list);
+      }
+    );
 
     const unsubQuotes = onSnapshot(collection(db, 'quotes'), (snapshot) => {
       const list: Quote[] = [];
-      snapshot.forEach(doc => list.push(doc.data() as Quote));
+
+      snapshot.forEach(doc => {
+        list.push(doc.data() as Quote);
+      });
+
       setQuotes(list);
     });
 
-    const unsubConversations = onSnapshot(collection(db, 'conversations'), (snapshot) => {
-      const list: Conversation[] = [];
-      snapshot.forEach(doc => list.push(doc.data() as Conversation));
-      setConversations(list);
-    });
+    const unsubConversations = onSnapshot(
+      collection(db, 'conversations'),
+      (snapshot) => {
+        const list: Conversation[] = [];
+
+        snapshot.forEach(doc => {
+          list.push(doc.data() as Conversation);
+        });
+
+        setConversations(list);
+      }
+    );
 
     const unsubReports = onSnapshot(collection(db, 'reports'), (snapshot) => {
       const list: UserReport[] = [];

@@ -19,7 +19,11 @@ export const RequestsList: React.FC<RequestsListProps> = ({
   const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const isPro = currentUser.role === 'PROFESSIONAL';
+  const isPro =
+  currentUser.role === 'PROFESSIONAL' ||
+  currentUser.isProfessional === true ||
+  currentUser.hasProfessionalProfile === true ||
+  currentUser.activeMode === 'PROFESSIONAL';
 
   return (
     <div className="space-y-4 animate-fade-in">
