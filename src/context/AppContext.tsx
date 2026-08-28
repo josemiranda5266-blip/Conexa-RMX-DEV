@@ -1043,6 +1043,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     setRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'REVIEW_PENDING' } : r));
+    setTransactions(prev => prev.map(t =>
+      t.serviceRequestId === requestId
+        ? { ...t, status: 'SERVICE_COMPLETED', completedAt: new Date().toISOString() }
+        : t
+    ));
   };
 
   const addReview = async (reviewData: Omit<Review, 'id' | 'createdAt' | 'isVerifiedJob'>) => {
