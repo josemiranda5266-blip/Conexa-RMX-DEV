@@ -187,6 +187,7 @@ export interface Transaction {
   paidAt?: string;
   completedAt?: string;
   settledAt?: string;
+  reviewCompletedAt?: string;
   refundedAt?: string;
 }
 
