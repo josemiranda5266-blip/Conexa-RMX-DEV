@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged , OpportunityStatus } from 'firebase/auth';
 import { doc, setDoc, updateDoc, collection, getDocs, getDoc, onSnapshot, query, where } from 'firebase/firestore';
 import { auth, db, isFirebaseConfigured } from '../lib/firebase';
 import { 
@@ -1558,9 +1558,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     trackEvent('radar_opportunity_detected', { category: opp.category, source: opp.source });
   };
 
+  const allowedRadarTransitions: Record<OpportunityStatus, OpportunityStatus[]> = {
+    NEW: ['ANALYZED', 'IGNORED', 'CLOSED'],
+    ANALYZED: ['QUALIFIED', 'IGNORED', 'CLOSED'],
+    QUALIFIED: ['READY_TO_CONTACT', 'IGNORED', 'CLOSED'],
+    READY_TO_CONTACT: ['CONTACTED', 'IGNORED', 'CLOSED'],
+    CONTACTED: ['RESPONDED', 'CLOSED', 'IGNORED'],
+    RESPONDED: ['REGISTERED', 'CLOSED', 'IGNORED'],
+    REGISTERED: ['MATCHED', 'SERVICE_REQUESTED', 'CONVERTED', 'CLOSED'],
+    MATCHED: ['SERVICE_REQUESTED', 'CONVERTED', 'CLOSED'],
+    SERVICE_REQUESTED: ['CONVERTED', 'CLOSED'],
+    CONVERTED: ['CLOSED'],
+    CLOSED: [],
+    IGNORED: []
+  };
+
+  const canTransitionRadarStatus = (
+    currentStatus: OpportunityStatus,
+    nextStatus: OpportunityStatus
+  ): boolean => currentStatus === nextStatus || allowedRadarTransitions[currentStatus].includes(nextStatus);
+
   const updateRadarOpportunity = (id: string, updates: Partial<RadarOpportunity>) => {
     setRadarOpportunities(prev => prev.map(o => {
       if (o.id !== id) return o;
+
+      if (updates.status && !canTransitionRadarStatus(o.status, updates.status)) {
+        console.warn(
+          '[CONEXA RADAR] Transición de estado no permitida:',
+          o.status,
+          '→',
+          updates.status,
+          'para oportunidad',
+          id
+        );
+        return o;
+      }
 
       const updatedOpportunity = {
         ...o,
