@@ -1025,7 +1025,12 @@ Responde en JSON con:
         if (currentRequest.status !== 'PROFESSIONAL_SELECTED' || currentTransaction.status !== 'PAID' || currentQuote.status !== 'ACCEPTED') {
           throw new Error('INVALID_JOB_STATE');
         }
+        const completedAt = new Date().toISOString();
         tx.update(requestRef, { status: 'REVIEW_PENDING' });
+        tx.update(transactionDoc.ref, {
+          status: 'SERVICE_COMPLETED',
+          completedAt
+        });
       });
 
       return res.json({ success: true, requestId, status: 'REVIEW_PENDING' });
