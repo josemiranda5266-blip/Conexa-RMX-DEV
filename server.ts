@@ -998,7 +998,15 @@ Responde en JSON con:
   app.post("/api/internal/transactions/:transactionId/confirm-payment", async (req: Request, res: Response) => {
     const expectedSecret = process.env.CONEXA_INTERNAL_PAYMENT_SECRET;
     const providedSecret = req.header('x-conexa-internal-secret');
-    if (!expectedSecret || !providedSecret || !crypto.timingSafeEqual(Buffer.from(expectedSecret), Buffer.from(providedSecret))) {
+    const expectedBuffer = expectedSecret ? Buffer.from(expectedSecret) : null;
+    const providedBuffer = providedSecret ? Buffer.from(providedSecret) : null;
+    const internalAuthorized = Boolean(
+      expectedBuffer &&
+      providedBuffer &&
+      expectedBuffer.length === providedBuffer.length &&
+      crypto.timingSafeEqual(expectedBuffer, providedBuffer)
+    );
+    if (!internalAuthorized) {
       return res.status(403).json({ success: false, error: 'Operación interna no autorizada.', code: 'INTERNAL_AUTH_REQUIRED' });
     }
     try {
