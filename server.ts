@@ -650,13 +650,30 @@ Responde en JSON con:
       const requestId = String(req.headers['x-request-id'] || '');
       const webhookSecret = process.env.MP_WEBHOOK_SECRET;
 
-      if (webhookSecret && signature && requestId) {
-        // Signature format is parsed defensively; if configured, a missing/invalid signature is rejected.
-        const parts = Object.fromEntries(signature.split(',').map((part: string) => { const [k, v] = part.trim().split('=', 2); return [k, v]; }));
-        const dataId = (() => { try { const parsed = JSON.parse(raw.toString('utf8')); return String(parsed?.data?.id || parsed?.id || ''); } catch { return ''; } })();
+      if (webhookSecret) {
+        // In production, a configured secret means every webhook must carry
+        // the signature headers. Never silently downgrade to an unsigned event.
+        if (!signature || !requestId) {
+          return res.status(401).send('missing signature');
+        }
+
+        const parts = Object.fromEntries(signature.split(',').map((part: string) => {
+          const [k, v] = part.trim().split('=', 2);
+          return [k, v];
+        }));
+        const dataId = (() => {
+          try {
+            const parsed = JSON.parse(raw.toString('utf8'));
+            return String(parsed?.data?.id || parsed?.id || '');
+          } catch {
+            return '';
+          }
+        })();
         const manifest = `id:${dataId};request-id:${requestId};ts:${parts.ts || ''};`;
         const expected = crypto.createHmac('sha256', webhookSecret).update(manifest).digest('hex');
-        if (!parts.v1 || parts.v1.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(parts.v1), Buffer.from(expected))) return res.status(401).send('invalid signature');
+        if (!parts.v1 || parts.v1.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(parts.v1), Buffer.from(expected))) {
+          return res.status(401).send('invalid signature');
+        }
       }
 
       let event: any = {};
