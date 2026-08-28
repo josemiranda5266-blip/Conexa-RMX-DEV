@@ -1089,6 +1089,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             jobsCompleted: (u.jobsCompleted || 0) + 1
           });
         }
+
+        const completedAt = new Date().toISOString();
+        const transactionSnapshot = await getDocs(
+          query(collection(db, 'transactions'), where('serviceRequestId', '==', reviewData.serviceRequestId))
+        );
+        const activeTransaction = transactionSnapshot.docs.find(
+          transactionDoc => (transactionDoc.data() as Transaction).status === 'SERVICE_COMPLETED'
+        );
+
+        if (activeTransaction) {
+          await updateDoc(activeTransaction.ref, {
+            status: 'SETTLED',
+            settledAt: completedAt,
+            reviewCompletedAt: completedAt
+          });
+          setTransactions(prev => prev.map(transaction =>
+            transaction.id === activeTransaction.id
+              ? { ...transaction, status: 'SETTLED', settledAt: completedAt, reviewCompletedAt: completedAt }
+              : transaction
+          ));
+        }
       } catch (e) {
         console.warn('[Firestore] Error guardando reseña:', e);
       }
