@@ -1163,82 +1163,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  // Helper for Admin Audit Logging (Requirement 15)
-  const logAdminAction = async (action: string, targetId: string, result: string) => {
-    const logData = {
-      adminUid: currentUser.id,
-      action,
-      targetId,
-      timestamp: new Date().toISOString(),
-      environment: import.meta.env.DEV ? 'development' : 'production',
-      result
+  const getAuthenticatedRequestHeaders = async (): Promise<Record<string, string>> => {
+    if (!auth?.currentUser) {
+      throw new Error('Debés iniciar sesión para realizar esta operación.');
+    }
+    const token = await auth.currentUser.getIdToken();
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
     };
-    console.log('[CONEXA AUDIT LOG]', logData);
-    if (db) {
-      try {
-        const logId = `log-${Date.now()}`;
-        await setDoc(doc(db, 'admin_audit_logs', logId), logData);
-      } catch (err) {
-        console.warn('[CONEXA AUDIT LOG] Error escribiendo log de auditoría en Firestore:', err);
-      }
+  };
+
+  const ensureAdminOperation = () => {
+    if (!isAdmin()) {
+      throw new Error('No tenés permisos administrativos para realizar esta operación.');
     }
   };
 
   const approveVerification = async (verificationId: string) => {
-    const req = verifications.find(v => v.id === verificationId);
-    if (!req) return;
-
-    if (db) {
-      try {
-        await updateDoc(doc(db, 'verifications', verificationId), { status: 'VERIFIED' });
-        await updateDoc(doc(db, 'users', req.userId), req.type === 'IDENTITY' 
-          ? { isIdentityVerified: true, identityVerificationStatus: 'VERIFIED' }
-          : { isProfessionalVerified: true, professionalVerificationStatus: 'VERIFIED' }
-        );
-        await logAdminAction('APPROVE_VERIFICATION', verificationId, 'SUCCESS');
-
-        // On success, update local state
-        setVerifications(prev => prev.map(v => v.id === verificationId ? { ...v, status: 'VERIFIED' } : v));
-        setUsers(prev => prev.map(u => {
-          if (u.id === req.userId) {
-            if (req.type === 'IDENTITY') {
-              return { ...u, isIdentityVerified: true, identityVerificationStatus: 'VERIFIED' };
-            } else {
-              return { ...u, isProfessionalVerified: true, professionalVerificationStatus: 'VERIFIED' };
-            }
-          }
-          return u;
-        }));
-      } catch (e: any) {
-        console.error('[CONEXA SECURITY] Error en Firestore al aprobar verificación:', e);
-        await logAdminAction('APPROVE_VERIFICATION', verificationId, `FAILED: ${e.message || e}`);
-        alert('Error al guardar en el servidor. La operación no se concretó.');
-        throw e;
-      }
-    } else {
-      setVerifications(prev => prev.map(v => v.id === verificationId ? { ...v, status: 'VERIFIED' } : v));
-      setUsers(prev => prev.map(u => {
-        if (u.id === req.userId) {
-          if (req.type === 'IDENTITY') {
-            return { ...u, isIdentityVerified: true, identityVerificationStatus: 'VERIFIED' };
-          } else {
-            return { ...u, isProfessionalVerified: true, professionalVerificationStatus: 'VERIFIED' };
-          }
-        }
-        return u;
-      }));
-      await logAdminAction('APPROVE_VERIFICATION', verificationId, 'SUCCESS_LOCAL');
+    ensureAdminOperation();
+    const response = await fetch(`/api/admin/verifications/${encodeURIComponent(verificationId)}/approve`, {
+      method: 'POST',
+      headers: await getAuthenticatedRequestHeaders()
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'No se pudo aprobar la verificación.');
     }
   };
 
   const reportUser = async (reportedUserId: string, reason: UserReport['reason'], description: string) => {
-    const reportedUser = users.find(u => u.id === reportedUserId);
+    if (!currentUser) throw new Error('Debés iniciar sesión para reportar un usuario.');
     const newReport: UserReport = {
       id: `rep-${Date.now()}`,
       reporterId: currentUser.id,
       reporterName: currentUser.name,
       reportedUserId,
-      reportedUserName: reportedUser?.name || 'Usuario',
+      reportedUserName: users.find(u => u.id === reportedUserId)?.name || 'Usuario',
       reason,
       description,
       createdAt: 'Hace un momento',
@@ -1246,51 +1207,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     if (db) {
-      try {
-        await setDoc(doc(db, 'reports', newReport.id), newReport);
-        setReports(prev => [newReport, ...prev]);
-      } catch (e) {
-        console.warn('[Firestore] Error guardando reporte:', e);
-        alert('Error al guardar reporte en el servidor.');
-      }
-    } else {
-      setReports(prev => [newReport, ...prev]);
+      await setDoc(doc(db, 'reports', newReport.id), newReport);
     }
+    setReports(prev => [newReport, ...prev]);
   };
 
   const blockUser = async (userIdToBlock: string) => {
-    if (db) {
-      try {
-        await updateDoc(doc(db, 'users', userIdToBlock), { isBlocked: true });
-        await logAdminAction('BLOCK_USER', userIdToBlock, 'SUCCESS');
-        setUsers(prev => prev.map(u => u.id === userIdToBlock ? { ...u, isBlocked: true } : u));
-      } catch (e: any) {
-        console.error('[CONEXA SECURITY] Error al bloquear usuario:', e);
-        await logAdminAction('BLOCK_USER', userIdToBlock, `FAILED: ${e.message || e}`);
-        alert('Error al bloquear usuario en el servidor.');
-        throw e;
-      }
-    } else {
-      setUsers(prev => prev.map(u => u.id === userIdToBlock ? { ...u, isBlocked: true } : u));
-      await logAdminAction('BLOCK_USER', userIdToBlock, 'SUCCESS_LOCAL');
+    ensureAdminOperation();
+    const response = await fetch(`/api/admin/users/${encodeURIComponent(userIdToBlock)}/block`, {
+      method: 'POST',
+      headers: await getAuthenticatedRequestHeaders()
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'No se pudo bloquear al usuario.');
     }
   };
 
   const resolveReport = async (reportId: string, action: 'DISMISSED' | 'ACTION_TAKEN') => {
-    if (db) {
-      try {
-        await updateDoc(doc(db, 'reports', reportId), { status: action });
-        await logAdminAction('RESOLVE_REPORT', reportId, action);
-        setReports(prev => prev.map(r => r.id === reportId ? { ...r, status: action } : r));
-      } catch (e: any) {
-        console.error('[CONEXA SECURITY] Error al resolver reporte:', e);
-        await logAdminAction('RESOLVE_REPORT', reportId, `FAILED_${action}: ${e.message || e}`);
-        alert('Error al resolver reporte en el servidor.');
-        throw e;
-      }
-    } else {
-      setReports(prev => prev.map(r => r.id === reportId ? { ...r, status: action } : r));
-      await logAdminAction('RESOLVE_REPORT', reportId, `SUCCESS_LOCAL_${action}`);
+    ensureAdminOperation();
+    const response = await fetch(`/api/admin/reports/${encodeURIComponent(reportId)}/resolve`, {
+      method: 'POST',
+      headers: await getAuthenticatedRequestHeaders(),
+      body: JSON.stringify({ action })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'No se pudo resolver el reporte.');
     }
   };
 
