@@ -60,6 +60,10 @@ interface AppContextType {
   updateRadarOpportunity: (id: string, updates: Partial<RadarOpportunity>) => void;
   deleteRadarOpportunity: (id: string) => void;
   convertRadarOpportunity: (opportunityId: string, userId?: string) => void;
+  createServiceRequestFromRadar: (
+    opportunityId: string,
+    clientId?: string
+  ) => Promise<ServiceRequest | null>;
   
   // Search & Filter State
   searchQuery: string;
@@ -1638,6 +1642,110 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const createServiceRequestFromRadar = async (
+    opportunityId: string,
+    clientId?: string
+  ): Promise<ServiceRequest | null> => {
+    const opportunity = radarOpportunities.find(o => o.id === opportunityId);
+
+    if (!opportunity) {
+      console.warn('[CONEXA RADAR] No se encontró la oportunidad:', opportunityId);
+      return null;
+    }
+
+    if (!['REGISTERED', 'MATCHED', 'SERVICE_REQUESTED'].includes(opportunity.status)) {
+      console.warn(
+        '[CONEXA RADAR] No se puede generar una solicitud desde el estado:',
+        opportunity.status
+      );
+      return null;
+    }
+
+    if (opportunity.consentStatus === 'PENDING_CONSENT') {
+      console.warn('[CONEXA RADAR] Falta consentimiento antes de generar la solicitud.');
+      return null;
+    }
+
+    const resolvedClientId = clientId || currentUser?.id;
+    const client = resolvedClientId
+      ? users.find(user => user.id === resolvedClientId)
+      : null;
+
+    if (!client) {
+      console.warn('[CONEXA RADAR] No existe un usuario CONEXA asociado a la oportunidad.');
+      return null;
+    }
+
+    const existingRequest = requests.find(
+      request => request.clientId === client.id &&
+        request.title === opportunity.subcategory &&
+        request.description === opportunity.description &&
+        request.category === opportunity.category
+    );
+
+    if (existingRequest) {
+      return existingRequest;
+    }
+
+    const now = new Date();
+    const newRequest: ServiceRequest = {
+      id: `req-radar-${opportunity.id}`,
+      clientId: client.id,
+      clientName: client.name,
+      clientAvatar: client.avatar,
+      title: opportunity.subcategory || opportunity.category,
+      category: opportunity.category,
+      professionName: opportunity.subcategory,
+      description: opportunity.description,
+      approxLocation: [opportunity.neighborhood, opportunity.city, opportunity.province]
+        .filter(Boolean)
+        .join(', '),
+      preferredDate: now.toLocaleDateString('es-AR'),
+      preferredTimeSlot: 'A coordinar',
+      urgency: opportunity.urgency === 'EMERGENCY' || opportunity.urgency === 'HIGH'
+        ? 'URGENTE'
+        : opportunity.urgency === 'MEDIUM'
+          ? 'ALTA'
+          : 'NORMAL',
+      status: 'REQUEST_CREATED',
+      createdAt: now.toLocaleDateString('es-AR'),
+      quotesCount: 0
+    };
+
+    setRequests(prev => [newRequest, ...prev]);
+
+    const radarUpdates = {
+      status: 'SERVICE_REQUESTED' as OpportunityStatus,
+      lastUpdated: 'Hace un instante'
+    };
+
+    setRadarOpportunities(prev => prev.map(o =>
+      o.id === opportunityId ? { ...o, ...radarUpdates } : o
+    ));
+
+    try {
+      if (isFirebaseConfigured && db) {
+        await Promise.all([
+          setDoc(doc(db, 'service_requests', newRequest.id), newRequest),
+          updateDoc(doc(db, 'radar_opportunities', opportunityId), radarUpdates)
+        ]);
+      }
+
+      trackEvent('radar_service_request_created', {
+        opportunityId,
+        requestId: newRequest.id,
+        category: opportunity.category
+      });
+
+      return newRequest;
+    } catch (error) {
+      console.warn('[CONEXA RADAR] Error generando solicitud desde oportunidad:', error);
+      setRequests(prev => prev.filter(request => request.id !== newRequest.id));
+      setRadarOpportunities(prev => prev.map(o => o.id === opportunityId ? opportunity : o));
+      return null;
+    }
+  };
+
   const convertRadarOpportunity = (opportunityId: string, userId?: string) => {
     const opportunity = radarOpportunities.find(o => o.id === opportunityId);
 
@@ -1707,7 +1815,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       conversations, messages, reports, verifications, notifications, transactions, favorites,
       betaConfig, inviteCodes, feedbacks, analyticsEvents,
       radarOpportunities, radarStats, approvalMode, setApprovalMode, updateApprovalMode,
-      addRadarOpportunity, updateRadarOpportunity, deleteRadarOpportunity, convertRadarOpportunity,
+      addRadarOpportunity, updateRadarOpportunity, deleteRadarOpportunity, convertRadarOpportunity, createServiceRequestFromRadar,
       searchQuery, setSearchQuery, selectedCategory, setSelectedCategory,
       selectedProfession, setSelectedProfession, selectedCity, setSelectedCity,
       maxDistanceKm, setMaxDistanceKm, onlyVerified, setOnlyVerified,
