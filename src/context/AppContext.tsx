@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, updateDoc, collection, getDocs, getDoc, onSnapshot } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, collection, getDocs, getDoc, onSnapshot, query, where } from 'firebase/firestore';
 import { auth, db, isFirebaseConfigured } from '../lib/firebase';
 import { 
   UserProfile, Category, Profession, ServiceRequest, Quote, 
@@ -460,18 +460,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setQuotes(list);
     });
 
-    const unsubConversations = onSnapshot(
-      collection(db, 'conversations'),
-      (snapshot) => {
+    let unsubConversations = () => {};
+
+    const syncConversations = (uid: string) => {
+      unsubConversations();
+
+      const conversationsQuery = query(
+        collection(db, 'conversations'),
+        where('participantIds', 'array-contains', uid)
+      );
+
+      unsubConversations = onSnapshot(conversationsQuery, (snapshot) => {
         const list: Conversation[] = [];
 
-        snapshot.forEach(doc => {
-          list.push(doc.data() as Conversation);
+        snapshot.forEach(conversationDoc => {
+          const data = conversationDoc.data() as Conversation;
+          list.push({
+            ...data,
+            id: data.id || conversationDoc.id
+          });
         });
 
         setConversations(list);
+      });
+    };
+
+    const authenticatedUid = auth.currentUser?.uid;
+    if (authenticatedUid) {
+      syncConversations(authenticatedUid);
+    }
+
+    const unsubAuthConversations = auth.onAuthStateChanged(user => {
+      if (user) {
+        syncConversations(user.uid);
+      } else {
+        unsubConversations();
+        setConversations([]);
+        setMessages({});
       }
-    );
+    });
 
     const unsubReports = onSnapshot(collection(db, 'reports'), (snapshot) => {
       const list: UserReport[] = [];
@@ -497,6 +524,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubRequests();
       unsubQuotes();
       unsubConversations();
+      unsubAuthConversations();
       unsubReports();
       unsubVerifications();
       unsubTransactions();
