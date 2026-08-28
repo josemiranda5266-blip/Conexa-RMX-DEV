@@ -992,6 +992,39 @@ Responde en JSON con:
     }
   });
 
+  app.post("/api/jobs/start", rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const auth = await verifyAuthToken(req);
+      if (!auth.isAuthenticated || !auth.userId) return res.status(401).json({ success: false, code: 'UNAUTHORIZED' });
+      const { requestId } = req.body || {};
+      if (!requestId || typeof requestId !== 'string') return res.status(400).json({ success: false, code: 'INVALID_REQUEST_ID' });
+
+      const firestore = await getAdminDb();
+      const requestRef = firestore.collection('service_requests').doc(requestId);
+      const transactions = await firestore.collection('transactions').where('serviceRequestId', '==', requestId).limit(1).get();
+      if (transactions.empty) return res.status(409).json({ success: false, code: 'TRANSACTION_NOT_FOUND' });
+      const transactionRef = transactions.docs[0].ref;
+      const quoteRef = firestore.collection('quotes').doc(String((transactions.docs[0].data() || {}).quoteId || ''));
+
+      await firestore.runTransaction(async (tx: any) => {
+        const [requestSnap, transactionSnap, quoteSnap, userSnap] = await Promise.all([
+          tx.get(requestRef), tx.get(transactionRef), tx.get(quoteRef), tx.get(firestore.collection('users').doc(auth.userId))
+        ]);
+        if (!requestSnap.exists || !transactionSnap.exists || !quoteSnap.exists || !userSnap.exists) throw new Error('RESOURCE_NOT_FOUND');
+        const requestData = requestSnap.data() || {}, transactionData = transactionSnap.data() || {}, quoteData = quoteSnap.data() || {};
+        if (!hasProfessionalCapability(userSnap.data())) throw new Error('PROFESSIONAL_ROLE_REQUIRED');
+        if (requestData.status !== 'PROFESSIONAL_SELECTED' || transactionData.status !== 'PAID' || quoteData.status !== 'ACCEPTED') throw new Error('INVALID_JOB_STATE');
+        if (quoteData.professionalId !== auth.userId || transactionData.professionalId !== auth.userId) throw new Error('FORBIDDEN');
+        tx.update(requestRef, { status: 'IN_PROGRESS', startedAt: new Date().toISOString(), startedBy: auth.userId });
+      });
+      return res.json({ success: true, requestId, status: 'IN_PROGRESS' });
+    } catch (err: any) {
+      const code = err?.message || 'JOB_START_ERROR';
+      const status = ['RESOURCE_NOT_FOUND'].includes(code) ? 404 : ['INVALID_JOB_STATE'].includes(code) ? 409 : ['PROFESSIONAL_ROLE_REQUIRED','FORBIDDEN'].includes(code) ? 403 : 500;
+      return res.status(status).json({ success: false, error: code, code });
+    }
+  });
+
   app.post("/api/jobs/complete", rateLimiter, async (req: Request, res: Response) => {
     try {
       const auth = await verifyAuthToken(req);
@@ -1044,8 +1077,8 @@ Responde en JSON con:
       if (quote.status !== 'ACCEPTED') return res.status(409).json({ success: false, error: "El presupuesto no está aceptado.", code: "QUOTE_NOT_ACCEPTED" });
       if (transaction.status !== 'PAID') return res.status(409).json({ success: false, error: "El pago del trabajo no está confirmado.", code: "PAYMENT_NOT_CONFIRMED" });
       if (serviceRequest.status === 'REVIEW_PENDING') return res.status(409).json({ success: false, error: "El trabajo ya fue completado.", code: "JOB_ALREADY_COMPLETED" });
-      if (serviceRequest.status !== 'PROFESSIONAL_SELECTED') {
-        return res.status(409).json({ success: false, error: "La solicitud no está en un estado válido para completarse.", code: "INVALID_JOB_STATE" });
+      if (serviceRequest.status !== 'IN_PROGRESS') {
+        return res.status(409).json({ success: false, error: "El trabajo debe estar en ejecución antes de completarse.", code: "INVALID_JOB_STATE" });
       }
 
       await firestore.runTransaction(async (tx: any) => {
@@ -1056,7 +1089,7 @@ Responde en JSON con:
         const currentRequest = currentRequestSnap.data() || {};
         const currentTransaction = currentTransactionSnap.data() || {};
         const currentQuote = currentQuoteSnap.data() || {};
-        if (currentRequest.status !== 'PROFESSIONAL_SELECTED' || currentTransaction.status !== 'PAID' || currentQuote.status !== 'ACCEPTED') {
+        if (currentRequest.status !== 'IN_PROGRESS' || currentTransaction.status !== 'PAID' || currentQuote.status !== 'ACCEPTED') {
           throw new Error('INVALID_JOB_STATE');
         }
         const completedAt = new Date().toISOString();
