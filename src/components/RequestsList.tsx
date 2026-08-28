@@ -74,6 +74,7 @@ export const RequestsList: React.FC<RequestsListProps> = ({
         {requests.map(req => {
           const reqQuotes = quotes.filter(q => q.requestId === req.id);
           const isMyReq = req.clientId === currentUser.id;
+          const isQuoteable = req.status === 'REQUEST_CREATED' || req.status === 'QUOTES_RECEIVED';
 
           return (
             <div 
@@ -129,7 +130,7 @@ export const RequestsList: React.FC<RequestsListProps> = ({
                   </span>
                 </div>
 
-                {isPro && !isMyReq ? (
+                {isPro && !isMyReq && isQuoteable ? (
                   <button
                     onClick={() => onSendQuoteForRequest(req)}
                     className="py-1.5 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-md transition-all border border-white/20 active:scale-95"
@@ -198,8 +199,13 @@ export const RequestsList: React.FC<RequestsListProps> = ({
                     >
                       Conversar en Chat
                     </button>
+                    {selectedRequest.status === 'REQUEST_CREATED' || selectedRequest.status === 'QUOTES_RECEIVED' ? (
                     <button
                       onClick={async () => {
+                        if (q.status !== 'PENDING') {
+                          setActionError('Este presupuesto ya no está disponible para ser aceptado.');
+                          return;
+                        }
                         setActionError(null);
                         const checkoutWindow = window.open('about:blank', '_blank');
                         try {
@@ -225,6 +231,19 @@ export const RequestsList: React.FC<RequestsListProps> = ({
                     >
                       Aceptar Presupuesto
                     </button>
+                    ) : (
+                      <div className="flex-1 py-2 text-center bg-slate-100 text-slate-600 font-bold rounded-xl">
+                        {selectedRequest.status === 'PROFESSIONAL_SELECTED'
+                          ? 'Profesional seleccionado'
+                          : selectedRequest.status === 'IN_PROGRESS'
+                            ? 'Trabajo en curso'
+                            : selectedRequest.status === 'REVIEW_PENDING'
+                              ? 'Esperando reseña'
+                              : selectedRequest.status === 'CLOSED'
+                                ? 'Trabajo cerrado'
+                                : 'Solicitud no disponible'}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
