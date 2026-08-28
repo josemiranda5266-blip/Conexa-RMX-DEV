@@ -930,7 +930,7 @@ Responde en JSON con:
 
         const professionalRef = firestore.collection('users').doc(String(quote.professionalId));
         const professionalSnap = await tx.get(professionalRef);
-        if (!professionalSnap.exists || professionalSnap.data()?.role !== 'PROFESSIONAL') {
+        if (!professionalSnap.exists || !hasProfessionalCapability(professionalSnap.data())) {
           throw new Error('PROFESSIONAL_ROLE_REQUIRED');
         }
         if (serviceRequest.assignedProfessionalId && serviceRequest.assignedProfessionalId !== quote.professionalId) {
