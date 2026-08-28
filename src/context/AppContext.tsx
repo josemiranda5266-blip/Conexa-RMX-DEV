@@ -600,47 +600,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
-  const sharePhoneWithUser = (conversationId: string, recipientId: string) => {
-    setConversations(prev => prev.map(c => {
-      if (c.id === conversationId) {
-        return {
-          ...c,
-          sharedPhoneBySender: c.participantIds[0] === currentUser.id ? true : c.sharedPhoneBySender,
-          sharedPhoneByReceiver: c.participantIds[1] === currentUser.id ? true : c.sharedPhoneByReceiver
-        };
-      }
-      return c;
-    }));
+  const persistConversation = async (conversation: Conversation) => {
+    if (!db) return;
+    try {
+      await setDoc(doc(db, 'conversations', conversation.id), conversation, { merge: true });
+    } catch (error) {
+      console.warn('[Firestore] Error persistiendo conversación:', error);
+    }
+  };
 
-    sendMessage(
-      conversationId,
-      `📱 ${currentUser.name} compartió voluntariamente su número de teléfono privado: ${currentUser.phonePrivate}`,
-      'SHARED_PHONE'
-    );
+  const sharePhoneWithUser = (conversationId: string, recipientId: string) => {
+    const conversation = conversations.find(c => c.id === conversationId);
+    if (!conversation || !currentUser) return;
+
+    const updates = conversation.participantIds[0] === currentUser.id
+      ? { sharedPhoneBySender: true }
+      : { sharedPhoneByReceiver: true };
+
+    const updatedConversation = { ...conversation, ...updates };
+    setConversations(prev => prev.map(c => c.id === conversationId ? updatedConversation : c));
+    void persistConversation(updatedConversation);
+
+    sendMessage(conversationId, '📱 Teléfono compartido voluntariamente.', 'SHARED_PHONE');
   };
 
   const shareAddressWithUser = (conversationId: string, recipientId: string) => {
-    const exactAddress = currentUser.location.exactAddressPrivate || 'Dirección no provista';
-    
-    setConversations(prev => prev.map(c => {
-      if (c.id === conversationId) {
-        return {
-          ...c,
-          sharedAddressBySender: c.participantIds[0] === currentUser.id ? true : c.sharedAddressBySender,
-          sharedAddressByReceiver: c.participantIds[1] === currentUser.id ? true : c.sharedAddressByReceiver
-        };
-      }
-      return c;
-    }));
+    const conversation = conversations.find(c => c.id === conversationId);
+    if (!conversation || !currentUser) return;
 
-    sendMessage(
-      conversationId,
-      `📍 ${currentUser.name} compartió voluntariamente su domicilio exacto para la visita: ${exactAddress}`,
-      'SHARED_ADDRESS'
-    );
+    const updates = conversation.participantIds[0] === currentUser.id
+      ? { sharedAddressBySender: true }
+      : { sharedAddressByReceiver: true };
+
+    const updatedConversation = { ...conversation, ...updates };
+    setConversations(prev => prev.map(c => c.id === conversationId ? updatedConversation : c));
+    void persistConversation(updatedConversation);
+
+    sendMessage(conversationId, '📍 Domicilio compartido voluntariamente.', 'SHARED_ADDRESS');
   };
 
   const sendMessage = (conversationId: string, content: string, type: Message['type'] = 'TEXT', quoteData?: Quote) => {
+    if (!currentUser) return;
+
     const newMsg: Message = {
       id: `msg-${Date.now()}`,
       conversationId,
@@ -657,20 +658,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       [conversationId]: [...(prev[conversationId] || []), newMsg]
     }));
 
-    setConversations(prev => prev.map(c => {
-      if (c.id === conversationId) {
-        return {
-          ...c,
-          lastMessage: type === 'SHARED_PHONE' ? '📱 Teléfono compartido' : type === 'SHARED_ADDRESS' ? '📍 Domicilio compartido' : type === 'QUOTE_PROPOSAL' ? '📋 Presupuesto enviado' : content,
-          lastMessageTime: newMsg.createdAt
-        };
-      }
-      return c;
-    }));
+    const conversation = conversations.find(c => c.id === conversationId);
+    if (conversation) {
+      const updatedConversation = {
+        ...conversation,
+        lastMessage: type === 'SHARED_PHONE' ? '📱 Teléfono compartido' : type === 'SHARED_ADDRESS' ? '📍 Domicilio compartido' : type === 'QUOTE_PROPOSAL' ? '📋 Presupuesto enviado' : content,
+        lastMessageTime: newMsg.createdAt
+      };
+
+      setConversations(prev => prev.map(c => c.id === conversationId ? updatedConversation : c));
+      void persistConversation(updatedConversation);
+    }
+
+    if (db) {
+      void setDoc(doc(db, 'conversations', conversationId, 'messages', newMsg.id), newMsg)
+        .catch(error => console.warn('[Firestore] Error persistiendo mensaje:', error));
+    }
   };
 
   const createConversation = (targetUserId: string): string => {
-    const existing = conversations.find(c => 
+    if (!currentUser) return '';
+
+    const existing = conversations.find(c =>
       c.participantIds.includes(currentUser.id) && c.participantIds.includes(targetUserId)
     );
     if (existing) return existing.id;
@@ -697,21 +706,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       sharedAddressByReceiver: false
     };
 
+    const initialMessage: Message = {
+      id: `m-init-${Date.now()}`,
+      conversationId: newConvId,
+      senderId: 'system',
+      senderName: 'CONEXA',
+      createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      type: 'SYSTEM',
+      content: '🔒 CONEXA PRIVACIDAD: La conversación está protegida. Tu número telefónico y domicilio exacto NO son visibles hasta que los compartas voluntariamente.'
+    };
+
     setConversations(prev => [newConv, ...prev]);
     setMessages(prev => ({
       ...prev,
-      [newConvId]: [
-        {
-          id: `m-init-${Date.now()}`,
-          conversationId: newConvId,
-          senderId: 'system',
-          senderName: 'CONEXA',
-          createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          type: 'SYSTEM',
-          content: '🔒 CONEXA PRIVACIDAD: La conversación está protegida. Tu número telefónico y domicilio exacto NO son visibles hasta que los compartas voluntariamente.'
-        }
-      ]
+      [newConvId]: [initialMessage]
     }));
+
+    void persistConversation(newConv);
+
+    if (db) {
+      void setDoc(doc(db, 'conversations', newConvId, 'messages', initialMessage.id), initialMessage)
+        .catch(error => console.warn('[Firestore] Error persistiendo mensaje inicial:', error));
+    }
 
     return newConvId;
   };
