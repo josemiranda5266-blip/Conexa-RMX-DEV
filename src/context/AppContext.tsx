@@ -461,9 +461,60 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     let unsubConversations = () => {};
+    let messageUnsubscribers: Record<string, () => void> = {};
+
+    const syncConversationMessages = (conversationIds: string[]) => {
+      const nextIds = new Set(conversationIds);
+
+      Object.entries(messageUnsubscribers).forEach(([conversationId, unsubscribe]) => {
+        if (!nextIds.has(conversationId)) {
+          unsubscribe();
+          delete messageUnsubscribers[conversationId];
+          setMessages(previous => {
+            const next = { ...previous };
+            delete next[conversationId];
+            return next;
+          });
+        }
+      });
+
+      conversationIds.forEach(conversationId => {
+        if (messageUnsubscribers[conversationId]) return;
+
+        messageUnsubscribers[conversationId] = onSnapshot(
+          collection(db, 'conversations', conversationId, 'messages'),
+          snapshot => {
+            const list: Message[] = [];
+
+            snapshot.forEach(messageDoc => {
+              const data = messageDoc.data() as Message;
+              list.push({
+                ...data,
+                id: data.id || messageDoc.id
+              });
+            });
+
+            setMessages(previous => ({
+              ...previous,
+              [conversationId]: list
+            }));
+          },
+          error => {
+            console.warn('[Firestore] Error sincronizando mensajes:', conversationId, error);
+          }
+        );
+      });
+    };
+
+    const stopConversationMessages = () => {
+      Object.values(messageUnsubscribers).forEach(unsubscribe => unsubscribe());
+      messageUnsubscribers = {};
+      setMessages({});
+    };
 
     const syncConversations = (uid: string) => {
       unsubConversations();
+      stopConversationMessages();
 
       const conversationsQuery = query(
         collection(db, 'conversations'),
@@ -482,6 +533,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
 
         setConversations(list);
+        syncConversationMessages(list.map(conversation => conversation.id));
       });
     };
 
@@ -495,8 +547,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncConversations(user.uid);
       } else {
         unsubConversations();
+        stopConversationMessages();
         setConversations([]);
-        setMessages({});
       }
     });
 
@@ -524,6 +576,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubRequests();
       unsubQuotes();
       unsubConversations();
+      stopConversationMessages();
       unsubAuthConversations();
       unsubReports();
       unsubVerifications();
