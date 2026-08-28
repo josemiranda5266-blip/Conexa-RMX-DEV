@@ -748,6 +748,23 @@ Responde en JSON con:
   // ==========================================
   // CONEXA TRANSACTIONS - Commercial Core
   // ==========================================
+  // Unified account capability checks. A user's primary role does not erase
+  // secondary capabilities: the same account may legitimately be both client
+  // and professional.
+  function hasProfessionalCapability(user: any): boolean {
+    return Boolean(
+      user &&
+      (
+        user.role === 'PROFESSIONAL' ||
+        user.isProfessional === true ||
+        user.hasProfessionalProfile === true
+      )
+    );
+  }
+
+  function hasClientCapability(user: any): boolean {
+    return Boolean(user) && user.isClient !== false;
+  }
   app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) => {
     try {
       const auth = await verifyAuthToken(req);
@@ -785,7 +802,7 @@ Responde en JSON con:
         const existingQuoteSnap = await tx.get(quoteRef);
 
         if (existingQuoteSnap.exists) throw new Error('QUOTE_ALREADY_EXISTS');
-        if (!professionalSnap.exists || professionalSnap.data()?.role !== 'PROFESSIONAL') {
+        if (!professionalSnap.exists || !hasProfessionalCapability(professionalSnap.data())) {
           throw new Error('PROFESSIONAL_ROLE_REQUIRED');
         }
         if (!requestSnap.exists) throw new Error('REQUEST_NOT_FOUND');
@@ -902,7 +919,7 @@ Responde en JSON con:
         if (!serviceRequest || serviceRequest.clientId !== auth.userId) throw new Error('FORBIDDEN_REQUEST_OWNER');
         const clientRef = firestore.collection('users').doc(auth.userId);
         const clientSnap = await tx.get(clientRef);
-        if (!clientSnap.exists || clientSnap.data()?.role !== 'USER') throw new Error('CLIENT_ROLE_REQUIRED');
+        if (!clientSnap.exists || !hasClientCapability(clientSnap.data())) throw new Error('CLIENT_ROLE_REQUIRED');
         if (serviceRequest.status !== 'REQUEST_CREATED' && serviceRequest.status !== 'QUOTES_RECEIVED') {
           throw new Error('REQUEST_NOT_CONTRACTABLE');
         }
@@ -1009,8 +1026,8 @@ Responde en JSON con:
         firestore.collection('users').doc(auth.userId).get()
       ]);
 
-      if (!professionalSnap.exists || professionalSnap.data()?.role !== 'PROFESSIONAL') {
-        return res.status(403).json({ success: false, error: "Solo un profesional puede completar trabajos.", code: "PROFESSIONAL_ROLE_REQUIRED" });
+      if (!professionalSnap.exists || !hasProfessionalCapability(professionalSnap.data())) {
+        return res.status(403).json({ success: false, error: "Solo un profesional con perfil profesional activo puede completar trabajos.", code: "PROFESSIONAL_ROLE_REQUIRED" });
       }
       if (serviceRequest.clientId === auth.userId) {
         return res.status(403).json({ success: false, error: "El cliente no puede completar este trabajo.", code: "FORBIDDEN" });
