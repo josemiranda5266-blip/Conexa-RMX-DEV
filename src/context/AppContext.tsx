@@ -1,12 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { onAuthStateChanged , OpportunityStatus } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth';
 import { doc, setDoc, updateDoc, collection, getDocs, getDoc, onSnapshot, query, where } from 'firebase/firestore';
 import { auth, db, isFirebaseConfigured } from '../lib/firebase';
 import { 
   UserProfile, Category, Profession, ServiceRequest, Quote, 
   Conversation, Message, Review, UserReport, VerificationRequest, 
   NotificationItem, LocationData, InviteCode, FeedbackItem, AnalyticsEvent, BetaConfig,
-  RadarOpportunity, RadarStats, ApprovalMode, Role, Transaction
+  RadarOpportunity, RadarStats, ApprovalMode, OpportunityStatus, Role, Transaction
 } from '../types';
 import { 
   INITIAL_CATEGORIES, INITIAL_PROFESSIONS, INITIAL_PROFILES, 
