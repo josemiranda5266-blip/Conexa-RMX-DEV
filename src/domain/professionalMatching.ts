@@ -113,18 +113,25 @@ export function matchesLocation(
   candidate: ProfessionalCandidate,
   opportunity: Pick<RadarOpportunity, 'city' | 'province' | 'neighborhood'>
 ): boolean {
-  const sameCity =
-    normalizeText(candidate.city) === normalizeText(opportunity.city);
+  const candidateCity = normalizeText(candidate.city);
+  const candidateProvince = normalizeText(candidate.province);
+  const candidateZone = normalizeText(candidate.approxZone);
+  const opportunityCity = normalizeText(opportunity.city);
+  const opportunityProvince = normalizeText(opportunity.province);
+  const opportunityNeighborhood = normalizeText(opportunity.neighborhood);
 
-  const sameProvince =
-    normalizeText(candidate.province) === normalizeText(opportunity.province);
+  const sameCity = Boolean(candidateCity && opportunityCity && candidateCity === opportunityCity);
+  const sameProvince = Boolean(
+    candidateProvince && opportunityProvince && candidateProvince === opportunityProvince
+  );
+  const sameNeighborhood = Boolean(
+    candidateZone &&
+    opportunityNeighborhood &&
+    (candidateZone.includes(opportunityNeighborhood) ||
+      opportunityNeighborhood.includes(candidateZone))
+  );
 
-  const sameNeighborhood = opportunity.neighborhood
-    ? normalizeText(candidate.approxZone).includes(normalizeText(opportunity.neighborhood)) ||
-      normalizeText(opportunity.neighborhood).includes(normalizeText(candidate.approxZone))
-    : false;
-
-  return sameCity || sameNeighborhood || (sameProvince && !opportunity.city);
+  return sameCity || sameNeighborhood || sameProvince;
 }
 
 export function calculateProfessionalMatchScore(
@@ -141,11 +148,23 @@ export function calculateProfessionalMatchScore(
     return { candidate, matchScore: 0, matchReasons: [] };
   }
 
-  const sameCity = normalizeText(candidate.city) === normalizeText(opportunity.city);
-  const sameProvince = normalizeText(candidate.province) === normalizeText(opportunity.province);
-  const sameNeighborhood = opportunity.neighborhood
-    ? normalizeText(candidate.approxZone).includes(normalizeText(opportunity.neighborhood))
-    : false;
+  const candidateCity = normalizeText(candidate.city);
+  const candidateProvince = normalizeText(candidate.province);
+  const candidateZone = normalizeText(candidate.approxZone);
+  const opportunityCity = normalizeText(opportunity.city);
+  const opportunityProvince = normalizeText(opportunity.province);
+  const opportunityNeighborhood = normalizeText(opportunity.neighborhood);
+
+  const sameCity = Boolean(candidateCity && opportunityCity && candidateCity === opportunityCity);
+  const sameProvince = Boolean(
+    candidateProvince && opportunityProvince && candidateProvince === opportunityProvince
+  );
+  const sameNeighborhood = Boolean(
+    candidateZone &&
+    opportunityNeighborhood &&
+    (candidateZone.includes(opportunityNeighborhood) ||
+      opportunityNeighborhood.includes(candidateZone))
+  );
 
   if (sameCity) {
     score += 25;
