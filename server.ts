@@ -1078,6 +1078,163 @@ Responde en JSON con:
     }
   });
 
+  // Administrative moderation operations are authoritative on the backend.
+  // The browser may request an action, but authorization, mutation and audit logging
+  // are performed together using Firebase Admin.
+  async function requireAdminRequest(req: Request, res: Response): Promise<{ userId: string; role: string } | null> {
+    const auth = await verifyAuthToken(req);
+    if (!auth.isAuthenticated || !auth.userId) {
+      res.status(401).json({ success: false, error: 'Se requiere autenticación válida.', code: auth.errorReason || 'UNAUTHORIZED' });
+      return null;
+    }
+    if (!auth.isAdmin) {
+      res.status(403).json({ success: false, error: 'Se requiere rol administrativo.', code: 'ADMIN_REQUIRED' });
+      return null;
+    }
+    return { userId: auth.userId, role: auth.role || 'ADMIN' };
+  }
+
+  async function writeAdminAudit(
+    firestore: any,
+    adminIdentity: { userId: string; role: string },
+    action: string,
+    targetType: string,
+    targetId: string,
+    result: string,
+    details: Record<string, unknown> = {}
+  ): Promise<void> {
+    const auditId = `AUD-${Date.now()}-${crypto.randomBytes(6).toString('hex')}`;
+    await firestore.collection('admin_audit_logs').doc(auditId).set({
+      adminUid: adminIdentity.userId,
+      role: adminIdentity.role,
+      action,
+      targetType,
+      targetId,
+      environment: process.env.NODE_ENV === 'production' ? 'production' : 'development',
+      timestamp: new Date().toISOString(),
+      result,
+      ...details
+    });
+  }
+
+  app.post('/api/admin/verifications/:verificationId/approve', rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const adminIdentity = await requireAdminRequest(req, res);
+      if (!adminIdentity) return;
+
+      const verificationId = req.params.verificationId;
+      if (!verificationId) {
+        return res.status(400).json({ success: false, error: 'verificationId es obligatorio.', code: 'INVALID_VERIFICATION_ID' });
+      }
+
+      const firestore = await getAdminDb();
+      const verificationRef = firestore.collection('verifications').doc(verificationId);
+
+      const result = await firestore.runTransaction(async (tx: any) => {
+        const verificationSnap = await tx.get(verificationRef);
+        if (!verificationSnap.exists) throw new Error('VERIFICATION_NOT_FOUND');
+
+        const verification = verificationSnap.data() || {};
+        if (!verification.userId || !['IDENTITY', 'PROFESSIONAL'].includes(verification.type)) {
+          throw new Error('INVALID_VERIFICATION_DATA');
+        }
+        if (verification.status === 'VERIFIED') throw new Error('VERIFICATION_ALREADY_APPROVED');
+        if (verification.status && verification.status !== 'PENDING') throw new Error('INVALID_VERIFICATION_STATE');
+
+        const userRef = firestore.collection('users').doc(verification.userId);
+        const userSnap = await tx.get(userRef);
+        if (!userSnap.exists) throw new Error('USER_NOT_FOUND');
+
+        const approvedAt = new Date().toISOString();
+        tx.update(verificationRef, {
+          status: 'VERIFIED',
+          approvedAt,
+          approvedBy: adminIdentity.userId
+        });
+        tx.update(userRef, verification.type === 'IDENTITY'
+          ? { isIdentityVerified: true, identityVerificationStatus: 'VERIFIED' }
+          : { isProfessionalVerified: true, professionalVerificationStatus: 'VERIFIED' }
+        );
+
+        return { userId: verification.userId, type: verification.type, approvedAt };
+      });
+
+      await writeAdminAudit(firestore, adminIdentity, 'APPROVE_VERIFICATION', 'VERIFICATION', verificationId, 'SUCCESS', result);
+      return res.json({ success: true, verificationId, status: 'VERIFIED', ...result });
+    } catch (err: any) {
+      const code = err?.message || 'ADMIN_VERIFICATION_APPROVAL_ERROR';
+      const statusMap: Record<string, number> = {
+        VERIFICATION_NOT_FOUND: 404,
+        USER_NOT_FOUND: 404,
+        INVALID_VERIFICATION_DATA: 400,
+        VERIFICATION_ALREADY_APPROVED: 409,
+        INVALID_VERIFICATION_STATE: 409
+      };
+      return res.status(statusMap[code] || 500).json({ success: false, error: statusMap[code] ? code : 'No se pudo aprobar la verificación.', code });
+    }
+  });
+
+  app.post('/api/admin/users/:userId/block', rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const adminIdentity = await requireAdminRequest(req, res);
+      if (!adminIdentity) return;
+
+      const userId = req.params.userId;
+      if (!userId || userId === adminIdentity.userId) {
+        return res.status(400).json({ success: false, error: 'No se puede bloquear este usuario.', code: 'INVALID_BLOCK_TARGET' });
+      }
+
+      const firestore = await getAdminDb();
+      const userRef = firestore.collection('users').doc(userId);
+      const userSnap = await userRef.get();
+      if (!userSnap.exists) {
+        return res.status(404).json({ success: false, error: 'Usuario no encontrado.', code: 'USER_NOT_FOUND' });
+      }
+
+      const blockedAt = new Date().toISOString();
+      await userRef.update({
+        isBlocked: true,
+        blockedAt,
+        blockedBy: adminIdentity.userId
+      });
+      await writeAdminAudit(firestore, adminIdentity, 'BLOCK_USER', 'USER', userId, 'SUCCESS', { blockedAt });
+      return res.json({ success: true, userId, isBlocked: true, blockedAt });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: 'No se pudo bloquear al usuario.', code: err?.message || 'ADMIN_BLOCK_USER_ERROR' });
+    }
+  });
+
+  app.post('/api/admin/reports/:reportId/resolve', rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const adminIdentity = await requireAdminRequest(req, res);
+      if (!adminIdentity) return;
+
+      const reportId = req.params.reportId;
+      const action = req.body?.action;
+      if (!['DISMISSED', 'ACTION_TAKEN'].includes(action)) {
+        return res.status(400).json({ success: false, error: 'Acción de resolución inválida.', code: 'INVALID_REPORT_ACTION' });
+      }
+
+      const firestore = await getAdminDb();
+      const reportRef = firestore.collection('reports').doc(reportId);
+      const reportSnap = await reportRef.get();
+      if (!reportSnap.exists) {
+        return res.status(404).json({ success: false, error: 'Reporte no encontrado.', code: 'REPORT_NOT_FOUND' });
+      }
+
+      const resolvedAt = new Date().toISOString();
+      await reportRef.update({
+        status: action,
+        resolvedAt,
+        resolvedBy: adminIdentity.userId
+      });
+      await writeAdminAudit(firestore, adminIdentity, 'RESOLVE_REPORT', 'REPORT', reportId, 'SUCCESS', { action, resolvedAt });
+      return res.json({ success: true, reportId, status: action, resolvedAt });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: 'No se pudo resolver el reporte.', code: err?.message || 'ADMIN_RESOLVE_REPORT_ERROR' });
+    }
+  });
+
   // Account Deletion API Endpoint (GDPR/ARCO Compliance)
   app.post("/api/user/delete-account", rateLimiter, async (req: Request, res: Response) => {
     try {
