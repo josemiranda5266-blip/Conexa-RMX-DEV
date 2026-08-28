@@ -55,6 +55,7 @@ interface AppContextType {
   radarStats: RadarStats;
   approvalMode: ApprovalMode;
   setApprovalMode: (mode: ApprovalMode) => void;
+  updateApprovalMode: (mode: ApprovalMode) => Promise<void>;
   addRadarOpportunity: (opp: RadarOpportunity) => void;
   updateRadarOpportunity: (id: string, updates: Partial<RadarOpportunity>) => void;
   deleteRadarOpportunity: (id: string) => void;
@@ -1417,6 +1418,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [radarStats, setRadarStats] = useState<RadarStats>(initialRadarStats);
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>('ASISTIDO');
 
+  const updateApprovalMode = async (mode: ApprovalMode): Promise<void> => {
+    if (!['AUTOMÁTICO', 'ASISTIDO', 'MANUAL'].includes(mode)) {
+      throw new Error('Modo de aprobación inválido.');
+    }
+
+    if (isFirebaseConfigured && db) {
+      await setDoc(
+        doc(db, 'system_config', 'radar'),
+        {
+          approvalMode: mode,
+          updatedAt: new Date().toISOString()
+        },
+        { merge: true }
+      );
+    }
+
+    setApprovalMode(mode);
+  };
+
   useEffect(() => {
     if (!isFirebaseConfigured || !db) return;
 
@@ -1607,7 +1627,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       users, categories, professions, reviews, requests, quotes, 
       conversations, messages, reports, verifications, notifications, transactions, favorites,
       betaConfig, inviteCodes, feedbacks, analyticsEvents,
-      radarOpportunities, radarStats, approvalMode, setApprovalMode,
+      radarOpportunities, radarStats, approvalMode, setApprovalMode, updateApprovalMode,
       addRadarOpportunity, updateRadarOpportunity, deleteRadarOpportunity, convertRadarOpportunity,
       searchQuery, setSearchQuery, selectedCategory, setSelectedCategory,
       selectedProfession, setSelectedProfession, selectedCity, setSelectedCity,
