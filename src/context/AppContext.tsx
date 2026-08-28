@@ -711,9 +711,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const getConversationParticipantIds = (conversationId: string): [string, string] | null => {
+    const conversation = conversations.find(item => item.id === conversationId);
+    return conversation?.participantIds ?? null;
+  };
+
+  const isConversationParticipant = (conversationId: string): boolean => {
+    if (!currentUser) return false;
+    return Boolean(getConversationParticipantIds(conversationId)?.includes(currentUser.id));
+  };
+
   const sharePhoneWithUser = (conversationId: string, recipientId: string) => {
     const conversation = conversations.find(c => c.id === conversationId);
-    if (!conversation || !currentUser) return;
+    if (!conversation || !currentUser || !conversation.participantIds.includes(recipientId) || !isConversationParticipant(conversationId)) return;
 
     const updates = conversation.participantIds[0] === currentUser.id
       ? { sharedPhoneBySender: true }
@@ -728,7 +738,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const shareAddressWithUser = (conversationId: string, recipientId: string) => {
     const conversation = conversations.find(c => c.id === conversationId);
-    if (!conversation || !currentUser) return;
+    if (!conversation || !currentUser || !conversation.participantIds.includes(recipientId) || !isConversationParticipant(conversationId)) return;
 
     const updates = conversation.participantIds[0] === currentUser.id
       ? { sharedAddressBySender: true }
@@ -742,7 +752,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const sendMessage = (conversationId: string, content: string, type: Message['type'] = 'TEXT', quoteData?: Quote) => {
-    if (!currentUser) return;
+    if (!currentUser || !isConversationParticipant(conversationId)) {
+      console.warn('[CONEXA MESSAGING] Intento de envío fuera de una conversación autorizada:', conversationId);
+      return;
+    }
 
     const newMsg: Message = {
       id: `msg-${Date.now()}`,
@@ -786,7 +799,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
     if (existing) return existing.id;
 
+    if (targetUserId === currentUser.id) return '';
+
     const targetUser = users.find(u => u.id === targetUserId);
+    if (!targetUser) {
+      console.warn('[CONEXA MESSAGING] No se puede crear una conversación con un usuario inexistente:', targetUserId);
+      return '';
+    }
+
     const newConvId = `conv-${Date.now()}`;
     const newConv: Conversation = {
       id: newConvId,
