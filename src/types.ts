@@ -131,6 +131,9 @@ export interface ServiceRequest {
   createdAt: string;
   quotesCount: number;
   isDemoData?: boolean;
+  // Origin metadata used when a request is created from CONEXA RADAR.
+  radarOpportunityId?: string;
+  sourceType?: 'DIRECT' | 'RADAR';
 }
 
 export interface Quote {
@@ -348,6 +351,9 @@ export interface RadarOpportunity {
   source: string; // e.g. "Meta Graph API (Página Oficial)", "Landing Campaña Electricistas", "Webhook N8n"
   sourceType: OpportunitySourceType;
   externalReference?: string;
+  // Persistent link to the authenticated CONEXA account once the lead becomes a user.
+  clientUserId?: string;
+  linkedAt?: string;
   category: string;
   subcategory: string;
   description: string;
