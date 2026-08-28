@@ -91,6 +91,7 @@ interface AppContextType {
   connectMercadoPago: () => Promise<void>;
   createMercadoPagoCheckout: (transactionId: string) => Promise<string>;
   getMercadoPagoStatus: () => Promise<{ connected: boolean; mpUserId?: string | null; publicKey?: string | null }>;
+  startJob: (jobId: string) => Promise<void>;
   completeJob: (jobId: string) => void;
   addReview: (review: Omit<Review, 'id' | 'createdAt' | 'isVerifiedJob'>) => void;
   submitVerification: (type: 'IDENTITY' | 'PROFESSIONAL', documentName: string, docUrl: string) => void;
@@ -1047,6 +1048,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return null;
   };
 
+  const startJob = async (requestId: string): Promise<void> => {
+    if (!auth?.currentUser) {
+      throw new Error('Debés iniciar sesión para iniciar un trabajo.');
+    }
+
+    const token = await auth.currentUser.getIdToken();
+    const response = await fetch('/api/jobs/start', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ requestId })
+    });
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || data.code || 'No se pudo iniciar el trabajo.');
+    }
+
+    setRequests(prev => prev.map(request =>
+      request.id === requestId
+        ? { ...request, status: 'IN_PROGRESS' }
+        : request
+    ));
+  };
+
   const completeJob = async (requestId: string) => {
     if (db) {
       if (!auth?.currentUser) throw new Error('Debés iniciar sesión para completar un trabajo.');
@@ -1834,7 +1862,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       selectedProfession, setSelectedProfession, selectedCity, setSelectedCity,
       maxDistanceKm, setMaxDistanceKm, onlyVerified, setOnlyVerified,
       toggleFavorite, sharePhoneWithUser, shareAddressWithUser, sendMessage,
-      createConversation, createServiceRequest, submitQuote, acceptQuote, connectMercadoPago, createMercadoPagoCheckout, getMercadoPagoStatus, completeJob,
+      createConversation, createServiceRequest, submitQuote, acceptQuote, connectMercadoPago, createMercadoPagoCheckout, getMercadoPagoStatus, startJob, completeJob,
       addReview, submitVerification, approveVerification, reportUser, blockUser,
       resolveReport, markNotificationRead, deleteAccount,
       trackEvent, submitFeedback, createInviteCode, toggleInviteCode, updateBetaConfig
