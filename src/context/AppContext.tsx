@@ -1100,13 +1100,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         if (activeTransaction) {
           await updateDoc(activeTransaction.ref, {
-            status: 'SETTLED',
-            settledAt: completedAt,
+            status: 'REVIEW_COMPLETED',
             reviewCompletedAt: completedAt
           });
           setTransactions(prev => prev.map(transaction =>
             transaction.id === activeTransaction.id
-              ? { ...transaction, status: 'SETTLED', settledAt: completedAt, reviewCompletedAt: completedAt }
+              ? { ...transaction, status: 'REVIEW_COMPLETED', reviewCompletedAt: completedAt }
               : transaction
           ));
         }
