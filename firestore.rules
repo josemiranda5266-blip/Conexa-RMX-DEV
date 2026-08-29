@@ -53,23 +53,48 @@ service cloud.firestore {
       }
     }
 
-    // Service Requests - Restricted to Client Owner, Bidding/Assigned Professionals, or Admins
+    // Service Requests - client-owned, assigned, explicitly targeted, or open-market discovery.
     match /service_requests/{requestId} {
+      function isOpenDiscoveryRequest() {
+        return resource.data.discoveryMode == 'OPEN';
+      }
+
+      function isTargetedProfessional() {
+        return resource.data.biddingProfessionalIds is list
+          && request.auth.uid in resource.data.biddingProfessionalIds;
+      }
+
       allow read: if isSignedIn() && (
         resource.data.clientId == request.auth.uid ||
         (resource.data.assignedProfessionalId != null && resource.data.assignedProfessionalId == request.auth.uid) ||
-        (resource.data.biddingProfessionalIds != null && request.auth.uid in resource.data.biddingProfessionalIds) ||
-        resource.data.status in ['REQUEST_CREATED', 'OPEN', 'QUOTES_RECEIVED'] ||
+        isTargetedProfessional() ||
+        isOpenDiscoveryRequest() ||
         isAdmin()
       );
-      allow create: if isSignedIn() && request.resource.data.clientId == request.auth.uid;
+
+      allow create: if isSignedIn()
+        && request.resource.data.clientId == request.auth.uid
+        && request.resource.data.discoveryMode == 'OPEN'
+        && !request.resource.data.keys().hasAny([
+          'assignedProfessionalId',
+          'biddingProfessionalIds'
+        ]);
+
       allow update: if isSignedIn() && (
-        resource.data.clientId == request.auth.uid
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'status', 'assignedProfessionalId', 'biddingProfessionalIds'
-        ])
+        (
+          resource.data.clientId == request.auth.uid
+          && request.resource.data.clientId == resource.data.clientId
+          && request.resource.data.discoveryMode == resource.data.discoveryMode
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'status',
+            'assignedProfessionalId',
+            'biddingProfessionalIds',
+            'discoveryMode'
+          ])
+        )
         || isAdmin()
       );
+
       allow delete: if isSignedIn() && (
         resource.data.clientId == request.auth.uid || isAdmin()
       );
