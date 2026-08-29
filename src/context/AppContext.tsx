@@ -20,6 +20,8 @@ import {
   sendConversationMessage,
   subscribeToUserConversations,
   updateConversationPrivacy,
+  subscribeToMessages,
+  type Unsubscribe,
   type StoredConversation,
   type StoredMessage,
 } from '../services/conversationService';
@@ -92,6 +94,7 @@ interface AppContextType {
   sharePhoneWithUser: (conversationId: string, recipientId: string) => Promise<void>;
   shareAddressWithUser: (conversationId: string, recipientId: string) => Promise<void>;
   sendMessage: (conversationId: string, content: string, type?: Message['type'], quoteData?: Quote) => Promise<void>;
+  subscribeConversationMessages: (conversationId: string) => Unsubscribe;
   createConversation: (targetUserId: string) => Promise<string>;
   createServiceRequest: (req: Omit<ServiceRequest, 'id' | 'clientId' | 'clientName' | 'clientAvatar' | 'createdAt' | 'status' | 'quotesCount'>) => void;
   submitQuote: (quote: Omit<Quote, 'id' | 'createdAt' | 'status'>) => void;
@@ -835,6 +838,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       content,
       quoteData,
     });
+  };
+
+  const subscribeConversationMessages = (conversationId: string): Unsubscribe => {
+    if (!currentUser || !isConversationParticipant(conversationId)) {
+      return () => undefined;
+    }
+
+    if (!isFirebaseConfigured) {
+      return () => undefined;
+    }
+
+    return subscribeToMessages(
+      conversationId,
+      (stored) => setMessages(prev => ({
+        ...prev,
+        [conversationId]: stored.map(toMessageView),
+      })),
+      (error) => console.warn('[CONEXA MESSAGING] Error sincronizando mensajes:', error),
+    );
   };
 
   const createConversation = async (targetUserId: string): Promise<string> => {
