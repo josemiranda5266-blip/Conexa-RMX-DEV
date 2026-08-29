@@ -801,7 +801,29 @@ Responde en JSON con:
       else if (payment.status === 'cancelled') update.status = 'CANCELLED';
       else if (payment.status === 'charged_back') update.status = 'CHARGEBACK';
 
-      await txDocRef.update(update);
+      await db.runTransaction(async (tx: any) => {
+        const currentTxSnap = await tx.get(txDocRef);
+        if (!currentTxSnap.exists) return;
+        const current = currentTxSnap.data() || {};
+        const currentUpdate: any = {
+          mercadoPagoPaymentId: paymentId,
+          paymentStatus: payment.status,
+          paymentUpdatedAt: new Date().toISOString()
+        };
+        if (payment.status === 'approved') {
+          if (current.status !== 'PAYMENT_PENDING' && current.status !== 'PAID') return;
+          currentUpdate.status = 'PAID';
+          currentUpdate.paidAt = current.paidAt || new Date().toISOString();
+        } else if (payment.status === 'refunded') {
+          currentUpdate.status = 'REFUNDED';
+          currentUpdate.refundedAt = new Date().toISOString();
+        } else if (payment.status === 'cancelled') {
+          currentUpdate.status = 'CANCELLED';
+        } else if (payment.status === 'charged_back') {
+          currentUpdate.status = 'CHARGEBACK';
+        }
+        tx.update(txDocRef, currentUpdate);
+      });
       return res.status(200).send('ok');
     } catch (err) {
       console.error('[MP Webhook] error', err);
@@ -1245,6 +1267,13 @@ Responde en JSON con:
           .where('serviceRequestId', '==', serviceRequestId).limit(5).get();
         const transactionDoc = transactions.docs.find((doc: any) => (doc.data() || {}).status === 'SERVICE_COMPLETED');
         if (!transactionDoc) throw new Error('SETTLEMENT_NOT_READY');
+        const quoteId = String((transactionDoc.data() || {}).quoteId || '');
+        if (!quoteId) throw new Error('SETTLEMENT_NOT_READY');
+        const quoteRef = firestore.collection('quotes').doc(quoteId);
+        const quoteSnap = await tx.get(quoteRef);
+        if (!quoteSnap.exists || (quoteSnap.data() || {}).requestId !== serviceRequestId || (quoteSnap.data() || {}).status !== 'ACCEPTED') {
+          throw new Error('WORK_RELATIONSHIP_INVALID');
+        }
 
         const completedAt = new Date().toISOString();
         tx.update(requestRef, { status: 'CLOSED', closedAt: completedAt });
@@ -1254,7 +1283,7 @@ Responde en JSON con:
       return res.json({ success: true, serviceRequestId, status: 'CLOSED', ...result });
     } catch (err: any) {
       const code = err?.message || 'REVIEW_COMPLETION_ERROR';
-      const status = code === 'REQUEST_NOT_FOUND' ? 404 : ['FORBIDDEN'].includes(code) ? 403 : ['INVALID_JOB_STATE','SETTLEMENT_NOT_READY'].includes(code) ? 409 : 500;
+      const status = code === 'REQUEST_NOT_FOUND' ? 404 : ['FORBIDDEN'].includes(code) ? 403 : ['INVALID_JOB_STATE','SETTLEMENT_NOT_READY','WORK_RELATIONSHIP_INVALID'].includes(code) ? 409 : 500;
       return res.status(status).json({ success: false, error: code, code });
     }
   });
