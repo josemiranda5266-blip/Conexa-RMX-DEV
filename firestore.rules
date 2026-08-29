@@ -23,17 +23,24 @@ service cloud.firestore {
       );
     }
 
-    // Public Users profiles (No phone or exact address)
+    // Public user profiles exclude private contact fields.
     match /users/{userId} {
+      function hasNoPrivateProfileFields() {
+        return !request.resource.data.keys().hasAny(['phonePrivate'])
+          && (!request.resource.data.keys().hasAny(['location'])
+            || !request.resource.data.location.keys().hasAny(['exactAddressPrivate']));
+      }
       allow read: if isSignedIn();
-      allow create: if isOwner(userId) 
+      allow create: if isOwner(userId)
+        && hasNoPrivateProfileFields()
         && (!request.resource.data.keys().hasAny(['role']) || request.resource.data.role == 'USER' || request.resource.data.role == 'PROFESSIONAL')
         && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode != 'ADMIN');
       
       // Prevent role & privilege tampering on update
       allow update: if isAdmin() || (
-        isOwner(userId) 
+        isOwner(userId)
         && request.resource.data.role == resource.data.role
+        && hasNoPrivateProfileFields()
         && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode != 'ADMIN')
         && (!resource.data.keys().hasAny(['isIdentityVerified']) || request.resource.data.isIdentityVerified == resource.data.isIdentityVerified)
         && (!resource.data.keys().hasAny(['isProfessionalVerified']) || request.resource.data.isProfessionalVerified == resource.data.isProfessionalVerified)
