@@ -1023,6 +1023,16 @@ Responde en JSON con:
         };
 
         tx.set(requestRef, request);
+
+        tx.update(opportunityRef, {
+          clientUserId: auth.userId,
+          linkedAt: now,
+          status: "SERVICE_REQUESTED",
+          conversionStatus: "PENDING",
+          lastUpdated: now,
+          serviceRequestId: requestRef.id
+        });
+
         return request;
       });
 
