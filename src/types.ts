@@ -134,6 +134,7 @@ export interface ServiceRequest {
   // optionally restricted to a candidate set, and finally assigned to one professional.
   assignedProfessionalId?: string;
   biddingProfessionalIds?: string[];
+  discoveryMode?: 'OPEN' | 'TARGETED';
   isDemoData?: boolean;
   // Origin metadata used when a request is created from CONEXA RADAR.
   radarOpportunityId?: string;
