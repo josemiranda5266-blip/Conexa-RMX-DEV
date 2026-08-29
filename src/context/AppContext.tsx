@@ -1144,11 +1144,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!response.ok || !data.success) {
         throw new Error(data.error || 'No se pudo crear la transacción.');
       }
-      setQuotes(prev => prev.map(q => q.id === quoteId ? { ...q, status: 'ACCEPTED' } : q));
-      setRequests(prev => prev.map(r => r.id === targetQuote.requestId ? { ...r, status: 'PROFESSIONAL_SELECTED' } : r));
-      const transaction = data.transaction as Transaction;
-      setTransactions(prev => [transaction, ...prev.filter(t => t.id !== transaction.id)]);
-      return transaction;
+      return data.transaction as Transaction;
     }
 
     setQuotes(prev => prev.map(q => q.id === quoteId ? { ...q, status: 'ACCEPTED' } : q));
@@ -1176,11 +1172,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       throw new Error(data.error || data.code || 'No se pudo iniciar el trabajo.');
     }
 
-    setRequests(prev => prev.map(request =>
-      request.id === requestId
-        ? { ...request, status: 'IN_PROGRESS' }
-        : request
-    ));
   };
 
   const completeJob = async (requestId: string) => {
@@ -1198,12 +1189,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    setRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'REVIEW_PENDING' } : r));
-    setTransactions(prev => prev.map(t =>
-      t.serviceRequestId === requestId
-        ? { ...t, status: 'SERVICE_COMPLETED', completedAt: new Date().toISOString() }
-        : t
-    ));
   };
 
   const addReview = async (reviewData: Omit<Review, 'id' | 'createdAt' | 'isVerifiedJob'>) => {
