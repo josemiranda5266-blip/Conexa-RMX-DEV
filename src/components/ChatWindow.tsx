@@ -43,6 +43,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const acknowledgedIncomingMessageIdsRef = useRef<Set<string>>(new Set());
 
   const convMessages = messages[conversation.id] || [];
+  const otherUserId = conversation.participants.find((participantId) => participantId !== currentUser?.id);
+  const otherUser = conversation.participantProfiles.find((participant) => participant.id === otherUserId);
+  const otherPrivacy = otherUserId ? conversation.privacyByUser?.[otherUserId] : undefined;
+  const canViewSharedPhone = otherPrivacy?.phoneShared === true;
+  const canViewSharedAddress = otherPrivacy?.addressShared === true;
 
   useEffect(() => {
     const unsubscribe = subscribeConversationMessages(conversation.id);
@@ -243,23 +248,27 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </button>
 
 
-          <button
-            onClick={() => void loadSharedContact('phone')}
-            disabled={contactLoading}
-            className="px-3 py-1.5 rounded-2xl bg-white hover:bg-slate-50 text-slate-800 font-bold flex items-center gap-1.5 transition-all shrink-0 border border-slate-200"
-          >
-            <PhoneCall size={13} />
-            <span>{sharedPhone || 'Ver teléfono compartido'}</span>
-          </button>
+          {canViewSharedPhone && (
+            <button
+              onClick={() => void loadSharedContact('phone')}
+              disabled={contactLoading}
+              className="px-3 py-1.5 rounded-2xl bg-white hover:bg-slate-50 text-slate-800 font-bold flex items-center gap-1.5 transition-all shrink-0 border border-slate-200"
+            >
+              <PhoneCall size={13} />
+              <span>{sharedPhone || `Ver teléfono de ${otherUser?.name || 'contacto'}`}</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => void loadSharedContact('address')}
-            disabled={contactLoading}
-            className="px-3 py-1.5 rounded-2xl bg-white hover:bg-slate-50 text-slate-800 font-bold flex items-center gap-1.5 transition-all shrink-0 border border-slate-200"
-          >
-            <MapPin size={13} />
-            <span>{sharedAddress || 'Ver domicilio compartido'}</span>
-          </button>
+          {canViewSharedAddress && (
+            <button
+              onClick={() => void loadSharedContact('address')}
+              disabled={contactLoading}
+              className="px-3 py-1.5 rounded-2xl bg-white hover:bg-slate-50 text-slate-800 font-bold flex items-center gap-1.5 transition-all shrink-0 border border-slate-200"
+            >
+              <MapPin size={13} />
+              <span>{sharedAddress || `Ver domicilio de ${otherUser?.name || 'contacto'}`}</span>
+            </button>
+          )}
 
           {onRequestQuoteClick && (
             <button
