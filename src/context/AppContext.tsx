@@ -105,7 +105,7 @@ interface AppContextType {
   createMercadoPagoCheckout: (transactionId: string) => Promise<string>;
   getMercadoPagoStatus: () => Promise<{ connected: boolean; mpUserId?: string | null; publicKey?: string | null }>;
   startJob: (jobId: string) => Promise<void>;
-  completeJob: (jobId: string) => void;
+  completeJob: (jobId: string) => Promise<void>;
   addReview: (review: Omit<Review, 'id' | 'createdAt' | 'isVerifiedJob'>) => Promise<void>;
   submitVerification: (type: 'IDENTITY' | 'PROFESSIONAL', documentName: string, docUrl: string) => void;
   approveVerification: (verificationId: string) => void;
@@ -1324,21 +1324,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   };
 
-  const completeJob = async (requestId: string) => {
-    if (db) {
-      if (!auth?.currentUser) throw new Error('Debés iniciar sesión para completar un trabajo.');
-      const token = await auth.currentUser.getIdToken();
-      const response = await fetch('/api/jobs/complete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ requestId })
-      });
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'No se pudo completar el trabajo.');
-      }
+  const completeJob = async (requestId: string): Promise<void> => {
+    if (!db || !auth?.currentUser) {
+      throw new Error('La finalización del trabajo requiere una sesión autenticada y backend configurado.');
     }
 
+    const token = await auth.currentUser.getIdToken();
+    const response = await fetch('/api/jobs/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ requestId })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'No se pudo completar el trabajo.');
+    }
   };
 
   const addReview = async (reviewData: Omit<Review, 'id' | 'createdAt' | 'isVerifiedJob'>) => {
