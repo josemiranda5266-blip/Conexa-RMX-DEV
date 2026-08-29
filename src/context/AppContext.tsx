@@ -1976,11 +1976,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         o.id === opportunityId ? { ...o, ...radarUpdates } : o
       ));
 
-      if (isFirebaseConfigured && db) {
-        updateDoc(doc(db, 'radar_opportunities', opportunityId), radarUpdates)
-          .catch(error => console.warn('[CONEXA RADAR] Error sincronizando estado local de oportunidad:', error));
-      }
-
       trackEvent('radar_service_request_created', {
         opportunityId,
         requestId: newRequest.id,
