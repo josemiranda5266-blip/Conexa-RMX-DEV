@@ -222,6 +222,7 @@ export async function sendConversationMessage(input: {
 
   batch.update(conversationRef, {
     lastMessagePreview: input.content,
+    lastMessageId: messageRef.id,
     lastMessageAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     [`unreadCountByUser.${input.senderId}`]: 0,
