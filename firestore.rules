@@ -59,7 +59,7 @@ service cloud.firestore {
         resource.data.clientId == request.auth.uid ||
         (resource.data.assignedProfessionalId != null && resource.data.assignedProfessionalId == request.auth.uid) ||
         (resource.data.biddingProfessionalIds != null && request.auth.uid in resource.data.biddingProfessionalIds) ||
-        resource.data.status == 'OPEN' ||
+        resource.data.status in ['REQUEST_CREATED', 'OPEN', 'QUOTES_RECEIVED'] ||
         isAdmin()
       );
       allow create: if isSignedIn() && request.resource.data.clientId == request.auth.uid;
@@ -216,7 +216,8 @@ service cloud.firestore {
     match /reviews/{reviewId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
-      allow update, delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+      // Reviews are immutable after publication; moderation belongs to admins.
+      allow update, delete: if isAdmin();
     }
 
     // Verification Requests
