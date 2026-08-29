@@ -1917,17 +1917,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     clientId?: string
   ): Promise<ServiceRequest | null> => {
     const opportunity = radarOpportunities.find(o => o.id === opportunityId);
-
     if (!opportunity) {
       console.warn('[CONEXA RADAR] No se encontró la oportunidad:', opportunityId);
       return null;
     }
 
     if (!['REGISTERED', 'MATCHED', 'SERVICE_REQUESTED'].includes(opportunity.status)) {
-      console.warn(
-        '[CONEXA RADAR] No se puede generar una solicitud desde el estado:',
-        opportunity.status
-      );
+      console.warn('[CONEXA RADAR] Estado no válido para generar solicitud:', opportunity.status);
       return null;
     }
 
@@ -1937,85 +1933,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const resolvedClientId = clientId || opportunity.clientUserId || currentUser?.id;
-    const client = resolvedClientId
-      ? users.find(user => user.id === resolvedClientId)
-      : null;
-
-    if (!client) {
-      console.warn('[CONEXA RADAR] No existe un usuario CONEXA asociado a la oportunidad.');
+    if (!currentUser || currentUser.id !== resolvedClientId) {
+      console.warn('[CONEXA RADAR] La identidad autenticada no coincide con el cliente de la oportunidad.');
       return null;
     }
 
-    if (
-      opportunity.clientUserId &&
-      opportunity.clientUserId !== client.id
-    ) {
-      console.warn('[CONEXA RADAR] La oportunidad ya está vinculada a otro usuario.');
-      return null;
-    }
-
-    const existingRequest = requests.find(
-      request => request.clientId === client.id &&
-        request.title === opportunity.subcategory &&
-        request.description === opportunity.description &&
-        request.category === opportunity.category
-    );
-
-    if (existingRequest) {
-      return existingRequest;
-    }
-
-    const now = new Date();
-    const newRequest: ServiceRequest = {
-      id: `req-radar-${opportunity.id}`,
-      clientId: client.id,
-      clientName: client.name,
-      clientAvatar: client.avatar,
-      title: opportunity.subcategory || opportunity.category,
-      category: opportunity.category,
-      professionName: opportunity.subcategory,
-      description: opportunity.description,
-      approxLocation: [opportunity.neighborhood, opportunity.city, opportunity.province]
-        .filter(Boolean)
-        .join(', '),
-      preferredDate: now.toLocaleDateString('es-AR'),
-      preferredTimeSlot: 'A coordinar',
-      urgency: opportunity.urgency === 'EMERGENCY' || opportunity.urgency === 'HIGH'
-        ? 'URGENTE'
-        : opportunity.urgency === 'MEDIUM'
-          ? 'ALTA'
-          : 'NORMAL',
-      status: 'REQUEST_CREATED',
-      createdAt: now.toLocaleDateString('es-AR'),
-      quotesCount: 0,
-      radarOpportunityId: opportunity.id,
-      sourceType: 'RADAR',
-      discoveryMode: 'TARGETED',
-      biddingProfessionalIds: opportunity.matchedProfessionals
-        .map(match => match.professionalId)
-        .filter((professionalId): professionalId is string => Boolean(professionalId))
-    };
-
-    setRequests(prev => [newRequest, ...prev]);
-
-    const radarUpdates = {
-      clientUserId: client.id,
-      linkedAt: new Date().toISOString(),
-      status: 'SERVICE_REQUESTED' as OpportunityStatus,
-      conversionStatus: 'PENDING' as const,
-      lastUpdated: 'Hace un instante'
-    };
-
-    setRadarOpportunities(prev => prev.map(o =>
-      o.id === opportunityId ? { ...o, ...radarUpdates } : o
-    ));
+    const existingRequest = requests.find(request => request.radarOpportunityId === opportunityId);
+    if (existingRequest) return existingRequest;
 
     try {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error('AUTH_TOKEN_REQUIRED');
+
+      const response = await fetch(
+        `/api/radar/opportunities/${encodeURIComponent(opportunityId)}/create-request`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+
+      const payload = await response.json();
+      if (!response.ok || !payload?.success || !payload?.serviceRequest) {
+        throw new Error(payload?.code || 'RADAR_REQUEST_CREATE_ERROR');
+      }
+
+      const newRequest = payload.serviceRequest as ServiceRequest;
+      setRequests(prev => [newRequest, ...prev.filter(request => request.id !== newRequest.id)]);
+
+      const radarUpdates = {
+        clientUserId: currentUser.id,
+        linkedAt: new Date().toISOString(),
+        status: 'SERVICE_REQUESTED' as OpportunityStatus,
+        conversionStatus: 'PENDING' as const,
+        lastUpdated: 'Hace un instante'
+      };
+
+      setRadarOpportunities(prev => prev.map(o =>
+        o.id === opportunityId ? { ...o, ...radarUpdates } : o
+      ));
+
       if (isFirebaseConfigured && db) {
-        await Promise.all([
-          setDoc(doc(db, 'service_requests', newRequest.id), newRequest),
-          updateDoc(doc(db, 'radar_opportunities', opportunityId), radarUpdates)
-        ]);
+        updateDoc(doc(db, 'radar_opportunities', opportunityId), radarUpdates)
+          .catch(error => console.warn('[CONEXA RADAR] Error sincronizando estado local de oportunidad:', error));
       }
 
       trackEvent('radar_service_request_created', {
@@ -2027,8 +1990,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return newRequest;
     } catch (error) {
       console.warn('[CONEXA RADAR] Error generando solicitud desde oportunidad:', error);
-      setRequests(prev => prev.filter(request => request.id !== newRequest.id));
-      setRadarOpportunities(prev => prev.map(o => o.id === opportunityId ? opportunity : o));
       return null;
     }
   };
