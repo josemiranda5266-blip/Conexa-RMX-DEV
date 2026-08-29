@@ -1286,7 +1286,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetQuote = quotes.find(q => q.id === quoteId);
     if (!targetQuote || !currentUser) throw new Error('Presupuesto o usuario no disponible.');
 
-    if (auth?.currentUser && db) {
+    if (!auth?.currentUser || !db) {
+      throw new Error('La aceptación del presupuesto requiere una sesión autenticada y backend configurado.');
+    }
+
+    {
       const token = await auth.currentUser.getIdToken();
       const response = await fetch('/api/transactions/create', {
         method: 'POST',
@@ -1299,10 +1303,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return data.transaction as Transaction;
     }
-
-    setQuotes(prev => prev.map(q => q.id === quoteId ? { ...q, status: 'ACCEPTED' } : q));
-    setRequests(prev => prev.map(r => r.id === targetQuote.requestId ? { ...r, status: 'PROFESSIONAL_SELECTED' } : r));
-    return null;
   };
 
   const startJob = async (requestId: string): Promise<void> => {
