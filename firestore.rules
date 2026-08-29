@@ -121,20 +121,61 @@ service cloud.firestore {
           && request.resource.data.privacyByUser.keys().hasAll(request.resource.data.participantIds);
       }
 
-      function updatesOnlyOwnConversationState() {
-        return request.resource.data.participantIds == resource.data.participantIds
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'privacyByUser',
+      function participantOtherThan(userId) {
+        return resource.data.participantIds[0] == userId
+          ? resource.data.participantIds[1]
+          : resource.data.participantIds[0];
+      }
+
+      function updatesOnlyOwnReadState() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'unreadCountByUser',
-            'updatedAt',
+            'updatedAt'
+          ])
+          && request.resource.data.unreadCountByUser.diff(resource.data.unreadCountByUser)
+            .affectedKeys().hasOnly([request.auth.uid])
+          && request.resource.data.unreadCountByUser[request.auth.uid] == 0;
+      }
+
+      function updatesOnlyOwnPrivacy() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'privacyByUser',
+            'updatedAt'
+          ])
+          && request.resource.data.privacyByUser.diff(resource.data.privacyByUser)
+            .affectedKeys().hasOnly([request.auth.uid]);
+      }
+
+      function updatesConversationFromValidMessage() {
+        let otherUserId = participantOtherThan(request.auth.uid);
+        let message = getAfter(
+          /databases/$(database)/documents/conversations/$(conversationId)/messages/$(request.resource.data.lastMessageId)
+        );
+
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'lastMessageId',
             'lastMessagePreview',
-            'lastMessageAt'
-          ]);
+            'lastMessageAt',
+            'unreadCountByUser',
+            'updatedAt'
+          ])
+          && request.resource.data.unreadCountByUser.diff(resource.data.unreadCountByUser)
+            .affectedKeys().hasOnly([request.auth.uid, otherUserId])
+          && request.resource.data.unreadCountByUser[request.auth.uid] == 0
+          && request.resource.data.unreadCountByUser[otherUserId]
+            == resource.data.unreadCountByUser[otherUserId] + 1
+          && message.data.senderId == request.auth.uid
+          && message.data.conversationId == conversationId
+          && request.resource.data.lastMessagePreview == message.data.content;
       }
 
       allow read: if isConversationParticipant() || isAdmin();
       allow create: if createsValidConversation();
-      allow update: if isAdmin() || (isConversationParticipant() && updatesOnlyOwnConversationState());
+      allow update: if isAdmin() || (isConversationParticipant() && (
+        updatesOnlyOwnReadState()
+        || updatesOnlyOwnPrivacy()
+        || updatesConversationFromValidMessage()
+      ));
       allow delete: if false;
 
       match /messages/{messageId} {
