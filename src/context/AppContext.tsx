@@ -15,6 +15,15 @@ import {
 } from '../data/mockData';
 import { initialRadarOpportunities, initialRadarStats } from '../data/radarMockData';
 import { canUseProfessionalMode, getDefaultProfessionalMode, matchOpportunityWithProfessionals } from '../domain/professionalMatching';
+import {
+  getOrCreateConversation,
+  sendConversationMessage,
+  subscribeToMessages,
+  subscribeToUserConversations,
+  updateConversationPrivacy,
+  type StoredConversation,
+  type StoredMessage,
+} from '../services/conversationService';
 
 interface AppContextType {
   currentUser: UserProfile | null;
@@ -81,10 +90,10 @@ interface AppContextType {
   
   // Actions
   toggleFavorite: (proId: string) => void;
-  sharePhoneWithUser: (conversationId: string, recipientId: string) => void;
-  shareAddressWithUser: (conversationId: string, recipientId: string) => void;
-  sendMessage: (conversationId: string, content: string, type?: Message['type'], quoteData?: Quote) => void;
-  createConversation: (targetUserId: string) => string;
+  sharePhoneWithUser: (conversationId: string, recipientId: string) => Promise<void>;
+  shareAddressWithUser: (conversationId: string, recipientId: string) => Promise<void>;
+  sendMessage: (conversationId: string, content: string, type?: Message['type'], quoteData?: Quote) => Promise<void>;
+  createConversation: (targetUserId: string) => Promise<string>;
   createServiceRequest: (req: Omit<ServiceRequest, 'id' | 'clientId' | 'clientName' | 'clientAvatar' | 'createdAt' | 'status' | 'quotesCount'>) => void;
   submitQuote: (quote: Omit<Quote, 'id' | 'createdAt' | 'status'>) => void;
   acceptQuote: (quoteId: string) => Promise<Transaction | null>;
@@ -197,6 +206,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (isFirebaseConfigured) return;
     localStorage.setItem('conexa_users', JSON.stringify(users));
   }, [users]);
+
+  const formatConversationTime = (value: any): string => {
+    if (!value?.toDate) return '';
+    return value.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const toConversationView = (stored: StoredConversation): Conversation => {
+    const otherUserId = stored.participantIds.find(id => id !== currentUser?.id) || stored.participantIds[0];
+    const otherUser = users.find(user => user.id === otherUserId);
+    const privacy = stored.privacyByUser || {};
+    const firstUserId = stored.participantIds[0];
+    const secondUserId = stored.participantIds[1];
+
+    return {
+      id: stored.id,
+      participantIds: stored.participantIds,
+      otherUser: {
+        id: otherUserId,
+        name: otherUser?.name || 'Usuario CONEXA',
+        avatar: otherUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=250',
+        profession: otherUser?.professionName,
+        isIdentityVerified: otherUser?.isIdentityVerified,
+        isProfessionalVerified: otherUser?.isProfessionalVerified,
+      },
+      lastMessage: stored.lastMessagePreview || 'Conversación iniciada',
+      lastMessageTime: formatConversationTime(stored.lastMessageAt) || 'Ahora',
+      unreadCount: 0,
+      sharedPhoneBySender: privacy[firstUserId]?.phoneShared === true,
+      sharedPhoneByReceiver: privacy[secondUserId]?.phoneShared === true,
+      sharedAddressBySender: privacy[firstUserId]?.addressShared === true,
+      sharedAddressByReceiver: privacy[secondUserId]?.addressShared === true,
+    };
+  };
+
+  const toMessageView = (stored: StoredMessage): Message => ({
+    id: stored.id,
+    conversationId: stored.conversationId,
+    senderId: stored.senderId,
+    senderName: stored.senderName,
+    createdAt: formatConversationTime(stored.createdAt),
+    type: stored.type,
+    content: stored.content,
+    attachmentUrl: stored.attachmentUrl,
+    quoteData: stored.quoteData as Quote | undefined,
+  });
+
+  useEffect(() => {
+    if (!isFirebaseConfigured || !currentUser) return;
+
+    return subscribeToUserConversations(
+      currentUser.id,
+      (stored) => setConversations(stored.map(toConversationView)),
+      (error) => console.warn('[CONEXA MESSAGING] Error sincronizando conversaciones:', error),
+    );
+  }, [currentUser?.id, users]);
 
   // Firebase Auth Real Listener Effect & Real-time Firestore Sync
   useEffect(() => {
@@ -702,15 +766,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
-  const persistConversation = async (conversation: Conversation) => {
-    if (!db) return;
-    try {
-      await setDoc(doc(db, 'conversations', conversation.id), conversation, { merge: true });
-    } catch (error) {
-      console.warn('[Firestore] Error persistiendo conversación:', error);
-    }
-  };
-
   const getConversationParticipantIds = (conversationId: string): [string, string] | null => {
     const conversation = conversations.find(item => item.id === conversationId);
     return conversation?.participantIds ?? null;
@@ -721,137 +776,109 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return Boolean(getConversationParticipantIds(conversationId)?.includes(currentUser.id));
   };
 
-  const sharePhoneWithUser = (conversationId: string, recipientId: string) => {
-    const conversation = conversations.find(c => c.id === conversationId);
-    if (!conversation || !currentUser || !conversation.participantIds.includes(recipientId) || !isConversationParticipant(conversationId)) return;
-
-    const updates = conversation.participantIds[0] === currentUser.id
-      ? { sharedPhoneBySender: true }
-      : { sharedPhoneByReceiver: true };
-
-    const updatedConversation = { ...conversation, ...updates };
-    setConversations(prev => prev.map(c => c.id === conversationId ? updatedConversation : c));
-    void persistConversation(updatedConversation);
-
-    sendMessage(conversationId, '📱 Teléfono compartido voluntariamente.', 'SHARED_PHONE');
+  const sharePhoneWithUser = async (conversationId: string, recipientId: string): Promise<void> => {
+    if (!currentUser || currentUser.id === recipientId || !isConversationParticipant(conversationId)) {
+      throw new Error('No autorizado para compartir teléfono en esta conversación.');
+    }
+    if (!isFirebaseConfigured) {
+      setConversations(prev => prev.map(conversation => conversation.id === conversationId
+        ? { ...conversation, ...(conversation.participantIds[0] === currentUser.id ? { sharedPhoneBySender: true } : { sharedPhoneByReceiver: true }) }
+        : conversation));
+      return;
+    }
+    await updateConversationPrivacy({ conversationId, userId: currentUser.id, phoneShared: true });
   };
 
-  const shareAddressWithUser = (conversationId: string, recipientId: string) => {
-    const conversation = conversations.find(c => c.id === conversationId);
-    if (!conversation || !currentUser || !conversation.participantIds.includes(recipientId) || !isConversationParticipant(conversationId)) return;
-
-    const updates = conversation.participantIds[0] === currentUser.id
-      ? { sharedAddressBySender: true }
-      : { sharedAddressByReceiver: true };
-
-    const updatedConversation = { ...conversation, ...updates };
-    setConversations(prev => prev.map(c => c.id === conversationId ? updatedConversation : c));
-    void persistConversation(updatedConversation);
-
-    sendMessage(conversationId, '📍 Domicilio compartido voluntariamente.', 'SHARED_ADDRESS');
+  const shareAddressWithUser = async (conversationId: string, recipientId: string): Promise<void> => {
+    if (!currentUser || currentUser.id === recipientId || !isConversationParticipant(conversationId)) {
+      throw new Error('No autorizado para compartir domicilio en esta conversación.');
+    }
+    if (!isFirebaseConfigured) {
+      setConversations(prev => prev.map(conversation => conversation.id === conversationId
+        ? { ...conversation, ...(conversation.participantIds[0] === currentUser.id ? { sharedAddressBySender: true } : { sharedAddressByReceiver: true }) }
+        : conversation));
+      return;
+    }
+    await updateConversationPrivacy({ conversationId, userId: currentUser.id, addressShared: true });
   };
 
-  const sendMessage = (conversationId: string, content: string, type: Message['type'] = 'TEXT', quoteData?: Quote) => {
+  const sendMessage = async (
+    conversationId: string,
+    content: string,
+    type: Message['type'] = 'TEXT',
+    quoteData?: Quote,
+  ): Promise<void> => {
     if (!currentUser || !isConversationParticipant(conversationId)) {
-      console.warn('[CONEXA MESSAGING] Intento de envío fuera de una conversación autorizada:', conversationId);
+      throw new Error('No autorizado para enviar mensajes en esta conversación.');
+    }
+
+    if (!isFirebaseConfigured) {
+      const newMsg: Message = {
+        id: `msg-${Date.now()}`,
+        conversationId,
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        type,
+        content,
+        quoteData,
+      };
+      setMessages(prev => ({ ...prev, [conversationId]: [...(prev[conversationId] || []), newMsg] }));
       return;
     }
 
-    const newMsg: Message = {
-      id: `msg-${Date.now()}`,
+    if (type === 'SYSTEM') throw new Error('Los mensajes SYSTEM no pueden ser creados por el cliente.');
+    await sendConversationMessage({
       conversationId,
       senderId: currentUser.id,
       senderName: currentUser.name,
-      createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       type,
       content,
-      quoteData
-    };
-
-    setMessages(prev => ({
-      ...prev,
-      [conversationId]: [...(prev[conversationId] || []), newMsg]
-    }));
-
-    const conversation = conversations.find(c => c.id === conversationId);
-    if (conversation) {
-      const updatedConversation = {
-        ...conversation,
-        lastMessage: type === 'SHARED_PHONE' ? '📱 Teléfono compartido' : type === 'SHARED_ADDRESS' ? '📍 Domicilio compartido' : type === 'QUOTE_PROPOSAL' ? '📋 Presupuesto enviado' : content,
-        lastMessageTime: newMsg.createdAt
-      };
-
-      setConversations(prev => prev.map(c => c.id === conversationId ? updatedConversation : c));
-      void persistConversation(updatedConversation);
-    }
-
-    if (db) {
-      void setDoc(doc(db, 'conversations', conversationId, 'messages', newMsg.id), newMsg)
-        .catch(error => console.warn('[Firestore] Error persistiendo mensaje:', error));
-    }
+      quoteData,
+    });
   };
 
-  const createConversation = (targetUserId: string): string => {
-    if (!currentUser) return '';
+  const createConversation = async (targetUserId: string): Promise<string> => {
+    if (!currentUser || targetUserId === currentUser.id) return '';
+    const targetUser = users.find(user => user.id === targetUserId);
+    if (!targetUser) throw new Error('No se puede crear una conversación con un usuario inexistente.');
 
-    const existing = conversations.find(c =>
-      c.participantIds.includes(currentUser.id) && c.participantIds.includes(targetUserId)
+    if (!isFirebaseConfigured) {
+      const existing = conversations.find(c => c.participantIds.includes(currentUser.id) && c.participantIds.includes(targetUserId));
+      if (existing) return existing.id;
+      const newConvId = [currentUser.id, targetUserId].sort().join('_');
+      setConversations(prev => prev.some(c => c.id === newConvId) ? prev : [{
+        id: newConvId,
+        participantIds: [currentUser.id, targetUserId],
+        otherUser: {
+          id: targetUserId,
+          name: targetUser.name,
+          avatar: targetUser.avatar,
+          profession: targetUser.professionName,
+          isIdentityVerified: targetUser.isIdentityVerified,
+          isProfessionalVerified: targetUser.isProfessionalVerified,
+        },
+        lastMessage: 'Conversación iniciada',
+        lastMessageTime: 'Ahora',
+        unreadCount: 0,
+        sharedPhoneBySender: false,
+        sharedPhoneByReceiver: false,
+        sharedAddressBySender: false,
+        sharedAddressByReceiver: false,
+      }, ...prev]);
+      return newConvId;
+    }
+
+    return getOrCreateConversation(currentUser.id, targetUserId);
+  };
+
+  const subscribeConversationMessages = (conversationId: string) => {
+    if (!isFirebaseConfigured) return () => undefined;
+    return subscribeToMessages(
+      conversationId,
+      (stored) => setMessages(prev => ({ ...prev, [conversationId]: stored.map(toMessageView) })),
+      (error) => console.warn('[CONEXA MESSAGING] Error sincronizando mensajes:', error),
     );
-    if (existing) return existing.id;
-
-    if (targetUserId === currentUser.id) return '';
-
-    const targetUser = users.find(u => u.id === targetUserId);
-    if (!targetUser) {
-      console.warn('[CONEXA MESSAGING] No se puede crear una conversación con un usuario inexistente:', targetUserId);
-      return '';
-    }
-
-    const newConvId = `conv-${Date.now()}`;
-    const newConv: Conversation = {
-      id: newConvId,
-      participantIds: [currentUser.id, targetUserId],
-      otherUser: {
-        id: targetUserId,
-        name: targetUser?.name || 'Usuario CONEXA',
-        avatar: targetUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=250',
-        profession: targetUser?.professionName,
-        isIdentityVerified: targetUser?.isIdentityVerified,
-        isProfessionalVerified: targetUser?.isProfessionalVerified
-      },
-      lastMessage: 'Conversación iniciada',
-      lastMessageTime: 'Ahora',
-      unreadCount: 0,
-      sharedPhoneBySender: false,
-      sharedPhoneByReceiver: false,
-      sharedAddressBySender: false,
-      sharedAddressByReceiver: false
-    };
-
-    const initialMessage: Message = {
-      id: `m-init-${Date.now()}`,
-      conversationId: newConvId,
-      senderId: 'system',
-      senderName: 'CONEXA',
-      createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      type: 'SYSTEM',
-      content: '🔒 CONEXA PRIVACIDAD: La conversación está protegida. Tu número telefónico y domicilio exacto NO son visibles hasta que los compartas voluntariamente.'
-    };
-
-    setConversations(prev => [newConv, ...prev]);
-    setMessages(prev => ({
-      ...prev,
-      [newConvId]: [initialMessage]
-    }));
-
-    void persistConversation(newConv);
-
-    if (db) {
-      void setDoc(doc(db, 'conversations', newConvId, 'messages', initialMessage.id), initialMessage)
-        .catch(error => console.warn('[Firestore] Error persistiendo mensaje inicial:', error));
-    }
-
-    return newConvId;
   };
 
   const createServiceRequest = async (reqData: Omit<ServiceRequest, 'id' | 'clientId' | 'clientName' | 'clientAvatar' | 'createdAt' | 'status' | 'quotesCount'>) => {
