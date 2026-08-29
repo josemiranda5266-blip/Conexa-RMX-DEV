@@ -696,7 +696,11 @@ Responde en JSON con:
       }
 
       const preference = JSON.parse(bodyText);
-      await txRef.update({ mercadoPagoPreferenceId: preference.id, status: 'PAYMENT_PENDING', paymentCheckoutCreatedAt: new Date().toISOString() });
+      await txRef.update({
+        mercadoPagoPreferenceId: preference.id,
+        status: 'PAYMENT_PENDING',
+        paymentCheckoutCreatedAt: new Date().toISOString()
+      });
 
       return res.json({ success: true, transactionId: transaction.id, preferenceId: preference.id, initPoint: preference.init_point, sandboxInitPoint: preference.sandbox_init_point || null });
     } catch (err: any) {
