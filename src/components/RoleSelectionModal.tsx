@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Search, Briefcase, ArrowRight, ShieldCheck, CheckCircle2, Sparkles, X, UserCheck, Wrench } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { isProfessionalCapable } from '../domain/professionalMatching';
 
 interface RoleSelectionModalProps {
   isOpen: boolean;
@@ -24,7 +25,7 @@ export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({
 
   if (!isOpen) return null;
 
-  const hasPro = currentUser.hasProfessionalProfile || currentUser.isProfessional;
+  const hasPro = isProfessionalCapable(currentUser);
   const isAdminUser = isAdmin();
 
   const handleClientClick = () => {
