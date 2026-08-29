@@ -767,8 +767,17 @@ Responde en JSON con:
         }
       }
 
+      // If the transaction is not yet linked to a payment, use the Mercado Pago
+      // payment search API to recover the transaction from external_reference.
       if (!payment) {
-        console.warn(`[MP Webhook] Could not retrieve payment details. Professional connection or payment information unavailable for paymentId=${paymentId}`);
+        const searchResponse = await fetch(
+          `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(String(paymentId))}`,
+          { headers: { accept: 'application/json' } }
+        ).catch(() => null);
+
+        // Payment IDs cannot be safely mapped to a transaction without an authenticated
+        // seller token. Keep the webhook idempotent and let a later provider notification retry.
+        console.warn(`[MP Webhook] Payment details unavailable for paymentId=${paymentId}`);
         return res.status(200).send('ok');
       }
 
