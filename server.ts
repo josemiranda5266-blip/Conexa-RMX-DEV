@@ -821,12 +821,15 @@ Responde en JSON con:
           currentUpdate.status = 'PAID';
           currentUpdate.paidAt = current.paidAt || new Date().toISOString();
         } else if (payment.status === 'refunded') {
-          currentUpdate.status = 'REFUNDED';
-          currentUpdate.refundedAt = new Date().toISOString();
+          if (['PAYMENT_PENDING', 'PAID', 'SERVICE_IN_PROGRESS', 'SERVICE_COMPLETED', 'REVIEW_COMPLETED', 'SETTLED'].includes(current.status)) {
+            currentUpdate.status = 'REFUNDED';
+            currentUpdate.refundedAt = new Date().toISOString();
+          } else return;
         } else if (payment.status === 'cancelled') {
-          currentUpdate.status = 'CANCELLED';
+          if (['PAYMENT_PENDING', 'PAID'].includes(current.status)) currentUpdate.status = 'CANCELLED';
+          else return;
         } else if (payment.status === 'charged_back') {
-          currentUpdate.status = 'CHARGEBACK';
+          if (current.status !== 'CHARGEBACK') currentUpdate.status = 'CHARGEBACK';
         }
         tx.update(txDocRef, currentUpdate);
       });
