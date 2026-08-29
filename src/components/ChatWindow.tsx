@@ -115,6 +115,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     setSharedAddress(null);
   }, [conversation.id]);
 
+  useEffect(() => {
+    if (!canViewSharedPhone) setSharedPhone(null);
+    if (!canViewSharedAddress) setSharedAddress(null);
+  }, [canViewSharedPhone, canViewSharedAddress]);
+
   const handleSendText = async (e: React.FormEvent) => {
     e.preventDefault();
     const content = inputMessage.trim();
