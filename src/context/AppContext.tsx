@@ -580,9 +580,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const own = new Map<string, ServiceRequest>();
       const assigned = new Map<string, ServiceRequest>();
       const open = new Map<string, ServiceRequest>();
+      const targeted = new Map<string, ServiceRequest>();
       const publish = () => {
         const merged = new Map<string, ServiceRequest>([
           ...open,
+          ...targeted,
           ...assigned,
           ...own
         ]);
@@ -618,7 +620,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       unsubTargetedRequests = onSnapshot(
         query(collection(db, 'service_requests'), where('biddingProfessionalIds', 'array-contains', uid)),
-        snapshot => syncBucket(open, snapshot),
+        snapshot => syncBucket(targeted, snapshot),
         error => console.warn('[Firestore] Error sincronizando oportunidades dirigidas:', error)
       );
     };
