@@ -23,7 +23,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 }) => {
   const { 
     currentUser, messages, sendMessage, sharePhoneWithUser, 
-    shareAddressWithUser, subscribeConversationMessages, reportUser, blockUser 
+    shareAddressWithUser, subscribeConversationMessages, markConversationAsRead, reportUser, blockUser 
   } = useApp();
 
   const [inputMessage, setInputMessage] = useState('');
@@ -40,8 +40,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
   useEffect(() => {
     const unsubscribe = subscribeConversationMessages(conversation.id);
+    void markConversationAsRead(conversation.id).catch((error) => {
+      console.warn('[CONEXA MESSAGING] No se pudo marcar la conversación como leída:', error);
+    });
     return () => unsubscribe();
-  }, [conversation.id, subscribeConversationMessages]);
+  }, [conversation.id, subscribeConversationMessages, markConversationAsRead]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
