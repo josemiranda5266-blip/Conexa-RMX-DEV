@@ -1104,8 +1104,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toLocaleDateString('es-AR'),
       status: 'REQUEST_CREATED',
       quotesCount: 0,
-      radarOpportunityId: opportunity.id,
-      sourceType: 'RADAR'
+      sourceType: 'DIRECT'
     };
     setRequests(prev => [newReq, ...prev]);
 
@@ -1976,7 +1975,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           : 'NORMAL',
       status: 'REQUEST_CREATED',
       createdAt: now.toLocaleDateString('es-AR'),
-      quotesCount: 0
+      quotesCount: 0,
+      radarOpportunityId: opportunity.id,
+      sourceType: 'RADAR',
+      biddingProfessionalIds: opportunity.matchedProfessionals
+        .map(match => match.professionalId)
+        .filter((professionalId): professionalId is string => Boolean(professionalId))
     };
 
     setRequests(prev => [newRequest, ...prev]);
