@@ -1175,7 +1175,7 @@ Responde en JSON con:
         if (!requestSnap.exists) throw new Error('REQUEST_NOT_FOUND');
         const request = requestSnap.data() || {};
         if (request.clientId !== auth.userId) throw new Error('FORBIDDEN');
-        if (request.status !== 'REVIEW_PENDING') throw new Error('INVALID_JOB_STATE');
+        if (request.status !== 'SERVICE_COMPLETED') throw new Error('INVALID_JOB_STATE');
 
         const transactions = await firestore.collection('transactions')
           .where('serviceRequestId', '==', serviceRequestId).limit(5).get();
