@@ -688,10 +688,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setVerifications(list);
     });
 
-    const unsubTransactions = onSnapshot(collection(db, 'transactions'), (snapshot) => {
-      const list: Transaction[] = [];
-      snapshot.forEach(doc => list.push(doc.data() as Transaction));
-      setTransactions(list);
+    let unsubClientTransactions = () => {};
+    let unsubProfessionalTransactions = () => {};
+
+    const syncTransactions = (uid: string | null) => {
+      unsubClientTransactions();
+      unsubProfessionalTransactions();
+
+      if (!uid) {
+        setTransactions([]);
+        return;
+      }
+
+      const byId = new Map<string, Transaction>();
+      const publish = () => setTransactions(Array.from(byId.values()));
+
+      unsubClientTransactions = onSnapshot(
+        query(collection(db, 'transactions'), where('clientId', '==', uid)),
+        snapshot => {
+          snapshot.docs.forEach(transactionDoc => {
+            const data = transactionDoc.data() as Transaction;
+            byId.set(data.id || transactionDoc.id, { ...data, id: data.id || transactionDoc.id });
+          });
+          snapshot.docChanges().filter(change => change.type === 'removed').forEach(change => {
+            byId.delete((change.doc.data() as Transaction).id || change.doc.id);
+          });
+          publish();
+        },
+        error => console.warn('[Firestore] Error sincronizando transacciones del cliente:', error)
+      );
+
+      unsubProfessionalTransactions = onSnapshot(
+        query(collection(db, 'transactions'), where('professionalId', '==', uid)),
+        snapshot => {
+          snapshot.docs.forEach(transactionDoc => {
+            const data = transactionDoc.data() as Transaction;
+            byId.set(data.id || transactionDoc.id, { ...data, id: data.id || transactionDoc.id });
+          });
+          snapshot.docChanges().filter(change => change.type === 'removed').forEach(change => {
+            byId.delete((change.doc.data() as Transaction).id || change.doc.id);
+          });
+          publish();
+        },
+        error => console.warn('[Firestore] Error sincronizando transacciones del profesional:', error)
+      );
+    };
+
+    syncTransactions(authenticatedUid || null);
+
+    const unsubAuthTransactions = auth.onAuthStateChanged(user => {
+      syncTransactions(user?.uid || null);
     });
 
     return () => {
@@ -704,7 +750,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubAuthConversations();
       unsubReports();
       unsubVerifications();
-      unsubTransactions();
+      unsubClientTransactions();
+      unsubProfessionalTransactions();
+      unsubAuthTransactions();
     };
   }, []);
 
