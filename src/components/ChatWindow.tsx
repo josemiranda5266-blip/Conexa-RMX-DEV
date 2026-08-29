@@ -23,7 +23,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 }) => {
   const { 
     currentUser, messages, sendMessage, sharePhoneWithUser, 
-    shareAddressWithUser, reportUser, blockUser 
+    shareAddressWithUser, subscribeConversationMessages, reportUser, blockUser 
   } = useApp();
 
   const [inputMessage, setInputMessage] = useState('');
@@ -39,24 +39,42 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const convMessages = messages[conversation.id] || [];
 
   useEffect(() => {
+    const unsubscribe = subscribeConversationMessages(conversation.id);
+    return () => unsubscribe();
+  }, [conversation.id, subscribeConversationMessages]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [convMessages]);
 
-  const handleSendText = (e: React.FormEvent) => {
+  const handleSendText = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputMessage.trim()) return;
-    sendMessage(conversation.id, inputMessage.trim(), 'TEXT');
-    setInputMessage('');
+    const content = inputMessage.trim();
+    if (!content) return;
+    try {
+      await sendMessage(conversation.id, content, 'TEXT');
+      setInputMessage('');
+    } catch (error) {
+      console.warn('[CONEXA MESSAGING] No se pudo enviar el mensaje:', error);
+    }
   };
 
-  const handleConfirmSharePhone = () => {
-    sharePhoneWithUser(conversation.id, conversation.otherUser.id);
-    setShowSharePhoneModal(false);
+  const handleConfirmSharePhone = async () => {
+    try {
+      await sharePhoneWithUser(conversation.id, conversation.otherUser.id);
+      setShowSharePhoneModal(false);
+    } catch (error) {
+      console.warn('[CONEXA PRIVACY] No se pudo compartir el teléfono:', error);
+    }
   };
 
-  const handleConfirmShareAddress = () => {
-    shareAddressWithUser(conversation.id, conversation.otherUser.id);
-    setShowShareAddressModal(false);
+  const handleConfirmShareAddress = async () => {
+    try {
+      await shareAddressWithUser(conversation.id, conversation.otherUser.id);
+      setShowShareAddressModal(false);
+    } catch (error) {
+      console.warn('[CONEXA PRIVACY] No se pudo compartir el domicilio:', error);
+    }
   };
 
   const handleSubmitReport = () => {
