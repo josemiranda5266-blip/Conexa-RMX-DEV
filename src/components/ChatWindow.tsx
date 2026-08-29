@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { auth } from '../lib/firebase';
+import { getSharedConversationContact } from '../services/conversationService';
 import { Conversation, Message, Quote } from '../types';
 import { useApp } from '../context/AppContext';
 import { ShareDataModal } from './ShareDataModal';
@@ -33,6 +35,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportReason, setReportReason] = useState<any>('SPAM');
   const [reportText, setReportText] = useState('');
+  const [sharedPhone, setSharedPhone] = useState<string | null>(null);
+  const [sharedAddress, setSharedAddress] = useState<string | null>(null);
+  const [contactLoading, setContactLoading] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const acknowledgedIncomingMessageIdsRef = useRef<Set<string>>(new Set());
@@ -80,6 +85,30 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     acknowledgeVisibleIncomingMessages();
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [convMessages, acknowledgeVisibleIncomingMessages]);
+
+
+  const loadSharedContact = useCallback(async (type: 'phone' | 'address') => {
+    if (!auth?.currentUser) return;
+    setContactLoading(true);
+    try {
+      const value = await getSharedConversationContact({
+        conversationId: conversation.id,
+        type,
+        getIdToken: () => auth.currentUser!.getIdToken(),
+      });
+      if (type === 'phone') setSharedPhone(value);
+      else setSharedAddress(value);
+    } catch (error) {
+      console.warn('[CONEXA PRIVACY] No se pudo recuperar el dato compartido:', error);
+    } finally {
+      setContactLoading(false);
+    }
+  }, [conversation.id]);
+
+  useEffect(() => {
+    setSharedPhone(null);
+    setSharedAddress(null);
+  }, [conversation.id]);
 
   const handleSendText = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -211,6 +240,25 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           >
             <MapPin size={13} />
             <span>Compartir domicilio</span>
+          </button>
+
+
+          <button
+            onClick={() => void loadSharedContact('phone')}
+            disabled={contactLoading}
+            className="px-3 py-1.5 rounded-2xl bg-white hover:bg-slate-50 text-slate-800 font-bold flex items-center gap-1.5 transition-all shrink-0 border border-slate-200"
+          >
+            <PhoneCall size={13} />
+            <span>{sharedPhone || 'Ver teléfono compartido'}</span>
+          </button>
+
+          <button
+            onClick={() => void loadSharedContact('address')}
+            disabled={contactLoading}
+            className="px-3 py-1.5 rounded-2xl bg-white hover:bg-slate-50 text-slate-800 font-bold flex items-center gap-1.5 transition-all shrink-0 border border-slate-200"
+          >
+            <MapPin size={13} />
+            <span>{sharedAddress || 'Ver domicilio compartido'}</span>
           </button>
 
           {onRequestQuoteClick && (
