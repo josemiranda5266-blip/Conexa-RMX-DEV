@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Shield, Lock, Download, Trash2, Bell, Eye, EyeOff, X, CheckCircle2, CreditCard, AlertCircle, LogIn } from 'lucide-react';
 import { auth } from '../lib/firebase';
+import { isProfessionalCapable } from '../domain/professionalMatching';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -18,13 +19,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [loadingMp, setLoadingMp] = useState(false);
   const [mpError, setMpError] = useState<string | null>(null);
 
-  const isPro =
-    currentUser && (
-      currentUser.role === 'PROFESSIONAL' ||
-      currentUser.isProfessional === true ||
-      currentUser.hasProfessionalProfile === true ||
-      currentUser.activeMode === 'PROFESSIONAL'
-    );
+  const isPro = currentUser ? isProfessionalCapable(currentUser) : false;
 
   useEffect(() => {
     if (isOpen && currentUser && isPro && authSessionReady) {
