@@ -1137,10 +1137,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       status: 'PENDING'
     };
 
+    if (!db || !auth?.currentUser) {
+      throw new Error('El envío del presupuesto requiere una sesión autenticada y backend configurado.');
+    }
+
     let quoteToStore = newQuote;
-    if (db) {
-      if (!auth?.currentUser) throw new Error('Debés iniciar sesión para enviar un presupuesto.');
-      try {
+    try {
         const token = await auth.currentUser.getIdToken();
         const response = await fetch('/api/quotes/submit', {
           method: 'POST',
@@ -1161,17 +1163,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           throw new Error(data.error || 'No se pudo enviar el presupuesto.');
         }
         quoteToStore = data.quote as Quote;
-      } catch (e) {
-        console.warn('[Firestore] Error guardando presupuesto:', e);
-        return;
-      }
+    } catch (e) {
+      console.warn('[CONEXA QUOTES] Error enviando presupuesto al backend:', e);
+      throw e;
     }
 
     setQuotes(prev => [quoteToStore, ...prev.filter(q => q.id !== quoteToStore.id)]);
-    setRequests(prev => prev.map(r => r.id === quoteData.requestId
-      ? { ...r, quotesCount: r.quotesCount + 1, status: 'QUOTES_RECEIVED' }
-      : r
-    ));
 
     // Find request to open chat with client
     const targetReq = requests.find(r => r.id === quoteData.requestId);
