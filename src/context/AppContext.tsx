@@ -561,18 +561,65 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setReviews(list);
     });
 
-    const unsubRequests = onSnapshot(
-      collection(db, 'service_requests'),
-      (snapshot) => {
-        const list: ServiceRequest[] = [];
+    let unsubOwnRequests = () => {};
+    let unsubAssignedRequests = () => {};
+    let unsubOpenRequests = () => {};
 
-        snapshot.forEach(doc => {
-          list.push(doc.data() as ServiceRequest);
-        });
+    const syncRequests = (uid: string | null) => {
+      unsubOwnRequests();
+      unsubAssignedRequests();
+      unsubOpenRequests();
 
-        setRequests(list);
+      if (!uid) {
+        setRequests([]);
+        return;
       }
-    );
+
+      const own = new Map<string, ServiceRequest>();
+      const assigned = new Map<string, ServiceRequest>();
+      const open = new Map<string, ServiceRequest>();
+      const publish = () => {
+        const merged = new Map<string, ServiceRequest>([
+          ...open,
+          ...assigned,
+          ...own
+        ]);
+        setRequests(Array.from(merged.values()));
+      };
+
+      const syncBucket = (bucket: Map<string, ServiceRequest>, snapshot: any) => {
+        bucket.clear();
+        snapshot.docs.forEach((requestDoc: any) => {
+          const data = requestDoc.data() as ServiceRequest;
+          bucket.set(data.id || requestDoc.id, { ...data, id: data.id || requestDoc.id });
+        });
+        publish();
+      };
+
+      unsubOwnRequests = onSnapshot(
+        query(collection(db, 'service_requests'), where('clientId', '==', uid)),
+        snapshot => syncBucket(own, snapshot),
+        error => console.warn('[Firestore] Error sincronizando solicitudes propias:', error)
+      );
+
+      unsubAssignedRequests = onSnapshot(
+        query(collection(db, 'service_requests'), where('assignedProfessionalId', '==', uid)),
+        snapshot => syncBucket(assigned, snapshot),
+        error => console.warn('[Firestore] Error sincronizando trabajos asignados:', error)
+      );
+
+      unsubOpenRequests = onSnapshot(
+        query(collection(db, 'service_requests'), where('status', 'in', ['REQUEST_CREATED', 'OPEN', 'QUOTES_RECEIVED'])),
+        snapshot => syncBucket(open, snapshot),
+        error => console.warn('[Firestore] Error sincronizando oportunidades abiertas:', error)
+      );
+    };
+
+    syncRequests(authenticatedUid || null);
+
+    const unsubAuthRequests = auth.onAuthStateChanged(user => {
+      syncRequests(user?.uid || null);
+    });
 
     let unsubClientQuotes = () => {};
     let unsubProfessionalQuotes = () => {};
@@ -785,7 +832,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => {
       unsubUsers();
       unsubReviews();
-      unsubRequests();
+      unsubOwnRequests();
+      unsubAssignedRequests();
+      unsubOpenRequests();
+      unsubAuthRequests();
       unsubClientQuotes();
       unsubProfessionalQuotes();
       unsubAuthQuotes();
