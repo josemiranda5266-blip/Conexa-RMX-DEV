@@ -1139,7 +1139,10 @@ Responde en JSON con:
 
         tx.set(transactionRef, transaction);
         tx.update(quoteRef, { status: 'ACCEPTED' });
-        tx.update(requestRef, { status: 'PROFESSIONAL_SELECTED' });
+        tx.update(requestRef, {
+          status: 'PROFESSIONAL_SELECTED',
+          assignedProfessionalId: quote.professionalId
+        });
         return transaction;
       });
 
