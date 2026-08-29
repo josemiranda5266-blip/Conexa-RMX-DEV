@@ -12,6 +12,7 @@ import {
   updateDoc,
   where,
   increment,
+  writeBatch,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from '../lib/firebase';
@@ -200,7 +201,15 @@ export async function sendConversationMessage(input: {
     throw new Error('Sender is not a conversation participant.');
   }
 
-  await addDoc(collection(conversationRef, 'messages'), {
+  const recipientId = participantIds.find((userId) => userId !== input.senderId);
+  if (!recipientId) {
+    throw new Error('Conversation recipient could not be resolved.');
+  }
+
+  const messageRef = doc(collection(conversationRef, 'messages'));
+  const batch = writeBatch(firestore);
+
+  batch.set(messageRef, {
     conversationId: input.conversationId,
     senderId: input.senderId,
     senderName: input.senderName,
@@ -211,20 +220,16 @@ export async function sendConversationMessage(input: {
     createdAt: serverTimestamp(),
   });
 
-  const recipientId = participantIds.find((userId) => userId !== input.senderId);
-  if (!recipientId) {
-    throw new Error('Conversation recipient could not be resolved.');
-  }
-
-  await updateDoc(conversationRef, {
+  batch.update(conversationRef, {
     lastMessagePreview: input.content,
     lastMessageAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     [`unreadCountByUser.${input.senderId}`]: 0,
     [`unreadCountByUser.${recipientId}`]: increment(1),
   });
-}
 
+  await batch.commit();
+}
 
 export async function markConversationAsRead(input: {
   conversationId: string;
