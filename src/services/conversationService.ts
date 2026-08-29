@@ -4,15 +4,12 @@ import {
   collection,
   doc,
   getDoc,
-  getDocs,
-  limit,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
   setDoc,
   updateDoc,
-  where,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from '../lib/firebase';
@@ -90,17 +87,17 @@ export async function getOrCreateConversation(
   const firestore = requireDb();
   const participantIds = [currentUserId, targetUserId] as [string, string];
   const participantKey = createParticipantKey(participantIds);
-  const conversationsRef = collection(firestore, 'conversations');
+  const conversationRef = doc(firestore, 'conversations', participantKey);
+  const existing = await getDoc(conversationRef);
 
-  const existing = await getDocs(
-    query(conversationsRef, where('participantKey', '==', participantKey), limit(1)),
-  );
-
-  if (!existing.empty) {
-    return existing.docs[0].id;
+  if (existing.exists()) {
+    const existingParticipantIds = existing.data().participantIds as string[] | undefined;
+    if (!existingParticipantIds || createParticipantKey(existingParticipantIds) !== participantKey) {
+      throw new Error('Conversation participant integrity check failed.');
+    }
+    return conversationRef.id;
   }
 
-  const conversationRef = doc(conversationsRef);
   await setDoc(conversationRef, {
     participantIds,
     participantKey,
