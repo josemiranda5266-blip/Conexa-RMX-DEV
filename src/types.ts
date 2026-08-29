@@ -130,6 +130,10 @@ export interface ServiceRequest {
   status: JobStatus;
   createdAt: string;
   quotesCount: number;
+  // Server-owned commercial targeting fields. A request can be public while open,
+  // optionally restricted to a candidate set, and finally assigned to one professional.
+  assignedProfessionalId?: string;
+  biddingProfessionalIds?: string[];
   isDemoData?: boolean;
   // Origin metadata used when a request is created from CONEXA RADAR.
   radarOpportunityId?: string;
