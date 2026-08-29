@@ -38,8 +38,9 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
       .filter(Boolean);
 
     const targetUid = auth?.currentUser?.uid || currentUser.id;
-    const safeRole = currentUser.role === 'SUPER_ADMIN' || currentUser.role === 'ADMIN' ? currentUser.role : 'PROFESSIONAL' as const;
 
+    // Creating a professional profile adds a capability; it must not escalate
+    // or rewrite the account's authorization role.
     const updatedUser = {
       ...currentUser,
       id: targetUid,
@@ -47,7 +48,7 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
       hasProfessionalProfile: true,
       hasClientProfile: true,
       activeMode: 'PROFESSIONAL' as const,
-      role: safeRole,
+      role: currentUser.role,
       professionName,
       businessName: businessName || `${professionName} ${currentUser.name.split(' ')[0]}`,
       specialties: updatedSpecialties.length > 0 ? updatedSpecialties : ['Atención rápida', 'Presupuestos sin cargo'],
