@@ -21,6 +21,7 @@ import {
   subscribeToUserConversations,
   updateConversationPrivacy,
   subscribeToMessages,
+  markConversationAsRead,
   type Unsubscribe,
   type StoredConversation,
   type StoredMessage,
@@ -95,6 +96,7 @@ interface AppContextType {
   shareAddressWithUser: (conversationId: string, recipientId: string) => Promise<void>;
   sendMessage: (conversationId: string, content: string, type?: Message['type'], quoteData?: Quote) => Promise<void>;
   subscribeConversationMessages: (conversationId: string) => Unsubscribe;
+  markConversationAsRead: (conversationId: string) => Promise<void>;
   createConversation: (targetUserId: string) => Promise<string>;
   createServiceRequest: (req: Omit<ServiceRequest, 'id' | 'clientId' | 'clientName' | 'clientAvatar' | 'createdAt' | 'status' | 'quotesCount'>) => void;
   submitQuote: (quote: Omit<Quote, 'id' | 'createdAt' | 'status'>) => void;
@@ -234,7 +236,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       },
       lastMessage: stored.lastMessagePreview || 'Conversación iniciada',
       lastMessageTime: formatConversationTime(stored.lastMessageAt) || 'Ahora',
-      unreadCount: 0,
+      unreadCount: currentUser ? (stored.unreadCountByUser[currentUser.id] ?? 0) : 0,
       sharedPhoneBySender: privacy[firstUserId]?.phoneShared === true,
       sharedPhoneByReceiver: privacy[secondUserId]?.phoneShared === true,
       sharedAddressBySender: privacy[firstUserId]?.addressShared === true,
@@ -857,6 +859,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })),
       (error) => console.warn('[CONEXA MESSAGING] Error sincronizando mensajes:', error),
     );
+  };
+
+  const markActiveConversationAsRead = async (conversationId: string): Promise<void> => {
+    if (!currentUser || !isConversationParticipant(conversationId) || !isFirebaseConfigured) return;
+    await markConversationAsRead({ conversationId, userId: currentUser.id });
   };
 
   const createConversation = async (targetUserId: string): Promise<string> => {
