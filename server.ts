@@ -964,6 +964,80 @@ Responde en JSON con:
     }
   });
 
+  // Creates a server-authoritative targeted request from a CONEXA RADAR opportunity.
+  // Candidate IDs are never trusted from the browser: they are read from the persisted opportunity.
+  app.post("/api/radar/opportunities/:opportunityId/create-request", rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const auth = await verifyAuthToken(req);
+      if (!auth.isAuthenticated || !auth.userId) {
+        return res.status(401).json({ success: false, code: "UNAUTHORIZED" });
+      }
+
+      const opportunityId = String(req.params.opportunityId || "").trim();
+      if (!opportunityId) {
+        return res.status(400).json({ success: false, code: "INVALID_OPPORTUNITY_ID" });
+      }
+
+      const firestore = await getAdminDb();
+      const opportunityRef = firestore.collection("radar_opportunities").doc(opportunityId);
+      const requestRef = firestore.collection("service_requests").doc();
+      const now = new Date().toISOString();
+
+      const serviceRequest = await firestore.runTransaction(async (tx: any) => {
+        const opportunitySnap = await tx.get(opportunityRef);
+        if (!opportunitySnap.exists) throw new Error("RADAR_OPPORTUNITY_NOT_FOUND");
+
+        const opportunity = opportunitySnap.data() || {};
+        if (opportunity.clientId !== auth.userId) throw new Error("FORBIDDEN_OPPORTUNITY_OWNER");
+
+        const matched = Array.isArray(opportunity.matchedProfessionals)
+          ? opportunity.matchedProfessionals
+          : [];
+
+        const candidateIds = Array.from(new Set(
+          matched
+            .map((candidate: any) => String(candidate?.professionalId || "").trim())
+            .filter(Boolean)
+        ));
+
+        if (candidateIds.length === 0) throw new Error("NO_RADAR_CANDIDATES");
+
+        const request = {
+          id: requestRef.id,
+          clientId: auth.userId,
+          title: String(opportunity.title || "Solicitud de servicio"),
+          description: String(opportunity.description || ""),
+          category: opportunity.category || null,
+          professionName: opportunity.professionName || null,
+          urgency: opportunity.urgency || "NORMAL",
+          approxLocation: opportunity.approxLocation || null,
+          estimatedBudgetArs: Number(opportunity.estimatedBudgetArs || 0),
+          status: "REQUEST_CREATED",
+          quotesCount: 0,
+          sourceType: "RADAR",
+          discoveryMode: "TARGETED",
+          radarOpportunityId: opportunityId,
+          biddingProfessionalIds: candidateIds,
+          createdAt: now,
+          updatedAt: now
+        };
+
+        tx.set(requestRef, request);
+        return request;
+      });
+
+      return res.status(201).json({ success: true, serviceRequest });
+    } catch (err: any) {
+      const code = err?.message || "RADAR_REQUEST_CREATE_ERROR";
+      const statusByCode: Record<string, number> = {
+        RADAR_OPPORTUNITY_NOT_FOUND: 404,
+        FORBIDDEN_OPPORTUNITY_OWNER: 403,
+        NO_RADAR_CANDIDATES: 409
+      };
+      return res.status(statusByCode[code] || 500).json({ success: false, code });
+    }
+  });
+
   // Creates the authoritative transaction when a client accepts a quote.
   // The financial values are calculated server-side; the browser cannot set the fee.
   app.post("/api/transactions/create", rateLimiter, async (req: Request, res: Response) => {
