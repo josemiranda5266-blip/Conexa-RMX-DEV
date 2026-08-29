@@ -272,6 +272,70 @@ Responde en JSON con:
     return verifyUserAuthToken(req, getFirebaseAdmin);
   }
 
+  // Private contact disclosure is mediated by the backend because Firebase Admin
+  // bypasses Firestore Rules and direct reads of /private/info are never exposed.
+  app.get('/api/conversations/:conversationId/shared-contact/:type', rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const auth = await verifyAuthToken(req);
+      if (!auth.isAuthenticated || !auth.userId) {
+        return res.status(401).json({ error: 'UNAUTHORIZED' });
+      }
+
+      const conversationId = String(req.params.conversationId || '').trim();
+      const type = String(req.params.type || '').trim();
+      if (!conversationId || !['phone', 'address'].includes(type)) {
+        return res.status(400).json({ error: 'INVALID_SHARED_CONTACT_REQUEST' });
+      }
+
+      const db = await getAdminDb();
+      const conversationSnap = await db.collection('conversations').doc(conversationId).get();
+      if (!conversationSnap.exists) {
+        return res.status(404).json({ error: 'CONVERSATION_NOT_FOUND' });
+      }
+
+      const conversation = conversationSnap.data() || {};
+      const participantIds = Array.isArray(conversation.participantIds) ? conversation.participantIds : [];
+      if (participantIds.length !== 2 || !participantIds.includes(auth.userId)) {
+        return res.status(403).json({ error: 'FORBIDDEN' });
+      }
+
+      const ownerId = participantIds.find((userId: string) => userId !== auth.userId);
+      if (!ownerId) {
+        return res.status(403).json({ error: 'FORBIDDEN' });
+      }
+
+      const privacyByUser = conversation.privacyByUser || {};
+      const ownerPrivacy = privacyByUser[ownerId] || {};
+      const isShared = type === 'phone'
+        ? ownerPrivacy.phoneShared === true
+        : ownerPrivacy.addressShared === true;
+
+      if (!isShared) {
+        return res.status(403).json({ error: 'CONTACT_NOT_SHARED' });
+      }
+
+      const privateInfoSnap = await db.collection('users').doc(ownerId).collection('private').doc('info').get();
+      if (!privateInfoSnap.exists) {
+        return res.status(404).json({ error: 'PRIVATE_CONTACT_NOT_AVAILABLE' });
+      }
+
+      const privateInfo = privateInfoSnap.data() || {};
+      const value = type === 'phone'
+        ? privateInfo.phonePrivate
+        : privateInfo.exactAddressPrivate;
+
+      if (typeof value !== 'string' || !value.trim()) {
+        return res.status(404).json({ error: 'PRIVATE_CONTACT_NOT_AVAILABLE' });
+      }
+
+      res.setHeader('Cache-Control', 'no-store, private');
+      return res.json({ type, value: value.trim() });
+    } catch (err: any) {
+      console.error('[CONEXA PRIVACY] Shared contact access failed:', err?.message || err);
+      return res.status(500).json({ error: 'SHARED_CONTACT_ACCESS_FAILED' });
+    }
+  });
+
   // ==========================================
   // MERCADO PAGO MARKETPLACE - OAuth + Checkout Pro
   // ==========================================
