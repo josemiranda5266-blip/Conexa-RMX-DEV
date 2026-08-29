@@ -10,6 +10,8 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
+  increment,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from '../lib/firebase';
@@ -30,6 +32,7 @@ export type StoredConversation = {
   updatedAt: Timestamp | null;
   lastMessagePreview: string;
   lastMessageAt: Timestamp | null;
+  unreadCountByUser: Record<string, number>;
 };
 
 export type StoredMessage = {
@@ -74,6 +77,12 @@ function normalizeConversation(id: string, data: Record<string, unknown>): Store
       ? data.lastMessagePreview
       : '',
     lastMessageAt: data.lastMessageAt instanceof Timestamp ? data.lastMessageAt : null,
+    unreadCountByUser: Object.fromEntries(participantIds.map((userId) => [
+      userId,
+      typeof (data.unreadCountByUser as Record<string, unknown> | undefined)?.[userId] === 'number'
+        ? (data.unreadCountByUser as Record<string, number>)[userId]
+        : 0,
+    ])),
   };
 }
 
@@ -107,6 +116,7 @@ export async function getOrCreateConversation(
     updatedAt: serverTimestamp(),
     lastMessagePreview: '',
     lastMessageAt: null,
+    unreadCountByUser: Object.fromEntries(participantIds.map((userId) => [userId, 0])),
   });
 
   return conversationRef.id;
@@ -201,9 +211,40 @@ export async function sendConversationMessage(input: {
     createdAt: serverTimestamp(),
   });
 
+  const recipientId = participantIds.find((userId) => userId !== input.senderId);
+  if (!recipientId) {
+    throw new Error('Conversation recipient could not be resolved.');
+  }
+
   await updateDoc(conversationRef, {
     lastMessagePreview: input.content,
     lastMessageAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    [`unreadCountByUser.${input.senderId}`]: 0,
+    [`unreadCountByUser.${recipientId}`]: increment(1),
+  });
+}
+
+
+export async function markConversationAsRead(input: {
+  conversationId: string;
+  userId: string;
+}): Promise<void> {
+  const firestore = requireDb();
+  const conversationRef = doc(firestore, 'conversations', input.conversationId);
+  const snapshot = await getDoc(conversationRef);
+
+  if (!snapshot.exists()) {
+    throw new Error('Conversation not found.');
+  }
+
+  const participantIds = snapshot.data().participantIds as string[];
+  if (!isConversationParticipant(participantIds, input.userId)) {
+    throw new Error('User is not a conversation participant.');
+  }
+
+  await updateDoc(conversationRef, {
+    [`unreadCountByUser.${input.userId}`]: 0,
     updatedAt: serverTimestamp(),
   });
 }
