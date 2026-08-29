@@ -1174,45 +1174,7 @@ Responde en JSON con:
   // Payment confirmation is authoritative: only the backend may move a transaction
   // from PAYMENT_PENDING to PAID. Webhook processors or the payment provider adapter
   // must call this endpoint with the internal confirmation secret.
-  app.post("/api/internal/transactions/:transactionId/confirm-payment", async (req: Request, res: Response) => {
-    const expectedSecret = process.env.CONEXA_INTERNAL_PAYMENT_SECRET;
-    const providedSecret = req.header('x-conexa-internal-secret');
-    const expectedBuffer = expectedSecret ? Buffer.from(expectedSecret) : null;
-    const providedBuffer = providedSecret ? Buffer.from(providedSecret) : null;
-    const internalAuthorized = Boolean(
-      expectedBuffer &&
-      providedBuffer &&
-      expectedBuffer.length === providedBuffer.length &&
-      crypto.timingSafeEqual(expectedBuffer, providedBuffer)
-    );
-    if (!internalAuthorized) {
-      return res.status(403).json({ success: false, error: 'Operación interna no autorizada.', code: 'INTERNAL_AUTH_REQUIRED' });
-    }
-    try {
-      const transactionId = req.params.transactionId;
-      const firestore = await getAdminDb();
-      const transactionRef = firestore.collection('transactions').doc(transactionId);
-      const result = await firestore.runTransaction(async (tx: any) => {
-        const snap = await tx.get(transactionRef);
-        if (!snap.exists) throw new Error('TRANSACTION_NOT_FOUND');
-        const transaction = snap.data() || {};
-        if (transaction.status === 'PAID') return { alreadyConfirmed: true };
-        if (transaction.status !== 'PAYMENT_PENDING') throw new Error('INVALID_PAYMENT_STATE');
-        const paidAt = new Date().toISOString();
-        tx.update(transactionRef, {
-          status: 'PAID',
-          paidAt,
-          mercadoPagoPaymentId: req.body?.paymentId || transaction.mercadoPagoPaymentId || null
-        });
-        return { alreadyConfirmed: false, paidAt };
-      });
-      return res.json({ success: true, transactionId, status: 'PAID', ...result });
-    } catch (err: any) {
-      const code = err?.message || 'PAYMENT_CONFIRMATION_ERROR';
-      const status = code === 'TRANSACTION_NOT_FOUND' ? 404 : code === 'INVALID_PAYMENT_STATE' ? 409 : 500;
-      return res.status(status).json({ success: false, error: code, code });
-    }
-  });
+  
 
   app.post("/api/jobs/start", rateLimiter, async (req: Request, res: Response) => {
     try {
