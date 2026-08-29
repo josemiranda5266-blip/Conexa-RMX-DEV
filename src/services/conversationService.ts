@@ -32,6 +32,7 @@ export type StoredConversation = {
   createdAt: Timestamp | null;
   updatedAt: Timestamp | null;
   lastMessagePreview: string;
+  lastMessageId?: string;
   lastMessageAt: Timestamp | null;
   unreadCountByUser: Record<string, number>;
 };
@@ -77,6 +78,7 @@ function normalizeConversation(id: string, data: Record<string, unknown>): Store
     lastMessagePreview: typeof data.lastMessagePreview === 'string'
       ? data.lastMessagePreview
       : '',
+    lastMessageId: typeof data.lastMessageId === 'string' ? data.lastMessageId : undefined,
     lastMessageAt: data.lastMessageAt instanceof Timestamp ? data.lastMessageAt : null,
     unreadCountByUser: Object.fromEntries(participantIds.map((userId) => [
       userId,
@@ -116,6 +118,7 @@ export async function getOrCreateConversation(
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     lastMessagePreview: '',
+    lastMessageId: null,
     lastMessageAt: null,
     unreadCountByUser: Object.fromEntries(participantIds.map((userId) => [userId, 0])),
   });
@@ -294,4 +297,37 @@ export function getOtherConversationParticipant(
   currentUserId: string,
 ): string | null {
   return getOtherParticipantId(conversation.participantIds, currentUserId);
+}
+
+
+export async function getSharedConversationContact(input: {
+  conversationId: string;
+  type: 'phone' | 'address';
+  getIdToken: () => Promise<string>;
+}): Promise<string | null> {
+  const token = await input.getIdToken();
+  const response = await fetch(
+    `/api/conversations/${encodeURIComponent(input.conversationId)}/shared-contact/${input.type}`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+      cache: 'no-store',
+    },
+  );
+
+  if (response.status === 403 || response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error('Unable to retrieve shared contact information.');
+  }
+
+  const payload = await response.json() as { value?: unknown };
+  return typeof payload.value === 'string' && payload.value.trim()
+    ? payload.value.trim()
+    : null;
 }
