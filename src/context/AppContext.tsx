@@ -18,7 +18,6 @@ import { canUseProfessionalMode, getDefaultProfessionalMode, matchOpportunityWit
 import {
   getOrCreateConversation,
   sendConversationMessage,
-  subscribeToMessages,
   subscribeToUserConversations,
   updateConversationPrivacy,
   type StoredConversation,
@@ -872,14 +871,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return getOrCreateConversation(currentUser.id, targetUserId);
   };
 
-  const subscribeConversationMessages = (conversationId: string) => {
-    if (!isFirebaseConfigured) return () => undefined;
-    return subscribeToMessages(
-      conversationId,
-      (stored) => setMessages(prev => ({ ...prev, [conversationId]: stored.map(toMessageView) })),
-      (error) => console.warn('[CONEXA MESSAGING] Error sincronizando mensajes:', error),
-    );
-  };
 
   const createServiceRequest = async (reqData: Omit<ServiceRequest, 'id' | 'clientId' | 'clientName' | 'clientAvatar' | 'createdAt' | 'status' | 'quotesCount'>) => {
     const newReq: ServiceRequest = {
@@ -952,8 +943,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Find request to open chat with client
     const targetReq = requests.find(r => r.id === quoteData.requestId);
     if (targetReq) {
-      const convId = createConversation(targetReq.clientId);
-      sendMessage(convId, `Hola! Te envío un presupuesto formal para tu solicitud "${targetReq.title}".`, 'QUOTE_PROPOSAL', quoteToStore);
+      try {
+        const convId = await createConversation(targetReq.clientId);
+        if (convId) {
+          await sendMessage(
+            convId,
+            `Hola! Te envío un presupuesto formal para tu solicitud "${targetReq.title}".`,
+            'QUOTE_PROPOSAL',
+            quoteToStore,
+          );
+        }
+      } catch (error) {
+        console.warn('[CONEXA MESSAGING] No se pudo abrir la conversación para el presupuesto:', error);
+      }
     }
   };
 
