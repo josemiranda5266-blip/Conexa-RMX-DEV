@@ -574,14 +574,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     );
 
-    const unsubQuotes = onSnapshot(collection(db, 'quotes'), (snapshot) => {
-      const list: Quote[] = [];
+    let unsubClientQuotes = () => {};
+    let unsubProfessionalQuotes = () => {};
 
-      snapshot.forEach(doc => {
-        list.push(doc.data() as Quote);
-      });
+    const syncQuotes = (uid: string | null) => {
+      unsubClientQuotes();
+      unsubProfessionalQuotes();
 
-      setQuotes(list);
+      if (!uid) {
+        setQuotes([]);
+        return;
+      }
+
+      const byId = new Map<string, Quote>();
+      const publish = () => setQuotes(Array.from(byId.values()));
+
+      unsubClientQuotes = onSnapshot(
+        query(collection(db, 'quotes'), where('clientId', '==', uid)),
+        snapshot => {
+          snapshot.docs.forEach(quoteDoc => {
+            const data = quoteDoc.data() as Quote;
+            byId.set(data.id || quoteDoc.id, { ...data, id: data.id || quoteDoc.id });
+          });
+          snapshot.docChanges().filter(change => change.type === 'removed').forEach(change => {
+            byId.delete((change.doc.data() as Quote).id || change.doc.id);
+          });
+          publish();
+        },
+        error => console.warn('[Firestore] Error sincronizando presupuestos del cliente:', error)
+      );
+
+      unsubProfessionalQuotes = onSnapshot(
+        query(collection(db, 'quotes'), where('professionalId', '==', uid)),
+        snapshot => {
+          snapshot.docs.forEach(quoteDoc => {
+            const data = quoteDoc.data() as Quote;
+            byId.set(data.id || quoteDoc.id, { ...data, id: data.id || quoteDoc.id });
+          });
+          snapshot.docChanges().filter(change => change.type === 'removed').forEach(change => {
+            byId.delete((change.doc.data() as Quote).id || change.doc.id);
+          });
+          publish();
+        },
+        error => console.warn('[Firestore] Error sincronizando presupuestos del profesional:', error)
+      );
+    };
+
+    syncQuotes(authenticatedUid || null);
+
+    const unsubAuthQuotes = auth.onAuthStateChanged(user => {
+      syncQuotes(user?.uid || null);
     });
 
     let unsubConversations = () => {};
@@ -744,7 +786,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubUsers();
       unsubReviews();
       unsubRequests();
-      unsubQuotes();
+      unsubClientQuotes();
+      unsubProfessionalQuotes();
+      unsubAuthQuotes();
       unsubConversations();
       stopConversationMessages();
       unsubAuthConversations();
