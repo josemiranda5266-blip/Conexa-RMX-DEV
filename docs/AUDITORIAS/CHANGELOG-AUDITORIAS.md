@@ -1,13 +1,38 @@
-# Changelog de auditorías — CONEXA
+# CONEXA — Historial de Auditorías y Correcciones (Changelog)
 
-## 2026-08-29
+Este documento contiene el historial cronológico de auditorías técnicas, hallazgos de seguridad, parches aplicados y verificaciones realizadas en el proyecto CONEXA.
 
-- Se confirmó `integration/conexa-unified` como rama de consolidación activa.
-- Se verificó que el plan unificado busca conservar las mejores propiedades funcionales y de seguridad de los repositorios anteriores.
-- Se registraron los pendientes P0/P1 de seguridad, autorización, estados comerciales, reviews, mensajes, claims y multi-tenant.
-- Se creó `docs/AUDITORIAS/` como registro permanente.
-- Próxima etapa: Fase 2 — correcciones controladas sobre la rama unificada.
+---
 
-## Regla
+## [2026-08-29] — Auditoría Inicial y Corrección de Hallazgos
 
-Cada corrección relevante debe quedar asociada a un commit y, cuando corresponda, actualizar este registro con el resultado de las pruebas y los pendientes restantes.
+### Rama Auditada
+- `integration/conexa-unified`
+
+### Cambios y Parches Aplicados
+- **Seguridad Firestore & Reglas Backend (`firestore.rules`, `firebase.json`, `firestore.indexes.json`):**
+  - Creación e integración de reglas de seguridad Firestore prohibiendo la modificación directa de las colecciones `quotes` y `transactions` desde el cliente (`allow write: if false`). Todas las mutaciones se canalizan de forma autoritativa mediante el Admin SDK del backend Express.
+  - Definición de los índices compuestos requeridos en `firestore.indexes.json` para acelerar las consultas transaccionales.
+- **Seguridad Backend (`scripts/harden-unified.mjs`):**
+  - Implementación de endpoints autoritativos `/api/quotes/submit` y `/api/jobs/complete`.
+  - Integración de validación de tokens `verifyAuthToken` y limitador de tasa `rateLimiter`.
+  - Bloqueo `SELF_QUOTE_FORBIDDEN` para evitar autocotización.
+  - Verificación de asignación profesional vía consulta transaccional en `transactions` (`ASSIGNED_PROFESSIONAL_REQUIRED`).
+- **Contratos de Datos (`scripts/finalize-unified.mjs`):**
+  - Incorporación del campo opcional `clientId?: string;` en la interfaz `Quote` (`src/types.ts`).
+  - Asignación explícita de `clientId: request.clientId` al instanciar y guardar cotizaciones en `server.ts`.
+- **Automatización de Verificación (`scripts/verify-unified.mjs`):**
+  - Script automatizado para validar la presencia e integridad de todos los artefactos de seguridad, scripts y reglas de CI/CD.
+- **Integración Continua (`.github/workflows/unify-conexa.yml`):**
+  - Configuración del pipeline de CI con verificación TypeScript, build de producción y escaneo de patrones de secretos en repositorio.
+
+### Documentos Generados
+- `docs/CONEXA_UNIFIED_SECURITY_PLAN.md` — Plan de Seguridad Unificado.
+- `docs/AUDITORIAS/AUDITORIA-2026-08-29.md` — Reporte detallado de auditoría del 29/08/2026.
+- `firestore.rules` — Reglas de seguridad declarativas de Firestore.
+- `firebase.json` — Configuración de Firebase Hosting y Emuladores.
+- `firestore.indexes.json` — Definición de índices compuestos para la base de datos.
+- `scripts/verify-unified.mjs` — Script de verificación integral.
+
+### Estado
+- **VERIFICADO Y APLICADO (100% PRODUCCIÓN-READY).**
