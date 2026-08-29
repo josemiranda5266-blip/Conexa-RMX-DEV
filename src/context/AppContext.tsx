@@ -274,15 +274,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               effectiveRole = claimRole;
             }
 
-            const finalIsProfessional = profileData.isProfessional === true || 
-                                        profileData.hasProfessionalProfile === true || 
-                                        effectiveRole === 'PROFESSIONAL' || 
-                                        profileData.activeMode === 'PROFESSIONAL';
-            
-            const finalHasProfessionalProfile = profileData.hasProfessionalProfile === true || 
-                                                profileData.isProfessional === true || 
-                                                effectiveRole === 'PROFESSIONAL' || 
-                                                profileData.activeMode === 'PROFESSIONAL';
+            // Professional capability is independent from the currently selected app mode.
+            // activeMode must never create or remove a professional profile.
+            const finalHasProfessionalProfile =
+              profileData.hasProfessionalProfile === true ||
+              profileData.isProfessional === true ||
+              effectiveRole === 'PROFESSIONAL';
+
+            const finalIsProfessional = finalHasProfessionalProfile;
 
             const finalActiveMode = profileData.activeMode || 
                                     (effectiveRole === 'ADMIN' || effectiveRole === 'SUPER_ADMIN' ? 'ADMIN' : (finalIsProfessional ? 'PROFESSIONAL' : 'CLIENT'));
