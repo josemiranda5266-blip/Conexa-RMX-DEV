@@ -289,7 +289,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             let profileData: Partial<UserProfile> = {};
             if (userDocSnap.exists()) {
               profileData = userDocSnap.data() as Partial<UserProfile>;
-              console.log('[CONEXA AUTH] Perfil de usuario cargado de Firestore:', profileData);
+
+              // Private contact data must never remain in the publicly readable
+              // /users document. Migrate legacy fields when found.
+              const legacyPhonePrivate = profileData.phonePrivate;
+              const legacyExactAddressPrivate = profileData.location?.exactAddressPrivate;
+
+              const privateInfoRef = doc(db, 'users', firebaseUser.uid, 'private', 'info');
+              const privateInfoSnap = await getDoc(privateInfoRef);
+
+              let privateData: Record<string, unknown> = {};
+              if (privateInfoSnap.exists()) {
+                privateData = privateInfoSnap.data() as Record<string, unknown>;
+              }
+
+              if (legacyPhonePrivate || legacyExactAddressPrivate) {
+                await setDoc(privateInfoRef, {
+                  ...(legacyPhonePrivate ? { phonePrivate: legacyPhonePrivate } : {}),
+                  ...(legacyExactAddressPrivate ? { exactAddressPrivate: legacyExactAddressPrivate } : {}),
+                  migratedAt: new Date().toISOString(),
+                }, { merge: true });
+
+                await updateDoc(userDocRef, {
+                  ...(legacyPhonePrivate ? { phonePrivate: deleteField() } : {}),
+                  ...(legacyExactAddressPrivate ? { 'location.exactAddressPrivate': deleteField() } : {}),
+                });
+
+                delete (profileData as any).phonePrivate;
+                if (profileData.location) delete (profileData.location as any).exactAddressPrivate;
+
+                privateData = {
+                  ...privateData,
+                  ...(legacyPhonePrivate ? { phonePrivate: legacyPhonePrivate } : {}),
+                  ...(legacyExactAddressPrivate ? { exactAddressPrivate: legacyExactAddressPrivate } : {}),
+                };
+              }
+
+              profileData = {
+                ...profileData,
+                ...(typeof privateData.phonePrivate === 'string'
+                  ? { phonePrivate: privateData.phonePrivate }
+                  : {}),
+                ...(typeof privateData.exactAddressPrivate === 'string'
+                  ? {
+                      location: {
+                        ...(profileData.location || {}),
+                        exactAddressPrivate: privateData.exactAddressPrivate,
+                      },
+                    }
+                  : {}),
+              };
+
+              console.log('[CONEXA AUTH] Perfil público y datos privados del propietario cargados.');
             } else {
               // Create default profile for newly registered users
               const defaultProfile: UserProfile = {
