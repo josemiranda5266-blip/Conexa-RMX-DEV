@@ -41,6 +41,7 @@ export type StoredMessage = {
   type: 'TEXT' | 'IMAGE' | 'VOICE' | 'SHARED_PHONE' | 'SHARED_ADDRESS' | 'QUOTE_PROPOSAL';
   content: string;
   attachmentUrl?: string;
+  quoteData?: unknown;
 };
 
 function requireDb() {
@@ -159,6 +160,7 @@ export function subscribeToMessages(
           type: data.type,
           content: String(data.content ?? ''),
           attachmentUrl: typeof data.attachmentUrl === 'string' ? data.attachmentUrl : undefined,
+          quoteData: data.quoteData,
         } as StoredMessage;
       }));
     },
@@ -173,6 +175,7 @@ export async function sendConversationMessage(input: {
   type: StoredMessage['type'];
   content: string;
   attachmentUrl?: string;
+  quoteData?: unknown;
 }): Promise<void> {
   const firestore = requireDb();
   const conversationRef = doc(firestore, 'conversations', input.conversationId);
@@ -194,6 +197,7 @@ export async function sendConversationMessage(input: {
     type: input.type,
     content: input.content,
     ...(input.attachmentUrl ? { attachmentUrl: input.attachmentUrl } : {}),
+    ...(input.quoteData !== undefined ? { quoteData: input.quoteData } : {}),
     createdAt: serverTimestamp(),
   });
 
