@@ -25,20 +25,33 @@ export interface ProfessionalMatch {
   matchReasons: string[];
 }
 
+export type LocationMatchLevel = 'NONE' | 'PROVINCE' | 'CITY' | 'ZONE';
+
+export interface LocationMatch {
+  level: LocationMatchLevel;
+  isMatch: boolean;
+  reason?: string;
+}
+
 const normalizeText = (value?: string | null): string =>
   (value || '').trim().toLocaleLowerCase('es-AR');
 
 const clamp = (value: number, min = 0, max = 100): number =>
   Math.min(max, Math.max(min, value));
 
-export function isProfessionalCandidate(user: UserProfile): boolean {
-  return user.role === 'PROFESSIONAL' ||
+export function isProfessionalCapable(user: UserProfile): boolean {
+  return user.hasProfessionalProfile === true ||
     user.isProfessional === true ||
-    user.hasProfessionalProfile === true;
+    user.role === 'PROFESSIONAL';
+}
+
+// Backward-compatible alias for existing consumers.
+export function isProfessionalCandidate(user: UserProfile): boolean {
+  return isProfessionalCapable(user);
 }
 
 export function canUseProfessionalMode(user: UserProfile): boolean {
-  return isProfessionalCandidate(user);
+  return isProfessionalCapable(user);
 }
 
 export function getDefaultProfessionalMode(
@@ -56,7 +69,7 @@ export function getDefaultProfessionalMode(
 }
 
 export function normalizeProfessionalCandidate(user: UserProfile): ProfessionalCandidate | null {
-  if (!isProfessionalCandidate(user) || user.isBlocked === true) {
+  if (!isProfessionalCapable(user) || user.isBlocked === true) {
     return null;
   }
 
@@ -78,6 +91,16 @@ export function normalizeProfessionalCandidate(user: UserProfile): ProfessionalC
     isIdentityVerified: user.isIdentityVerified === true,
     isProfessionalVerified: user.isProfessionalVerified === true
   };
+}
+
+export function isDiscoverableProfessional(candidate: ProfessionalCandidate): boolean {
+  const hasProfessionalTerms = Boolean(
+    normalizeText(candidate.professionName) ||
+    normalizeText(candidate.professionId) ||
+    candidate.specialties.some(specialty => Boolean(normalizeText(specialty)))
+  );
+
+  return hasProfessionalTerms;
 }
 
 export function matchesProfession(
@@ -109,49 +132,10 @@ export function matchesProfession(
   );
 }
 
-export function matchesLocation(
+export function evaluateLocationMatch(
   candidate: ProfessionalCandidate,
   opportunity: Pick<RadarOpportunity, 'city' | 'province' | 'neighborhood'>
-): boolean {
-  const candidateCity = normalizeText(candidate.city);
-  const candidateProvince = normalizeText(candidate.province);
-  const candidateZone = normalizeText(candidate.approxZone);
-  const opportunityCity = normalizeText(opportunity.city);
-  const opportunityProvince = normalizeText(opportunity.province);
-  const opportunityNeighborhood = normalizeText(opportunity.neighborhood);
-
-  const sameCity = Boolean(candidateCity && opportunityCity && candidateCity === opportunityCity);
-  const sameProvince = Boolean(
-    candidateProvince && opportunityProvince && candidateProvince === opportunityProvince
-  );
-  const sameNeighborhood = Boolean(
-    candidateZone &&
-    opportunityNeighborhood &&
-    (candidateZone.includes(opportunityNeighborhood) ||
-      opportunityNeighborhood.includes(candidateZone))
-  );
-
-  // Province alone is a weak fallback and should not be treated as local proximity.
-  // It is kept only when the opportunity does not provide a city or neighborhood.
-  const opportunityHasLocality = Boolean(opportunityCity || opportunityNeighborhood);
-
-  return sameCity || sameNeighborhood || (!opportunityHasLocality && sameProvince);
-}
-
-export function calculateProfessionalMatchScore(
-  candidate: ProfessionalCandidate,
-  opportunity: Pick<RadarOpportunity, 'category' | 'subcategory' | 'city' | 'province' | 'neighborhood'>
-): ProfessionalMatch {
-  const matchReasons: string[] = [];
-  let score = 0;
-
-  if (matchesProfession(candidate, opportunity)) {
-    score += 40;
-    matchReasons.push('Especialidad compatible');
-  } else {
-    return { candidate, matchScore: 0, matchReasons: [] };
-  }
-
+): LocationMatch {
   const candidateCity = normalizeText(candidate.city);
   const candidateProvince = normalizeText(candidate.province);
   const candidateZone = normalizeText(candidate.approxZone);
@@ -171,14 +155,70 @@ export function calculateProfessionalMatchScore(
   );
 
   if (sameCity) {
+    return {
+      level: 'CITY',
+      isMatch: true,
+      reason: 'Ubicación en la misma ciudad'
+    };
+  }
+
+  if (sameNeighborhood) {
+    return {
+      level: 'ZONE',
+      isMatch: true,
+      reason: 'Zona de cobertura compatible'
+    };
+  }
+
+  const opportunityHasLocality = Boolean(opportunityCity || opportunityNeighborhood);
+  if (!opportunityHasLocality && sameProvince) {
+    return {
+      level: 'PROVINCE',
+      isMatch: true,
+      reason: 'Ubicación compatible a nivel provincial'
+    };
+  }
+
+  return {
+    level: 'NONE',
+    isMatch: false
+  };
+}
+
+export function matchesLocation(
+  candidate: ProfessionalCandidate,
+  opportunity: Pick<RadarOpportunity, 'city' | 'province' | 'neighborhood'>
+): boolean {
+  return evaluateLocationMatch(candidate, opportunity).isMatch;
+}
+
+export function calculateProfessionalMatchScore(
+  candidate: ProfessionalCandidate,
+  opportunity: Pick<RadarOpportunity, 'category' | 'subcategory' | 'city' | 'province' | 'neighborhood'>
+): ProfessionalMatch {
+  const matchReasons: string[] = [];
+  let score = 0;
+
+  if (!matchesProfession(candidate, opportunity)) {
+    return { candidate, matchScore: 0, matchReasons: [] };
+  }
+
+  const locationMatch = evaluateLocationMatch(candidate, opportunity);
+  if (!locationMatch.isMatch) {
+    return { candidate, matchScore: 0, matchReasons: [] };
+  }
+
+  score += 40;
+  matchReasons.push('Especialidad compatible');
+
+  if (locationMatch.level === 'CITY' || locationMatch.level === 'ZONE') {
     score += 25;
-    matchReasons.push('Ubicación en la misma ciudad');
-  } else if (sameNeighborhood) {
-    score += 25;
-    matchReasons.push('Zona de cobertura compatible');
-  } else if (!opportunityCity && !opportunityNeighborhood && sameProvince) {
+  } else if (locationMatch.level === 'PROVINCE') {
     score += 5;
-    matchReasons.push('Ubicación compatible a nivel provincial');
+  }
+
+  if (locationMatch.reason) {
+    matchReasons.push(locationMatch.reason);
   }
 
   const qualityScore = clamp((candidate.rating / 5) * 10);
@@ -228,9 +268,11 @@ export function findMatchingProfessionals(
   return users
     .map(normalizeProfessionalCandidate)
     .filter((candidate): candidate is ProfessionalCandidate => candidate !== null)
+    .filter(isDiscoverableProfessional)
     .filter(candidate => options.includeUnavailable || candidate.availabilityStatus !== 'OCUPADO')
+    .filter(candidate => matchesProfession(candidate, opportunity))
+    .filter(candidate => matchesLocation(candidate, opportunity))
     .map(candidate => calculateProfessionalMatchScore(candidate, opportunity))
-    .filter(match => match.matchScore > 0)
     .sort((a, b) => b.matchScore - a.matchScore)
     .slice(0, limit);
 }
