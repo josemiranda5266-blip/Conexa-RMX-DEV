@@ -564,11 +564,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let unsubOwnRequests = () => {};
     let unsubAssignedRequests = () => {};
     let unsubOpenRequests = () => {};
+    let unsubTargetedRequests = () => {};
 
     const syncRequests = (uid: string | null) => {
       unsubOwnRequests();
       unsubAssignedRequests();
       unsubOpenRequests();
+      unsubTargetedRequests();
 
       if (!uid) {
         setRequests([]);
@@ -609,9 +611,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
 
       unsubOpenRequests = onSnapshot(
-        query(collection(db, 'service_requests'), where('status', 'in', ['REQUEST_CREATED', 'OPEN', 'QUOTES_RECEIVED'])),
+        query(collection(db, 'service_requests'), where('discoveryMode', '==', 'OPEN')),
         snapshot => syncBucket(open, snapshot),
         error => console.warn('[Firestore] Error sincronizando oportunidades abiertas:', error)
+      );
+
+      unsubTargetedRequests = onSnapshot(
+        query(collection(db, 'service_requests'), where('biddingProfessionalIds', 'array-contains', uid)),
+        snapshot => syncBucket(open, snapshot),
+        error => console.warn('[Firestore] Error sincronizando oportunidades dirigidas:', error)
       );
     };
 
@@ -835,6 +843,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubOwnRequests();
       unsubAssignedRequests();
       unsubOpenRequests();
+      unsubTargetedRequests();
       unsubAuthRequests();
       unsubClientQuotes();
       unsubProfessionalQuotes();
@@ -1104,7 +1113,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toLocaleDateString('es-AR'),
       status: 'REQUEST_CREATED',
       quotesCount: 0,
-      sourceType: 'DIRECT'
+      sourceType: 'DIRECT',
+      discoveryMode: 'OPEN'
     };
     setRequests(prev => [newReq, ...prev]);
 
@@ -1978,6 +1988,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       quotesCount: 0,
       radarOpportunityId: opportunity.id,
       sourceType: 'RADAR',
+      discoveryMode: 'TARGETED',
       biddingProfessionalIds: opportunity.matchedProfessionals
         .map(match => match.professionalId)
         .filter((professionalId): professionalId is string => Boolean(professionalId))
