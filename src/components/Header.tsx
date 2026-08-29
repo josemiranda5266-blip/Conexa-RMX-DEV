@@ -6,6 +6,7 @@ import {
   User, Wrench, RefreshCw, PlusCircle, ArrowLeftRight, LogIn, LogOut
 } from 'lucide-react';
 import { auth, isFirebaseConfigured } from '../lib/firebase';
+import { isProfessionalCapable } from '../domain/professionalMatching';
 
 interface HeaderProps {
   onOpenAiAssistant: () => void;
@@ -43,13 +44,14 @@ export const Header: React.FC<HeaderProps> = ({
 
   const unreadNotifs = notifications.filter(n => !n.read);
 
-  const activeMode = currentUser.activeMode || (currentUser.isProfessional ? 'PROFESSIONAL' : 'CLIENT');
+  const hasProfessionalCapability = isProfessionalCapable(currentUser);
+  const activeMode = currentUser.activeMode || (hasProfessionalCapability ? 'PROFESSIONAL' : 'CLIENT');
   const isAdminUser = currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN';
   const isDevEnvironment = Boolean((import.meta as any).env?.DEV);
 
   const handleToggleMode = () => {
     if (activeMode === 'CLIENT') {
-      if (!currentUser.hasProfessionalProfile && !currentUser.isProfessional) {
+      if (!hasProfessionalCapability) {
         onOpenBecomePro();
       } else {
         switchActiveMode('PROFESSIONAL');
