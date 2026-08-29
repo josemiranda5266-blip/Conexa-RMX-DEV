@@ -93,7 +93,7 @@ interface AppContextType {
   getMercadoPagoStatus: () => Promise<{ connected: boolean; mpUserId?: string | null; publicKey?: string | null }>;
   startJob: (jobId: string) => Promise<void>;
   completeJob: (jobId: string) => void;
-  addReview: (review: Omit<Review, 'id' | 'createdAt' | 'isVerifiedJob'>) => void;
+  addReview: (review: Omit<Review, 'id' | 'createdAt' | 'isVerifiedJob'>) => Promise<void>;
   submitVerification: (type: 'IDENTITY' | 'PROFESSIONAL', documentName: string, docUrl: string) => void;
   approveVerification: (verificationId: string) => void;
   reportUser: (reportedUserId: string, reason: UserReport['reason'], description: string) => void;
@@ -1105,8 +1105,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toLocaleDateString('es-AR'),
       isVerifiedJob: true
     };
-    setReviews(prev => [newRev, ...prev]);
-
     // Recalculate target professional rating locally
     setUsers(prev => prev.map(u => {
       if (u.id === reviewData.professionalId) {
@@ -1123,6 +1121,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }));
 
     if (db) {
+      if (!auth?.currentUser || !reviewData.jobId) {
+        throw new Error('Debés iniciar sesión y asociar la reseña a un trabajo válido.');
+      }
+      const token = await auth.currentUser.getIdToken();
+      const closeResponse = await fetch('/api/jobs/review-complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ serviceRequestId: reviewData.jobId })
+      });
+      const closeResult = await closeResponse.json();
+      if (!closeResponse.ok || !closeResult.success) {
+        throw new Error(closeResult.error || closeResult.code || 'No se pudo cerrar el trabajo.');
+      }
+
       try {
         await setDoc(doc(db, 'reviews', newRev.id), newRev);
         const proRef = doc(db, 'users', reviewData.professionalId);
@@ -1172,7 +1184,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ));
       } catch (e) {
         console.warn('[Firestore] Error guardando reseña:', e);
+        throw e;
       }
+      setReviews(prev => [newRev, ...prev]);
+      setRequests(prev => prev.map(request =>
+        request.id === reviewData.jobId ? { ...request, status: 'CLOSED' } : request
+      ));
+    } else {
+      setReviews(prev => [newRev, ...prev]);
     }
   };
 
