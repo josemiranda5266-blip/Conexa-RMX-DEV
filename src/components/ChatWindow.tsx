@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Conversation, Message, Quote } from '../types';
 import { useApp } from '../context/AppContext';
 import { ShareDataModal } from './ShareDataModal';
@@ -35,6 +35,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [reportText, setReportText] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const acknowledgedIncomingMessageIdsRef = useRef<Set<string>>(new Set());
 
   const convMessages = messages[conversation.id] || [];
 
@@ -47,8 +48,38 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   }, [conversation.id, subscribeConversationMessages, markConversationAsRead]);
 
   useEffect(() => {
+    acknowledgedIncomingMessageIdsRef.current.clear();
+  }, [conversation.id]);
+
+  const acknowledgeVisibleIncomingMessages = useCallback(() => {
+    if (!currentUser) return;
+
+    const incomingMessages = convMessages.filter(
+      (message) => message.senderId !== currentUser.id && message.type !== 'SYSTEM',
+    );
+
+    const hasUnacknowledgedIncomingMessage = incomingMessages.some(
+      (message) => !acknowledgedIncomingMessageIdsRef.current.has(message.id),
+    );
+
+    if (!hasUnacknowledgedIncomingMessage) return;
+
+    incomingMessages.forEach((message) => {
+      acknowledgedIncomingMessageIdsRef.current.add(message.id);
+    });
+
+    void markConversationAsRead(conversation.id).catch((error) => {
+      incomingMessages.forEach((message) => {
+        acknowledgedIncomingMessageIdsRef.current.delete(message.id);
+      });
+      console.warn('[CONEXA MESSAGING] No se pudo confirmar la lectura de mensajes:', error);
+    });
+  }, [conversation.id, convMessages, currentUser, markConversationAsRead]);
+
+  useEffect(() => {
+    acknowledgeVisibleIncomingMessages();
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [convMessages]);
+  }, [convMessages, acknowledgeVisibleIncomingMessages]);
 
   const handleSendText = async (e: React.FormEvent) => {
     e.preventDefault();
