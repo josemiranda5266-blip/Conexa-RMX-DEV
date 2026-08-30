@@ -1,0 +1,8 @@
+{
+  "name": "CONEXA RMX",
+  "description": "Plataforma de servicios para conectar clientes con profesionales certificados en Argentina con cotizaciones seguras, chat y gestión de trabajos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
