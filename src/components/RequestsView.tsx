@@ -292,7 +292,7 @@ export const RequestsView: React.FC<{
                     Los fondos están retenidos. Cuando el profesional complete el trabajo, podrás verificar el resultado y liberar el pago.
                   </p>
                   
-                  {currentUser.role === 'PROFESSIONAL' && (
+                  {isUserCandidateProfessional(currentUser) && (
                     <button
                       disabled={isProcessing}
                       onClick={() => handleCompleteJob(selectedRequest.id)}

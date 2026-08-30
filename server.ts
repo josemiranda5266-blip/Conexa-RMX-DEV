@@ -191,7 +191,7 @@ app.post('/api/quotes/submit', rateLimiter, async (req: Request, res: Response) 
     if (typeof body.description !== 'string' || body.description.trim().length < 3 || body.description.length > 4000) return res.status(422).json({ success: false, error: 'INVALID_QUOTE_DESCRIPTION' });
 
     const user = dbState.users.find(u => u.id === auth.userId) || { id: auth.userId, name: 'Profesional CONEXA', role: 'PROFESSIONAL', isProfessional: true, hasProfessionalProfile: true };
-    const effectiveProfessional = auth.role === 'PROFESSIONAL' || isUserCandidateProfessional(user);
+    const effectiveProfessional = isUserCandidateProfessional(user);
     if (!effectiveProfessional) return res.status(403).json({ success: false, error: 'PROFESSIONAL_ROLE_REQUIRED' });
 
     const request = dbState.requests.find(r => r.id === body.requestId);
