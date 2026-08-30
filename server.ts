@@ -130,7 +130,7 @@ app.get('/api/audit/metrics', (req: Request, res: Response) => {
     totalRequests: dbState.requests.length,
     totalQuotes: dbState.quotes.length,
     totalTransactions: dbState.transactions.length,
-    activeProfessionals: dbState.users.filter(u => u.isProfessional).length,
+    activeProfessionals: dbState.users.filter(u => u.isProfessional === true || u.hasProfessionalProfile === true || u.role === 'PROFESSIONAL').length,
     securityChecks: {
       escrowProtocol: 'ENFORCED',
       resourceAuth: 'ACTIVE',
@@ -189,8 +189,8 @@ app.post('/api/quotes/submit', rateLimiter, async (req: Request, res: Response) 
     if (!Number.isFinite(priceArs) || priceArs <= 0 || priceArs > 1000000000) return res.status(422).json({ success: false, error: 'INVALID_QUOTE_AMOUNT' });
     if (typeof body.description !== 'string' || body.description.trim().length < 3 || body.description.length > 4000) return res.status(422).json({ success: false, error: 'INVALID_QUOTE_DESCRIPTION' });
 
-    const user = dbState.users.find(u => u.id === auth.userId) || { id: auth.userId, name: 'Profesional CONEXA', role: 'PROFESSIONAL', isProfessional: true };
-    const effectiveProfessional = auth.role === 'PROFESSIONAL' || user.role === 'PROFESSIONAL' || user.isProfessional === true;
+    const user = dbState.users.find(u => u.id === auth.userId) || { id: auth.userId, name: 'Profesional CONEXA', role: 'PROFESSIONAL', isProfessional: true, hasProfessionalProfile: true };
+    const effectiveProfessional = auth.role === 'PROFESSIONAL' || user.role === 'PROFESSIONAL' || user.isProfessional === true || user.hasProfessionalProfile === true;
     if (!effectiveProfessional) return res.status(403).json({ success: false, error: 'PROFESSIONAL_ROLE_REQUIRED' });
 
     const request = dbState.requests.find(r => r.id === body.requestId);

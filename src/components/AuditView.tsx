@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { isUserCandidateProfessional } from '../domain/professionalEligibility';
 import {
   Activity,
   ShieldCheck,
@@ -29,7 +30,7 @@ export const AuditView: React.FC = () => {
         totalRequests: requests.length,
         totalQuotes: quotes.length,
         totalTransactions: transactions.length,
-        activeProfessionals: users.filter(u => u.isProfessional).length,
+        activeProfessionals: users.filter(isUserCandidateProfessional).length,
         securityChecks: {
           escrowProtocol: 'ENFORCED',
           resourceAuth: 'ACTIVE',
@@ -106,7 +107,7 @@ export const AuditView: React.FC = () => {
             <span>Profesionales Validados</span>
             <CheckCircle2 className="w-4 h-4 text-amber-600" />
           </div>
-          <div className="text-lg font-extrabold text-slate-900">{users.filter(u => u.isProfessional).length} Activos</div>
+          <div className="text-lg font-extrabold text-slate-900">{users.filter(isUserCandidateProfessional).length} Activos</div>
           <p className="text-[11px] text-slate-400">Matrículas e identidades constatadas</p>
         </div>
 

@@ -9,6 +9,7 @@ export interface User {
   phone?: string;
   zone?: string;
   isProfessional?: boolean;
+  hasProfessionalProfile?: boolean;
   isProfessionalVerified?: boolean;
   matricula?: string;
   rating?: number;

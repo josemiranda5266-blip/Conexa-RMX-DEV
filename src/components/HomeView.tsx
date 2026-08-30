@@ -21,6 +21,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { CategoryInfo } from '../types';
+import { isUserCandidateProfessional } from '../domain/professionalEligibility';
 
 const ICON_MAP: Record<string, React.ReactNode> = {
   Zap: <Zap className="w-6 h-6 text-amber-500" />,
@@ -41,7 +42,7 @@ export const HomeView: React.FC<{
   const { categories, requests, users, currentUser, setActiveView, setSelectedRequestId } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
 
-  const verifiedPros = users.filter(u => u.isProfessional);
+  const verifiedPros = users.filter(isUserCandidateProfessional);
   const openRequests = requests.filter(r => r.status === 'PENDING' || r.status === 'QUOTES_RECEIVED').slice(0, 4);
 
   return (
@@ -223,7 +224,7 @@ export const HomeView: React.FC<{
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {currentUser.role === 'PROFESSIONAL' ? (
+                    {isUserCandidateProfessional(currentUser) ? (
                       <button
                         onClick={() => onOpenSubmitQuote(req.id)}
                         className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition-colors cursor-pointer"

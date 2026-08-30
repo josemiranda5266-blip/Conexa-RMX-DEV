@@ -16,6 +16,7 @@ import {
   Mail
 } from 'lucide-react';
 import { User } from '../types';
+import { isUserCandidateProfessional } from '../domain/professionalEligibility';
 
 export const ProfessionalsView: React.FC<{
   onOpenNewRequest: () => void;
@@ -27,7 +28,7 @@ export const ProfessionalsView: React.FC<{
   const [onlyVerified, setOnlyVerified] = useState(false);
   const [selectedPro, setSelectedPro] = useState<User | null>(null);
 
-  const pros = users.filter(u => u.isProfessional);
+  const pros = users.filter(isUserCandidateProfessional);
 
   const filteredPros = pros.filter(pro => {
     if (onlyVerified && !pro.isProfessionalVerified) return false;

@@ -18,6 +18,7 @@ import {
   Send
 } from 'lucide-react';
 import { ServiceRequest, Quote, RequestStatus } from '../types';
+import { isUserCandidateProfessional } from '../domain/professionalEligibility';
 
 export const RequestsView: React.FC<{
   onOpenNewRequest: () => void;
@@ -334,7 +335,7 @@ export const RequestsView: React.FC<{
                     Cotizaciones Recibidas ({requestQuotes.length})
                   </h3>
 
-                  {currentUser.role === 'PROFESSIONAL' && selectedRequest.status === 'PENDING' || selectedRequest.status === 'QUOTES_RECEIVED' ? (
+                  {isUserCandidateProfessional(currentUser) && (selectedRequest.status === 'PENDING' || selectedRequest.status === 'QUOTES_RECEIVED') ? (
                     <button
                       onClick={() => onOpenSubmitQuote(selectedRequest.id)}
                       className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
@@ -347,7 +348,7 @@ export const RequestsView: React.FC<{
                 {requestQuotes.length === 0 ? (
                   <div className="p-6 rounded-xl border border-dashed border-slate-300 text-center space-y-2">
                     <p className="text-xs text-slate-500">Aún no hay cotizaciones para esta solicitud.</p>
-                    {currentUser.role === 'PROFESSIONAL' && (
+                    {isUserCandidateProfessional(currentUser) && (
                       <button
                         onClick={() => onOpenSubmitQuote(selectedRequest.id)}
                         className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 cursor-pointer"
