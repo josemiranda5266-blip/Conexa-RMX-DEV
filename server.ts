@@ -3,6 +3,7 @@ import cors from 'cors';
 import path from 'path';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
+import { isUserCandidateProfessional } from './src/domain/professionalEligibility';
 
 const app = express();
 const PORT = 3000;
@@ -103,7 +104,7 @@ const rateLimiter = (req: Request, res: Response, next: NextFunction) => {
 const verifyAuthToken = async (req: Request) => {
   const authHeader = req.headers.authorization;
   const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
-  const callerId = (req.body && req.body.professionalId) || (req.body && req.body.userId) || 'user-pro-1';
+  const callerId = (req.body && req.body.userId) || 'user-pro-1';
   const foundUser = dbState.users.find(u => u.id === callerId) || dbState.users[1];
 
   return {
@@ -130,7 +131,7 @@ app.get('/api/audit/metrics', (req: Request, res: Response) => {
     totalRequests: dbState.requests.length,
     totalQuotes: dbState.quotes.length,
     totalTransactions: dbState.transactions.length,
-    activeProfessionals: dbState.users.filter(u => u.isProfessional === true || u.hasProfessionalProfile === true || u.role === 'PROFESSIONAL').length,
+    activeProfessionals: dbState.users.filter(isUserCandidateProfessional).length,
     securityChecks: {
       escrowProtocol: 'ENFORCED',
       resourceAuth: 'ACTIVE',
@@ -190,7 +191,7 @@ app.post('/api/quotes/submit', rateLimiter, async (req: Request, res: Response) 
     if (typeof body.description !== 'string' || body.description.trim().length < 3 || body.description.length > 4000) return res.status(422).json({ success: false, error: 'INVALID_QUOTE_DESCRIPTION' });
 
     const user = dbState.users.find(u => u.id === auth.userId) || { id: auth.userId, name: 'Profesional CONEXA', role: 'PROFESSIONAL', isProfessional: true, hasProfessionalProfile: true };
-    const effectiveProfessional = auth.role === 'PROFESSIONAL' || user.role === 'PROFESSIONAL' || user.isProfessional === true || user.hasProfessionalProfile === true;
+    const effectiveProfessional = auth.role === 'PROFESSIONAL' || isUserCandidateProfessional(user);
     if (!effectiveProfessional) return res.status(403).json({ success: false, error: 'PROFESSIONAL_ROLE_REQUIRED' });
 
     const request = dbState.requests.find(r => r.id === body.requestId);
