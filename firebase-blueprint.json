@@ -1,0 +1,142 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with separated public identity and confidential phone/address information.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "format": "email" },
+        "avatar": { "type": "string" },
+        "role": { "type": "string", "enum": ["USER", "PROFESSIONAL", "MODERATOR", "ADMIN", "SUPER_ADMIN"] },
+        "joinedDate": { "type": "string" },
+        "isIdentityVerified": { "type": "boolean" },
+        "rating": { "type": "number" },
+        "reviewCount": { "type": "integer" },
+        "jobsCompleted": { "type": "integer" },
+        "trustScore": { "type": "integer" }
+      },
+      "required": ["id", "name", "email", "role"]
+    },
+    "PrivateUserInfo": {
+      "title": "PrivateUserInfo",
+      "description": "Confidential phone number, exact address, and official identity documents.",
+      "type": "object",
+      "properties": {
+        "phonePrivate": { "type": "string", "maxLength": 30 },
+        "exactAddressPrivate": { "type": "string", "maxLength": 200 },
+        "identityDocUrl": { "type": "string" },
+        "verificationDocUrl": { "type": "string" }
+      }
+    },
+    "ServiceRequest": {
+      "title": "ServiceRequest",
+      "description": "Published job request by client without exact public location.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "clientId": { "type": "string" },
+        "title": { "type": "string", "maxLength": 150 },
+        "category": { "type": "string" },
+        "professionName": { "type": "string" },
+        "description": { "type": "string", "maxLength": 2000 },
+        "approxLocation": { "type": "string" },
+        "urgency": { "type": "string", "enum": ["NORMAL", "ALTA", "URGENTE"] },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "clientId", "title", "description", "urgency", "status"]
+    },
+    "Quote": {
+      "title": "Quote",
+      "description": "Professional budget response to a service request.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "requestId": { "type": "string" },
+        "professionalId": { "type": "string" },
+        "priceArs": { "type": "number" },
+        "description": { "type": "string", "maxLength": 1000 },
+        "estimatedTime": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "ACCEPTED", "REJECTED", "MODIFICATION_REQUESTED"] }
+      },
+      "required": ["id", "requestId", "professionalId", "priceArs", "status"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Private encrypted chat message between client and professional.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "conversationId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "content": { "type": "string", "maxLength": 1000 },
+        "type": { "type": "string", "enum": ["TEXT", "IMAGE", "VOICE", "SYSTEM", "SHARED_PHONE", "SHARED_ADDRESS", "QUOTE_PROPOSAL"] }
+      },
+      "required": ["id", "conversationId", "senderId", "content", "type"]
+    },
+    "UserReport": {
+      "title": "UserReport",
+      "description": "Platform safety report filed against fraudulent or abusive behavior.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "reporterId": { "type": "string" },
+        "reportedUserId": { "type": "string" },
+        "reason": { "type": "string", "enum": ["SPAM", "ESTAFA", "ACOSO", "PERFIL_FALSO", "SUPLANTACION", "INAPROPIADO", "OTRO"] },
+        "description": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["PENDING", "REVIEWED", "DISMISSED", "ACTION_TAKEN"] }
+      },
+      "required": ["id", "reporterId", "reportedUserId", "reason", "description", "status"]
+    },
+    "RadarOpportunity": {
+      "title": "RadarOpportunity",
+      "description": "Public or authorized demand opportunity detected and classified by CONEXA RADAR.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "source": { "type": "string" },
+        "category": { "type": "string" },
+        "subcategory": { "type": "string" },
+        "description": { "type": "string", "maxLength": 1000 },
+        "city": { "type": "string" },
+        "province": { "type": "string" },
+        "urgency": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "EMERGENCY"] },
+        "intentScore": { "type": "integer" },
+        "confidenceScore": { "type": "integer" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "source", "category", "description", "city", "intentScore", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Public user profile."
+    },
+    "/users/{userId}/private/info": {
+      "schema": { "$ref": "#/entities/PrivateUserInfo" },
+      "description": "Confidential user PII accessible ONLY by the owner or system admin."
+    },
+    "/service_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/ServiceRequest" },
+      "description": "Public service requests."
+    },
+    "/quotes/{quoteId}": {
+      "schema": { "$ref": "#/entities/Quote" },
+      "description": "Service quote proposals."
+    },
+    "/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Chat messages."
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/UserReport" },
+      "description": "Moderation reports."
+    },
+    "/radar_opportunities/{opportunityId}": {
+      "schema": { "$ref": "#/entities/RadarOpportunity" },
+      "description": "Demand opportunities managed by CONEXA RADAR."
+    }
+  }
+}

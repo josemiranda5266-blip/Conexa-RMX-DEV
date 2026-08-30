@@ -1,58 +1,54 @@
-# AUDITORÍA TÉCNICA Y DE SEGURIDAD — CONEXA
+# Auditoría CONEXA — 2026-08-29
 
-**Fecha de ejecución:** 29 de Agosto de 2026  
-**Proyecto:** CONEXA RMX (`Conexa-RMX-DEV`)  
-**Rama auditada:** `integration/conexa-unified`  
-**Auditor:** Agente Antigravity (Google DeepMind Team)  
-**Estado General:** **100% VERIFICADO Y PROBADO (PRODUCTION-READY)**  
+## Alcance
+Auditoría inicial de la rama de consolidación `integration/conexa-unified` de `Conexa-RMX-DEV`, con foco en identificar la fuente real de desarrollo, estado de consolidación, seguridad y próximos puntos de corrección.
 
----
+## Estado de consolidación
 
-## 1. Resumen Ejecutivo
+- Rama auditada: `integration/conexa-unified`
+- Commit observado al inicio de la auditoría: `a97ac5781118ffbe6a04be13703fa8c8ea744d61`
+- Commit observado: 29/08/2026 06:28 UTC.
+- La rama está documentada como integración de `Conxa.rmk` y `Conexa-RMX-DEV`.
+- El plan de consolidación establece que `main` de producción no debe modificarse durante esta etapa.
 
-Se ha llevado a cabo la auditoría integral de código, seguridad, contratos de datos y **ejecución de pruebas de funcionalidad completa** para la plataforma CONEXA (`integration/conexa-unified`). 
+## Evidencia funcional y de seguridad existente
 
-Todas las pruebas funcionales del backend autoritativo, autenticación, control de roles (RBAC), transacciones de base de datos y reglas de Firestore han sido ejecutadas exitosamente sin ningún fallo (**11/11 Pruebas Pasadas**).
+La rama ya contiene trabajo de consolidación comercial y de seguridad, incluyendo:
 
----
+- modelo `Transaction` y creación backend de transacciones;
+- comisión calculada en backend;
+- bloqueo de escrituras directas de transacciones desde cliente;
+- restricciones para `invite_codes` y `beta_config`;
+- autenticación Firebase para endpoints Gemini;
+- eliminación de secretos fallback hardcodeados en webhook Meta;
+- OAuth de Mercado Pago;
+- tokens de Mercado Pago cifrados con AES-256-GCM y no expuestos al navegador;
+- Checkout Pro y webhook server-side;
+- comprobación server-side del estado de pago;
+- protección contra crear una contratación pagable si el profesional no tiene Mercado Pago conectado;
+- corrección reciente de transiciones obsoletas/stale en webhooks de pagos.
 
-## 2. Alcance de la Auditoría y Pruebas
+## Pendientes P0/P1 identificados por el plan unificado
 
-1. **Servidor Backend Express (`server.ts` & `scripts/harden-unified.mjs`):**
-   - Endpoint `/api/quotes/submit`
-   - Endpoint `/api/jobs/complete`
-   - Middleware de autenticación `verifyAuthToken` y limitación de tasa `rateLimiter`.
-2. **Modelo de Datos y Tipos (`src/types.ts` & `src/context/AppContext.tsx`):**
-   - Interfaz `Quote` con `clientId` opcional y contrato de respuesta HTTP.
-3. **Reglas de Seguridad y Firestore (`firestore.rules` & `firebase.json`):**
-   - Restricción de escritura directa a nivel de cliente (`allow write: if false`) para `quotes` y `transactions`.
-4. **Suite de Pruebas Automatizada (`scripts/test-app-functionality.mjs`):**
-   - Verificación de 11 escenarios de uso crítico.
+1. Implementar operación autoritativa `startJob`.
+2. Corregir `completeJob` para exigir `IN_PROGRESS -> COMPLETED` y separar elegibilidad de review.
+3. Mover creación de reviews y actualización de agregados profesionales a transacción backend.
+4. Restringir updates de solicitudes mediante whitelist.
+5. Mantener transacciones protegidas contra escrituras directas del cliente.
+6. Validar autoría de mensajes contra membresía de la conversación.
+7. Proteger aprobaciones de verificación y mutaciones administrativas detrás de autorización/auditoría backend.
+8. Revisar permisos de lectura de `beta_config` e `invite_codes`.
+9. Verificar ciclo completo de custom claims antes de producción.
+10. Incorporar contexto de tenant/negocio de forma consistente antes de SaaS multi-tenant.
 
----
+## Criterio de producción
 
-## 3. Matriz de Resultados de Pruebas Funcionales
+No declarar producción lista hasta verificar: TypeScript/build, tests del flujo request -> quote -> accept -> pay -> start -> complete -> review, rechazo server-side de transiciones inválidas, reglas Firestore, ownership por recurso, imposibilidad de escalar privilegios mediante headers controlados por usuario, webhooks idempotentes y ausencia de fixtures/demo en datos reales.
 
-| # | Funcionalidad / Escenario | Tipo | Resultado |
-| :-: | :--- | :--- | :--- |
-| **1** | Envío de Presupuesto Válido por Profesional | Endpoints & Transacción | **PASÓ (201 Created)** |
-| **2** | Bloqueo de Autocotización por Cliente (`SELF_QUOTE_FORBIDDEN`) | Seguridad RBAC | **PASÓ (403 Forbidden)** |
-| **3** | Rechazo de Usuarios con Rol Cliente (`PROFESSIONAL_ROLE_REQUIRED`) | Autorización RBAC | **PASÓ (403 Forbidden)** |
-| **4** | Validación de Montos Inválidos (`INVALID_QUOTE_AMOUNT`) | Sanitización de Entradas | **PASÓ (422 Unprocessable)** |
-| **5** | Validación de Longitud de Descripción (`INVALID_QUOTE_DESCRIPTION`) | Sanitización de Entradas | **PASÓ (422 Unprocessable)** |
-| **6** | Rechazo de Solicitudes Sin Autenticación (`UNAUTHORIZED`) | Autenticación Auth Token | **PASÓ (401 Unauthorized)** |
-| **7** | Finalización de Trabajo por Profesional Asignado | Transacción & Estado | **PASÓ (200 OK)** |
-| **8** | Bloqueo de Cliente en Endpoint del Profesional (`CLIENT_CANNOT_COMPLETE_JOB`) | Autorización por Recurso | **PASÓ (403 Forbidden)** |
-| **9** | Bloqueo de Profesional No Asignado (`ASSIGNED_PROFESSIONAL_REQUIRED`) | Transacción & Asignación | **PASÓ (403 Forbidden)** |
-| **10**| Sintaxis de Reglas de Seguridad en `firestore.rules` | Reglas Firestore | **PASÓ** |
-| **11**| Configuración de Emuladores e Índices en `firebase.json` | Configuración Firebase | **PASÓ** |
+## Decisión de trabajo
 
----
+A partir de esta auditoría, `integration/conexa-unified` queda como rama de trabajo principal para la consolidación. No se deben hacer correcciones equivalentes en repositorios paralelos sin una razón explícita.
 
-## 4. Estado de Producción
+## Próximo paso
 
-La plataforma CONEXA cuenta con:
-- Cobertura total de pruebas funcionales para los flujos comerciales de cotización y cierre de trabajos.
-- Protección transaccional Firestore de cero colisiones.
-- Garantía de cero credenciales expuestas en repositorio.
-- **Resultado Global: APROBADO PARA PRODUCCIÓN.**
+Continuar con la Fase 2: correcciones de autorización/BOLA/IDOR, privacidad de datos, solicitudes, conversaciones/mensajes, reviews y estados comerciales; después ejecutar la batería de validación antes de avanzar a producción.
