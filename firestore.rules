@@ -41,14 +41,51 @@ service cloud.firestore {
     // Transactions collection
     match /transactions/{transactionId} {
       allow read: if isAuthenticated() && (resource.data.clientId == request.auth.uid || resource.data.professionalId == request.auth.uid);
-      allow create, update: if isAuthenticated();
+      allow create: if isAuthenticated() && (request.resource.data.clientId == request.auth.uid || request.resource.data.professionalId == request.auth.uid);
+      allow update: if isAuthenticated() && (resource.data.clientId == request.auth.uid || resource.data.professionalId == request.auth.uid);
+    }
+
+    // Helper for chat participant verification
+    function isChatParticipant() {
+      return isAuthenticated() && (
+        resource == null ||
+        resource.data.clientId == request.auth.uid ||
+        resource.data.professionalId == request.auth.uid ||
+        (resource.data.participants != null && request.auth.uid in resource.data.participants) ||
+        (resource.data.participantIds != null && resource.data.participantIds.hasAny([request.auth.uid]))
+      );
+    }
+
+    function isChatParticipantForCreate() {
+      return isAuthenticated() && (
+        request.resource.data.clientId == request.auth.uid ||
+        request.resource.data.professionalId == request.auth.uid ||
+        (request.resource.data.participants != null && request.auth.uid in request.resource.data.participants) ||
+        (request.resource.data.participantIds != null && request.resource.data.participantIds.hasAny([request.auth.uid]))
+      );
     }
 
     // Chats collection
     match /chats/{chatId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isChatParticipant();
+      allow create: if isChatParticipantForCreate();
+      allow update: if isChatParticipant();
+      allow delete: if false;
+
       match /messages/{messageId} {
-        allow read, write: if isAuthenticated();
+        allow read: if isAuthenticated() && (
+          get(/databases/$(database)/documents/chats/$(chatId)).data.clientId == request.auth.uid ||
+          get(/databases/$(database)/documents/chats/$(chatId)).data.professionalId == request.auth.uid ||
+          (get(/databases/$(database)/documents/chats/$(chatId)).data.participants != null && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants) ||
+          (get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds != null && get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds.hasAny([request.auth.uid]))
+        );
+        allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid && (
+          get(/databases/$(database)/documents/chats/$(chatId)).data.clientId == request.auth.uid ||
+          get(/databases/$(database)/documents/chats/$(chatId)).data.professionalId == request.auth.uid ||
+          (get(/databases/$(database)/documents/chats/$(chatId)).data.participants != null && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants) ||
+          (get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds != null && get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds.hasAny([request.auth.uid]))
+        );
+        allow update, delete: if false;
       }
     }
   }

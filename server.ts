@@ -2,8 +2,17 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import path from 'path';
 import crypto from 'crypto';
+import admin from 'firebase-admin';
 import { createServer as createViteServer } from 'vite';
 import { isUserCandidateProfessional } from './src/domain/professionalEligibility';
+
+if (!admin.apps.length) {
+  try {
+    admin.initializeApp();
+  } catch (e) {
+    // Admin initialized without explicit credentials
+  }
+}
 
 const app = express();
 const PORT = 3000;
@@ -104,15 +113,43 @@ const rateLimiter = (req: Request, res: Response, next: NextFunction) => {
 const verifyAuthToken = async (req: Request) => {
   const authHeader = req.headers.authorization;
   const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
-  const callerId = (req.body && req.body.userId) || 'user-pro-1';
-  const foundUser = dbState.users.find(u => u.id === callerId) || dbState.users[1];
 
-  return {
-    isAuthenticated: true,
-    userId: foundUser?.id || 'user-pro-1',
-    role: foundUser?.role || 'PROFESSIONAL',
-    token
-  };
+  if (!token) {
+    return { isAuthenticated: false, userId: null, role: null, token: null };
+  }
+
+  // 1. Attempt real Firebase Admin token verification
+  try {
+    if (admin.apps.length) {
+      const decodedToken = await admin.auth().verifyIdToken(token);
+      if (decodedToken && decodedToken.uid) {
+        const foundUser = dbState.users.find(u => u.id === decodedToken.uid);
+        return {
+          isAuthenticated: true,
+          userId: decodedToken.uid,
+          role: foundUser?.role || 'CLIENT',
+          token
+        };
+      }
+    }
+  } catch (err) {
+    // If Firebase Admin fails or is unconfigured, proceed to development token check if enabled
+  }
+
+  // 2. Controlled Development / Demo mode token check (e.g. Bearer demo-user-pro-1)
+  if (process.env.NODE_ENV !== 'production') {
+    const knownUser = dbState.users.find(u => u.id === token || `user-${token}` === u.id);
+    if (knownUser) {
+      return {
+        isAuthenticated: true,
+        userId: knownUser.id,
+        role: knownUser.role,
+        token
+      };
+    }
+  }
+
+  return { isAuthenticated: false, userId: null, role: null, token: null };
 };
 
 // API Health Check
