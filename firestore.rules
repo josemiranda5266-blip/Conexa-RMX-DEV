@@ -1,286 +1,112 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Default Deny All
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Helper functions
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
-    }
-
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
     function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.role == 'ADMIN' ||
-        request.auth.token.role == 'SUPER_ADMIN'
-      );
+      return isSignedIn() && (request.auth.token.role == 'ADMIN' || request.auth.token.role == 'SUPER_ADMIN');
     }
 
-    // Public user profiles exclude private contact and verification-document fields.
     match /users/{userId} {
       function hasNoPrivateProfileFields() {
-        return !request.resource.data.keys().hasAny([
-          'phonePrivate',
-          'identityDocUrl',
-          'verificationDocUrl'
-        ])
-          && (!request.resource.data.keys().hasAny(['location'])
-            || !request.resource.data.location.keys().hasAny(['exactAddressPrivate']));
+        return !request.resource.data.keys().hasAny(['phonePrivate', 'identityDocUrl', 'verificationDocUrl'])
+          && (!request.resource.data.keys().hasAny(['location']) || !request.resource.data.location.keys().hasAny(['exactAddressPrivate']));
       }
       allow read: if isSignedIn();
       allow create: if isOwner(userId)
         && hasNoPrivateProfileFields()
         && (!request.resource.data.keys().hasAny(['role']) || request.resource.data.role == 'USER' || request.resource.data.role == 'PROFESSIONAL')
         && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode != 'ADMIN');
-      
-      // Prevent role & privilege tampering on update
-      allow update: if isAdmin() || (
-        isOwner(userId)
+      allow update: if isAdmin() || (isOwner(userId)
         && request.resource.data.role == resource.data.role
         && hasNoPrivateProfileFields()
         && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode != 'ADMIN')
         && (!resource.data.keys().hasAny(['isIdentityVerified']) || request.resource.data.isIdentityVerified == resource.data.isIdentityVerified)
         && (!resource.data.keys().hasAny(['isProfessionalVerified']) || request.resource.data.isProfessionalVerified == resource.data.isProfessionalVerified)
-      );
+        && (!resource.data.keys().hasAny(['hasProfessionalProfile']) || request.resource.data.hasProfessionalProfile == resource.data.hasProfessionalProfile));
       allow delete: if isAdmin();
-
-      // Confidential Private Info (Phone, Exact Address, ID docs) - Restricted strictly to owner or admin
-      match /private/info {
-        allow read, write: if isOwner(userId) || isAdmin();
-      }
+      match /private/info { allow read, write: if isOwner(userId) || isAdmin(); }
     }
 
-    // Service Requests - client-owned, assigned, explicitly targeted, or open-market discovery.
     match /service_requests/{requestId} {
-      function isOpenDiscoveryRequest() {
-        return resource.data.discoveryMode == 'OPEN';
-      }
-
-      function isTargetedProfessional() {
-        return resource.data.biddingProfessionalIds is list
-          && request.auth.uid in resource.data.biddingProfessionalIds;
-      }
-
-      allow read: if isSignedIn() && (
-        resource.data.clientId == request.auth.uid ||
-        (resource.data.assignedProfessionalId != null && resource.data.assignedProfessionalId == request.auth.uid) ||
-        isTargetedProfessional() ||
-        isOpenDiscoveryRequest() ||
-        isAdmin()
-      );
-
-      allow create: if isSignedIn()
-        && request.resource.data.clientId == request.auth.uid
-        && request.resource.data.discoveryMode == 'OPEN'
-        && !request.resource.data.keys().hasAny([
-          'assignedProfessionalId',
-          'biddingProfessionalIds'
-        ]);
-
-      allow update: if isSignedIn() && (
-        (
-          resource.data.clientId == request.auth.uid
-          && request.resource.data.clientId == resource.data.clientId
-          && request.resource.data.discoveryMode == resource.data.discoveryMode
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-            'status',
-            'assignedProfessionalId',
-            'biddingProfessionalIds',
-            'discoveryMode'
-          ])
-        )
-        || isAdmin()
-      );
-
-      allow delete: if isSignedIn() && (
-        resource.data.clientId == request.auth.uid || isAdmin()
-      );
+      function isOpenDiscoveryRequest() { return resource.data.discoveryMode == 'OPEN'; }
+      function isTargetedProfessional() { return resource.data.biddingProfessionalIds is list && request.auth.uid in resource.data.biddingProfessionalIds; }
+      allow read: if isSignedIn() && (resource.data.clientId == request.auth.uid || (resource.data.assignedProfessionalId != null && resource.data.assignedProfessionalId == request.auth.uid) || isTargetedProfessional() || isOpenDiscoveryRequest() || isAdmin());
+      allow create: if false;
+      allow update: if isAdmin() || (isSignedIn() && resource.data.clientId == request.auth.uid && request.resource.data.clientId == resource.data.clientId && request.resource.data.discoveryMode == resource.data.discoveryMode && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status','assignedProfessionalId','biddingProfessionalIds','discoveryMode']));
+      allow delete: if isSignedIn() && (resource.data.clientId == request.auth.uid || isAdmin());
     }
 
-    // Quotes - Confidential between Professional, Client and Admin
     match /quotes/{quoteId} {
-      allow read: if isSignedIn() && (
-        resource.data.professionalId == request.auth.uid || 
-        resource.data.clientId == request.auth.uid || 
-        isAdmin()
-      );
-      // Quote creation is performed only by the authenticated backend endpoint.
+      allow read: if isSignedIn() && (resource.data.professionalId == request.auth.uid || resource.data.clientId == request.auth.uid || isAdmin());
       allow create: if false;
-      // Client acceptance is performed by the authenticated backend transaction endpoint.
-      // Professionals may only modify their own quote before acceptance.
-      allow update: if isAdmin() || (
-        isSignedIn() && resource.data.professionalId == request.auth.uid
-        && resource.data.status == 'PENDING'
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'description', 'materialsIncluded', 'estimatedTime', 'availableStartDate',
-          'warrantyInfo', 'termsAndConditions'
-        ])
-      );
+      allow update: if isAdmin() || (isSignedIn() && resource.data.professionalId == request.auth.uid && resource.data.status == 'PENDING' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['description','materialsIncluded','estimatedTime','availableStartDate','warrantyInfo','termsAndConditions']));
       allow delete: if isAdmin();
     }
 
-    // Mercado Pago connection metadata. OAuth tokens are backend-only and never exposed via Firestore.
     match /mercadopago_connections/{userId} {
       allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
       allow create, update, delete: if false;
     }
 
-    // Commercial ledger. Transactions are created and mutated only by the trusted backend.
     match /transactions/{transactionId} {
-      allow read: if isSignedIn() && (
-        resource.data.clientId == request.auth.uid ||
-        resource.data.professionalId == request.auth.uid ||
-        isAdmin()
-      );
+      allow read: if isSignedIn() && (resource.data.clientId == request.auth.uid || resource.data.professionalId == request.auth.uid || isAdmin());
       allow create, update, delete: if isAdmin();
     }
 
-    // Conversations & Messages - Strictly between participants
     match /conversations/{conversationId} {
-      function isConversationParticipant() {
-        return isSignedIn() && request.auth.uid in resource.data.participantIds;
-      }
-
+      function isConversationParticipant() { return isSignedIn() && request.auth.uid in resource.data.participantIds; }
       function createsValidConversation() {
-        return request.resource.data.participantIds is list
-          && request.resource.data.participantIds.size() == 2
+        return request.resource.data.participantIds is list && request.resource.data.participantIds.size() == 2
           && request.resource.data.participantIds[0] != request.resource.data.participantIds[1]
           && request.auth.uid in request.resource.data.participantIds
           && request.resource.data.unreadCountByUser.keys().hasAll(request.resource.data.participantIds)
           && request.resource.data.privacyByUser.keys().hasAll(request.resource.data.participantIds);
       }
-
-      function participantOtherThan(userId) {
-        return resource.data.participantIds[0] == userId
-          ? resource.data.participantIds[1]
-          : resource.data.participantIds[0];
-      }
-
+      function participantOtherThan(userId) { return resource.data.participantIds[0] == userId ? resource.data.participantIds[1] : resource.data.participantIds[0]; }
       function updatesOnlyOwnReadState() {
-        return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'unreadCountByUser',
-            'updatedAt'
-          ])
-          && request.resource.data.unreadCountByUser.diff(resource.data.unreadCountByUser)
-            .affectedKeys().hasOnly([request.auth.uid])
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['unreadCountByUser','updatedAt'])
+          && request.resource.data.unreadCountByUser.diff(resource.data.unreadCountByUser).affectedKeys().hasOnly([request.auth.uid])
           && request.resource.data.unreadCountByUser[request.auth.uid] == 0;
       }
-
       function updatesOnlyOwnPrivacy() {
-        return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'privacyByUser',
-            'updatedAt'
-          ])
-          && request.resource.data.privacyByUser.diff(resource.data.privacyByUser)
-            .affectedKeys().hasOnly([request.auth.uid]);
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['privacyByUser','updatedAt'])
+          && request.resource.data.privacyByUser.diff(resource.data.privacyByUser).affectedKeys().hasOnly([request.auth.uid]);
       }
-
       function updatesConversationFromValidMessage() {
         let otherUserId = participantOtherThan(request.auth.uid);
-        let message = getAfter(
-          /databases/$(database)/documents/conversations/$(conversationId)/messages/$(request.resource.data.lastMessageId)
-        );
-
-        return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'lastMessageId',
-            'lastMessagePreview',
-            'lastMessageAt',
-            'unreadCountByUser',
-            'updatedAt'
-          ])
-          && request.resource.data.unreadCountByUser.diff(resource.data.unreadCountByUser)
-            .affectedKeys().hasOnly([request.auth.uid, otherUserId])
+        let message = getAfter(/databases/$(database)/documents/conversations/$(conversationId)/messages/$(request.resource.data.lastMessageId));
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessageId','lastMessagePreview','lastMessageAt','unreadCountByUser','updatedAt'])
+          && request.resource.data.unreadCountByUser.diff(resource.data.unreadCountByUser).affectedKeys().hasOnly([request.auth.uid, otherUserId])
           && request.resource.data.unreadCountByUser[request.auth.uid] == 0
-          && request.resource.data.unreadCountByUser[otherUserId]
-            == resource.data.unreadCountByUser[otherUserId] + 1
-          && message.data.senderId == request.auth.uid
-          && message.data.conversationId == conversationId
+          && request.resource.data.unreadCountByUser[otherUserId] == resource.data.unreadCountByUser[otherUserId] + 1
+          && message.data.senderId == request.auth.uid && message.data.conversationId == conversationId
           && request.resource.data.lastMessagePreview == message.data.content;
       }
-
       allow read: if isConversationParticipant() || isAdmin();
       allow create: if createsValidConversation();
-      allow update: if isAdmin() || (isConversationParticipant() && (
-        updatesOnlyOwnReadState()
-        || updatesOnlyOwnPrivacy()
-        || updatesConversationFromValidMessage()
-      ));
+      allow update: if isAdmin() || (isConversationParticipant() && (updatesOnlyOwnReadState() || updatesOnlyOwnPrivacy() || updatesConversationFromValidMessage()));
       allow delete: if false;
-
       match /messages/{messageId} {
         allow read: if isConversationParticipant() || isAdmin();
-
-        // Message writes are performed as part of the same atomic batch that
-        // updates conversation metadata. The authenticated sender must match.
-        allow create: if isConversationParticipant()
-          && request.resource.data.senderId == request.auth.uid
-          && request.resource.data.conversationId == conversationId
-          && request.resource.data.type in [
-            'TEXT', 'IMAGE', 'VOICE', 'SHARED_PHONE', 'SHARED_ADDRESS', 'QUOTE_PROPOSAL'
-          ]
-          && request.resource.data.content is string
-          && request.resource.data.content.size() <= 4000
-          && request.resource.data.keys().hasAll([
-            'conversationId',
-            'senderId',
-            'senderName',
-            'type',
-            'content',
-            'createdAt'
-          ]);
-
+        allow create: if isConversationParticipant() && request.resource.data.senderId == request.auth.uid && request.resource.data.conversationId == conversationId
+          && request.resource.data.type in ['TEXT','IMAGE','VOICE','SHARED_PHONE','SHARED_ADDRESS','QUOTE_PROPOSAL']
+          && request.resource.data.content is string && request.resource.data.content.size() <= 4000
+          && request.resource.data.keys().hasAll(['conversationId','senderId','senderName','type','content','createdAt']);
         allow update, delete: if false;
       }
     }
 
-    // Moderation & Safety Reports
-    match /reports/{reportId} {
-      allow create: if isSignedIn() && request.resource.data.reporterId == request.auth.uid;
-      allow read, update, delete: if isAdmin();
-    }
-
-    // Reviews - Public read, creator write, admin moderation.
-    // Creation remains temporarily compatible with the current client flow until
-    // the authoritative server-side review endpoint is installed.
-    match /reviews/{reviewId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
-      allow update, delete: if isAdmin();
-    }
-
-    // Verification Requests
-    match /verifications/{verifId} {
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow read, update, delete: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
-    }
-
-    // CONEXA RADAR Demand Opportunities - Restricted to Admins
-    match /radar_opportunities/{opportunityId} {
-      allow read, create, update, delete: if isAdmin();
-    }
-
-    // Immutable Admin Audit Logs
-    match /admin_audit_logs/{logId} {
-      allow read, create: if isAdmin();
-      allow update, delete: if false;
-    }
-
-    // Beta System Config & Invite Codes
-    match /beta_config/{configId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
-    }
-
-    match /invite_codes/{codeId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
-    }
+    match /reports/{reportId} { allow create: if isSignedIn() && request.resource.data.reporterId == request.auth.uid; allow read, update, delete: if isAdmin(); }
+    match /reviews/{reviewId} { allow read: if isSignedIn(); allow create: if false; allow update, delete: if isAdmin(); }
+    match /verifications/{verifId} { allow create: if false; allow read, update, delete: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid); }
+    match /radar_opportunities/{opportunityId} { allow read, create, update, delete: if isAdmin(); }
+    match /admin_audit_logs/{logId} { allow read, create: if isAdmin(); allow update, delete: if false; }
+    match /beta_config/{configId} { allow read: if isSignedIn(); allow write: if isAdmin(); }
+    match /invite_codes/{codeId} { allow read, write: if false; }
   }
 }
