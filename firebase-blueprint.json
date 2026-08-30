@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "users": {
+      "title": "Users",
+      "description": "User profiles and credentials",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "isProfessional": { "type": "boolean" },
+        "hasProfessionalProfile": { "type": "boolean" },
+        "avatar": { "type": "string" },
+        "phone": { "type": "string" },
+        "city": { "type": "string" },
+        "category": { "type": "string" },
+        "rating": { "type": "number" },
+        "reviewsCount": { "type": "number" },
+        "completedJobs": { "type": "number" },
+        "bio": { "type": "string" },
+        "hourlyRate": { "type": "number" },
+        "isProfessionalVerified": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "email", "role"]
+    },
+    "service_requests": {
+      "title": "Service Requests",
+      "description": "Job requests submitted by clients",
+      "properties": {
+        "id": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "urgency": { "type": "string" },
+        "location": { "type": "string" },
+        "status": { "type": "string" },
+        "quotesCount": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["clientId", "title", "description", "category", "status"]
+    },
+    "quotes": {
+      "title": "Quotes",
+      "description": "Quotes submitted by professionals for service requests",
+      "properties": {
+        "id": { "type": "string" },
+        "requestId": { "type": "string" },
+        "professionalId": { "type": "string" },
+        "professionalName": { "type": "string" },
+        "priceArs": { "type": "number" },
+        "description": { "type": "string" },
+        "estimatedTime": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["requestId", "professionalId", "priceArs", "status"]
+    },
+    "transactions": {
+      "title": "Transactions",
+      "description": "Escrow transactions for completed services",
+      "properties": {
+        "id": { "type": "string" },
+        "serviceRequestId": { "type": "string" },
+        "quoteId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "professionalId": { "type": "string" },
+        "amountArs": { "type": "number" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["serviceRequestId", "clientId", "professionalId", "amountArs", "status"]
+    }
+  }
+}
