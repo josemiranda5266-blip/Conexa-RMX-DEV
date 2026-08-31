@@ -208,3 +208,26 @@ Cada corrección relevante debe quedar asociada a un commit y actualizar este re
 - Se actualizó la documentación comercial para reflejar esta reconciliación.
 
 Commit de reconciliación comercial: `a542c579239960253d17d518ed271467228bf867`.
+
+
+### Corrección aplicada — Review, reputación y cierre atómico
+
+- Se creó `POST /api/reviews/create` como única autoridad para reseñas de trabajos contratados.
+- El endpoint deriva cliente, profesional y relación comercial desde `ServiceRequest → Transaction → Quote`; el navegador ya no decide esas identidades ni escribe reputación.
+- La operación valida seis calificaciones en rango 1..5, propiedad del request, estado `REVIEW_PENDING`, transacción `SERVICE_COMPLETED` y Quote `ACCEPTED`.
+- Se impide una segunda reseña mediante un ID determinista por `serviceRequestId + clientId` y comprobación transaccional.
+- En una única transacción se crea la Review, se recalculan `rating` y `reviewCount`, se cierra el ServiceRequest y la Transaction pasa a `REVIEW_COMPLETED`.
+- Se eliminó de `AppContext.addReview()` la escritura directa a Firestore y la actualización client-side de rating/reviewCount/jobsCompleted.
+- `jobsCompleted` fue trasladado al momento de completar el trabajo, no al momento de crear una reseña.
+- El estado intermedio correcto después de completar un trabajo pasa a ser `REVIEW_PENDING`; `SERVICE_COMPLETED` queda reservado para la Transaction.
+- `/api/jobs/review-complete` queda deprecado y responde 410 para impedir que una ruta antigua vuelva a cerrar el trabajo sin crear una reseña autoritativa.
+
+Commits funcionales:
+- `fdbb9dee736d49191fd29ddc23daf89ec4f79e90`
+- `3de6308fbb9b124e94c80e85dcee316ca1b1b3dd`
+
+### Flujo actualizado
+
+`IN_PROGRESS → REVIEW_PENDING → CLOSED` para ServiceRequest.
+
+`PAID → SERVICE_COMPLETED → REVIEW_COMPLETED` para Transaction.
