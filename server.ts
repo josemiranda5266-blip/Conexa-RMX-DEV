@@ -1373,8 +1373,12 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
           throw new Error('INVALID_JOB_STATE');
         }
         const completedAt = new Date().toISOString();
+        const professionalRef = firestore.collection('users').doc(auth.userId);
+        const currentProfessionalSnap = await tx.get(professionalRef);
+        if (!currentProfessionalSnap.exists) throw new Error('RESOURCE_NOT_FOUND');
+        const professional = currentProfessionalSnap.data() || {};
         tx.update(requestRef, {
-          status: 'SERVICE_COMPLETED',
+          status: 'REVIEW_PENDING',
           completedAt,
           completedBy: auth.userId
         });
@@ -1382,9 +1386,12 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
           status: 'SERVICE_COMPLETED',
           completedAt
         });
+        tx.update(professionalRef, {
+          jobsCompleted: Number(professional.jobsCompleted || 0) + 1
+        });
       });
 
-      return res.json({ success: true, requestId, status: 'SERVICE_COMPLETED' });
+      return res.json({ success: true, requestId, status: 'REVIEW_PENDING' });
     } catch (err: any) {
       const code = err?.message || 'JOB_COMPLETION_ERROR';
       const map: Record<string, number> = {
@@ -1395,48 +1402,151 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
     }
   });
 
-  app.post("/api/jobs/review-complete", rateLimiter, async (req: Request, res: Response) => {
+  // Review creation and reputation aggregation are authoritative on the backend.
+  // A client may review only its own completed service, exactly once.
+  app.post("/api/reviews/create", rateLimiter, async (req: Request, res: Response) => {
     try {
       const auth = await verifyAuthToken(req);
       if (!auth.isAuthenticated || !auth.userId) {
-        return res.status(401).json({ success: false, error: "Se requiere autenticación válida.", code: "UNAUTHORIZED" });
+        return res.status(401).json({ success: false, code: 'UNAUTHORIZED' });
       }
-      const { serviceRequestId } = req.body || {};
+
+      const {
+        serviceRequestId,
+        comment = '',
+        overallRating,
+        qualityRating,
+        punctualityRating,
+        treatmentRating,
+        priceRating,
+        complianceRating
+      } = req.body || {};
+
       if (!serviceRequestId || typeof serviceRequestId !== 'string') {
-        return res.status(400).json({ success: false, error: "serviceRequestId es obligatorio.", code: "INVALID_REQUEST_ID" });
+        return res.status(400).json({ success: false, code: 'INVALID_REQUEST_ID' });
       }
+
+      const ratingValues = [overallRating, qualityRating, punctualityRating, treatmentRating, priceRating, complianceRating];
+      if (ratingValues.some((value) => typeof value !== 'number' || !Number.isFinite(value) || value < 1 || value > 5)) {
+        return res.status(400).json({ success: false, code: 'INVALID_RATING' });
+      }
+
       const firestore = await getAdminDb();
       const requestRef = firestore.collection('service_requests').doc(serviceRequestId);
+      const reviewRef = firestore.collection('reviews').doc(`review-${serviceRequestId}-${auth.userId}`);
+      const transactionQuery = firestore.collection('transactions')
+        .where('serviceRequestId', '==', serviceRequestId)
+        .limit(5);
+
       const result = await firestore.runTransaction(async (tx: any) => {
-        const requestSnap = await tx.get(requestRef);
+        const [requestSnap, reviewSnap, transactionSnap, clientSnap] = await Promise.all([
+          tx.get(requestRef),
+          tx.get(reviewRef),
+          tx.get(transactionQuery),
+          tx.get(firestore.collection('users').doc(auth.userId))
+        ]);
+
         if (!requestSnap.exists) throw new Error('REQUEST_NOT_FOUND');
+        if (!clientSnap.exists) throw new Error('CLIENT_NOT_FOUND');
+        if (reviewSnap.exists) throw new Error('REVIEW_ALREADY_EXISTS');
+
         const request = requestSnap.data() || {};
         if (request.clientId !== auth.userId) throw new Error('FORBIDDEN');
-        if (request.status !== 'SERVICE_COMPLETED') throw new Error('INVALID_JOB_STATE');
+        if (request.status !== 'REVIEW_PENDING') throw new Error('INVALID_JOB_STATE');
 
-        const transactions = await firestore.collection('transactions')
-          .where('serviceRequestId', '==', serviceRequestId).limit(5).get();
-        const transactionDoc = transactions.docs.find((doc: any) => (doc.data() || {}).status === 'SERVICE_COMPLETED');
+        const transactionDoc = transactionSnap.docs.find((doc: any) => (doc.data() || {}).status === 'SERVICE_COMPLETED');
         if (!transactionDoc) throw new Error('SETTLEMENT_NOT_READY');
-        const quoteId = String((transactionDoc.data() || {}).quoteId || '');
-        if (!quoteId) throw new Error('SETTLEMENT_NOT_READY');
-        const quoteRef = firestore.collection('quotes').doc(quoteId);
-        const quoteSnap = await tx.get(quoteRef);
-        if (!quoteSnap.exists || (quoteSnap.data() || {}).requestId !== serviceRequestId || (quoteSnap.data() || {}).status !== 'ACCEPTED') {
-          throw new Error('WORK_RELATIONSHIP_INVALID');
-        }
 
-        const completedAt = new Date().toISOString();
-        tx.update(requestRef, { status: 'CLOSED', closedAt: completedAt });
-        tx.update(transactionDoc.ref, { status: 'REVIEW_COMPLETED', reviewCompletedAt: completedAt });
-        return { transactionId: transactionDoc.id, completedAt };
+        const transaction = transactionDoc.data() || {};
+        const quoteRef = firestore.collection('quotes').doc(String(transaction.quoteId || ''));
+        const [quoteSnap, professionalSnap] = await Promise.all([
+          tx.get(quoteRef),
+          tx.get(firestore.collection('users').doc(String(transaction.professionalId || '')))
+        ]);
+
+        if (!quoteSnap.exists || !professionalSnap.exists) throw new Error('RESOURCE_NOT_FOUND');
+        const quote = quoteSnap.data() || {};
+        if (
+          quote.requestId !== serviceRequestId ||
+          quote.status !== 'ACCEPTED' ||
+          quote.professionalId !== transaction.professionalId
+        ) throw new Error('WORK_RELATIONSHIP_INVALID');
+
+        const client = clientSnap.data() || {};
+        const professional = professionalSnap.data() || {};
+        const previousCount = Number(professional.reviewCount || 0);
+        const newCount = previousCount + 1;
+        const newRating = Number(
+          ((((Number(professional.rating || 0) * previousCount) + overallRating) / newCount).toFixed(1))
+        );
+        const now = new Date().toISOString();
+
+        const review = {
+          id: reviewRef.id,
+          jobId: serviceRequestId,
+          serviceRequestId,
+          authorId: auth.userId,
+          clientId: auth.userId,
+          clientName: String(client.name || ''),
+          clientAvatar: String(client.avatar || ''),
+          professionalId: String(transaction.professionalId),
+          createdAt: now,
+          comment: String(comment || '').slice(0, 2000),
+          overallRating,
+          qualityRating,
+          punctualityRating,
+          treatmentRating,
+          priceRating,
+          complianceRating,
+          isVerifiedJob: true
+        };
+
+        tx.set(reviewRef, review);
+        tx.update(professionalSnap.ref, {
+          reviewCount: newCount,
+          rating: newRating
+        });
+        tx.update(requestRef, {
+          status: 'CLOSED',
+          closedAt: now
+        });
+        tx.update(transactionDoc.ref, {
+          status: 'REVIEW_COMPLETED',
+          reviewCompletedAt: now
+        });
+
+        return {
+          review,
+          transactionId: transactionDoc.id,
+          completedAt: now
+        };
       });
-      return res.json({ success: true, serviceRequestId, status: 'CLOSED', ...result });
+
+      return res.status(201).json({
+        success: true,
+        serviceRequestId,
+        status: 'CLOSED',
+        ...result
+      });
     } catch (err: any) {
-      const code = err?.message || 'REVIEW_COMPLETION_ERROR';
-      const status = code === 'REQUEST_NOT_FOUND' ? 404 : ['FORBIDDEN'].includes(code) ? 403 : ['INVALID_JOB_STATE','SETTLEMENT_NOT_READY','WORK_RELATIONSHIP_INVALID'].includes(code) ? 409 : 500;
+      const code = err?.message || 'REVIEW_CREATE_ERROR';
+      const status =
+        ['REQUEST_NOT_FOUND', 'CLIENT_NOT_FOUND'].includes(code) ? 404 :
+        ['FORBIDDEN'].includes(code) ? 403 :
+        ['INVALID_REQUEST_ID', 'INVALID_RATING'].includes(code) ? 400 :
+        ['REVIEW_ALREADY_EXISTS', 'INVALID_JOB_STATE', 'SETTLEMENT_NOT_READY', 'WORK_RELATIONSHIP_INVALID'].includes(code) ? 409 :
+        500;
       return res.status(status).json({ success: false, error: code, code });
     }
+  });
+
+  // Backward-compatible close endpoint. It no longer creates or aggregates reviews.
+  app.post("/api/jobs/review-complete", rateLimiter, async (_req: Request, res: Response) => {
+    return res.status(410).json({
+      success: false,
+      code: 'REVIEW_CREATE_ENDPOINT_REQUIRED',
+      error: 'Usá /api/reviews/create para crear la reseña y cerrar el trabajo de forma atómica.'
+    });
   });
 
   // Administrative moderation operations are authoritative on the backend.
