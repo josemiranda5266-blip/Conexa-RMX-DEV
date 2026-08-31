@@ -17,13 +17,13 @@ export type JobAction =
   | 'CLOSE_JOB'
   | 'CANCEL_JOB';
 
-const transitions: Record<JobAction, { from: JobStatus[]; to: JobStatus }> = {
+const transitions: Record<JobAction, { from: readonly JobStatus[]; to: JobStatus }> = {
   SUBMIT_QUOTE: {
     from: ['REQUEST_CREATED', 'QUOTES_RECEIVED'],
     to: 'QUOTES_RECEIVED'
   },
   ACCEPT_QUOTE: {
-    from: ['REQUEST_CREATED', 'QUOTES_RECEIVED'],
+    from: ['QUOTES_RECEIVED'],
     to: 'PROFESSIONAL_SELECTED'
   },
   START_JOB: {
