@@ -25,7 +25,7 @@ export interface EnvValidationResult {
 
 /**
  * Validates the existence and format of all Mercado Pago and system environment variables required by Conexa RMX.
- * 
+ *
  * Required Mercado Pago Variables:
  * - MP_APP_ID: Non-empty string
  * - MP_CLIENT_SECRET: Non-empty string
@@ -34,10 +34,10 @@ export interface EnvValidationResult {
  * - MP_WEBHOOK_SECRET: Non-empty string (used for HMAC-SHA256 webhook signature validation)
  * - APP_URL: Valid HTTP or HTTPS URL string
  * - CONEXA_PLATFORM_FEE_PERCENT: Valid number between 0 and 100
- * 
+ *
  * Required Firebase Admin Variables (At least one):
  * - FIREBASE_SERVICE_ACCOUNT or GOOGLE_APPLICATION_CREDENTIALS
- * 
+ *
  * @param options.throwOnError If true, throws a detailed Error listing all invalid or missing variables.
  */
 export function validateMercadoPagoEnv(options: { throwOnError?: boolean } = {}): EnvValidationResult {
@@ -91,7 +91,12 @@ export function validateMercadoPagoEnv(options: { throwOnError?: boolean } = {})
     errorTypes.MERCADO_PAGO_CONFIG_ERROR = true;
   } else {
     try {
-      const buf = Buffer.from(mpTokenKey, 'base64');
+      const normalized = mpTokenKey.replace(/\s/g, '');
+      const base64Shape = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(normalized);
+      if (!base64Shape) {
+        throw new Error('La cadena no tiene un formato Base64 válido.');
+      }
+      const buf = Buffer.from(normalized, 'base64');
       if (buf.length !== 32) {
         errors.push(`🔴 [MP_TOKEN_ENCRYPTION_KEY]: La clave proporcionada decodifica a ${buf.length} bytes. Debe ser una cadena Base64 válida de exactamente 32 bytes (256 bits para AES-256-GCM).`);
         errorTypes.MERCADO_PAGO_CONFIG_ERROR = true;
@@ -160,11 +165,12 @@ export function validateMercadoPagoEnv(options: { throwOnError?: boolean } = {})
     details.FIREBASE_ADMIN = false;
   } else if (saEnv) {
     try {
-      if (saEnv.startsWith('{')) {
-        JSON.parse(saEnv);
-      } else {
-        const decoded = Buffer.from(saEnv, 'base64').toString('utf8');
-        JSON.parse(decoded);
+      const normalized = saEnv.trim();
+      const parsed = normalized.startsWith('{')
+        ? JSON.parse(normalized)
+        : JSON.parse(Buffer.from(normalized, 'base64').toString('utf8'));
+      if (!parsed || typeof parsed !== 'object' || !parsed.project_id || !parsed.client_email || !parsed.private_key) {
+        throw new Error('La cuenta de servicio no contiene project_id, client_email y private_key requeridos.');
       }
       details.FIREBASE_ADMIN = true;
     } catch (e: any) {
