@@ -1311,70 +1311,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!serviceRequestId) {
       throw new Error('La reseña debe estar asociada a una solicitud de servicio válida.');
     }
-
-    const newRev: Review = {
-      ...reviewData,
-      serviceRequestId,
-      jobId: serviceRequestId,
-      id: `rev-${Date.now()}`,
-      createdAt: new Date().toLocaleDateString('es-AR'),
-      isVerifiedJob: true
-    };
-
-    if (db) {
-      if (!auth?.currentUser) {
-        throw new Error('Debés iniciar sesión para enviar una reseña.');
-      }
-
-      try {
-        await setDoc(doc(db, 'reviews', newRev.id), newRev);
-
-        const proRef = doc(db, 'users', reviewData.professionalId);
-        const proSnap = await getDoc(proRef);
-        if (proSnap.exists()) {
-          const professional = proSnap.data() as UserProfile;
-          const previousCount = professional.reviewCount || 0;
-          const newCount = previousCount + 1;
-          const newRating = Number(
-            ((((professional.rating || 0) * previousCount) + reviewData.overallRating) / newCount).toFixed(1)
-          );
-          await updateDoc(proRef, {
-            reviewCount: newCount,
-            rating: newRating,
-            jobsCompleted: (professional.jobsCompleted || 0) + 1
-          });
-        }
-
-        const token = await auth.currentUser.getIdToken();
-        const reviewResponse = await fetch('/api/jobs/review-complete', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({ serviceRequestId })
-        });
-        const reviewResult = await reviewResponse.json();
-        if (!reviewResponse.ok || !reviewResult.success) {
-          throw new Error(reviewResult.error || reviewResult.code || 'No se pudo cerrar el trabajo después de la reseña.');
-        }
-
-        setTransactions(prev => prev.map(transaction =>
-          transaction.id === reviewResult.transactionId
-            ? {
-                ...transaction,
-                status: 'REVIEW_COMPLETED',
-                reviewCompletedAt: reviewResult.completedAt
-              }
-            : transaction
-        ));
-      } catch (e) {
-        console.warn('[Firestore] Error guardando reseña:', e);
-        throw e;
-      }
+    if (!auth?.currentUser) {
+      throw new Error('Debés iniciar sesión para enviar una reseña.');
     }
 
-    setReviews(prev => [newRev, ...prev]);
+    const token = await auth.currentUser.getIdToken();
+    const response = await fetch('/api/reviews/create', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        serviceRequestId,
+        comment: reviewData.comment,
+        overallRating: reviewData.overallRating,
+        qualityRating: reviewData.qualityRating,
+        punctualityRating: reviewData.punctualityRating,
+        treatmentRating: reviewData.treatmentRating,
+        priceRating: reviewData.priceRating,
+        complianceRating: reviewData.complianceRating
+      })
+    });
+
+    const result = await response.json();
+    if (!response.ok || !result.success || !result.review) {
+      throw new Error(result.error || result.code || 'No se pudo crear la reseña.');
+    }
+
+    const authoritativeReview = result.review as Review;
+    setReviews(prev => [authoritativeReview, ...prev.filter(review => review.id !== authoritativeReview.id)]);
+    setTransactions(prev => prev.map(transaction =>
+      transaction.id === result.transactionId
+        ? {
+            ...transaction,
+            status: 'REVIEW_COMPLETED',
+            reviewCompletedAt: result.completedAt
+          }
+        : transaction
+    ));
   };
 
   const submitVerification = (type: 'IDENTITY' | 'PROFESSIONAL', documentName: string, docUrl: string) => {
