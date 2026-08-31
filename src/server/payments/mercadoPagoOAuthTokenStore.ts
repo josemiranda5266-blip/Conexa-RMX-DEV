@@ -12,11 +12,7 @@ function encryptionKey(): Buffer {
   return key;
 }
 
-export interface EncryptedOAuthToken {
-  ciphertext: string;
-  iv: string;
-  authTag: string;
-}
+export interface EncryptedOAuthToken { ciphertext: string; iv: string; authTag: string; }
 
 export interface MercadoPagoOAuthConnection {
   merchantId: string;
@@ -30,21 +26,16 @@ export interface MercadoPagoOAuthConnection {
 }
 
 export function encryptOAuthToken(token: string): EncryptedOAuthToken {
+  if (!token) throw new Error('OAUTH_TOKEN_EMPTY');
   const iv = crypto.randomBytes(IV_BYTES);
   const cipher = crypto.createCipheriv(ALGORITHM, encryptionKey(), iv);
   const ciphertext = Buffer.concat([cipher.update(token, 'utf8'), cipher.final()]);
-  return {
-    ciphertext: ciphertext.toString('base64'),
-    iv: iv.toString('base64'),
-    authTag: cipher.getAuthTag().subarray(0, TAG_BYTES).toString('base64'),
-  };
+  return { ciphertext: ciphertext.toString('base64'), iv: iv.toString('base64'), authTag: cipher.getAuthTag().subarray(0, TAG_BYTES).toString('base64') };
 }
 
 export function decryptOAuthToken(payload: EncryptedOAuthToken): string {
+  if (!payload?.ciphertext || !payload?.iv || !payload?.authTag) throw new Error('OAUTH_TOKEN_PAYLOAD_INVALID');
   const decipher = crypto.createDecipheriv(ALGORITHM, encryptionKey(), Buffer.from(payload.iv, 'base64'));
   decipher.setAuthTag(Buffer.from(payload.authTag, 'base64'));
-  return Buffer.concat([
-    decipher.update(Buffer.from(payload.ciphertext, 'base64')),
-    decipher.final(),
-  ]).toString('utf8');
+  return Buffer.concat([decipher.update(Buffer.from(payload.ciphertext, 'base64')), decipher.final()]).toString('utf8');
 }
