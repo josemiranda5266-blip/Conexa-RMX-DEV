@@ -16,10 +16,16 @@ service cloud.firestore {
         return !request.resource.data.keys().hasAny(['phonePrivate', 'identityDocUrl', 'verificationDocUrl'])
           && (!request.resource.data.keys().hasAny(['location']) || !request.resource.data.location.keys().hasAny(['exactAddressPrivate']));
       }
+      function hasNoClientManagedTrustFieldsOnCreate() {
+        return (!request.resource.data.keys().hasAny(['isIdentityVerified']) || request.resource.data.isIdentityVerified == false)
+          && (!request.resource.data.keys().hasAny(['isProfessionalVerified']) || request.resource.data.isProfessionalVerified == false)
+          && (!request.resource.data.keys().hasAny(['hasProfessionalProfile']) || request.resource.data.hasProfessionalProfile == false);
+      }
       allow read: if isSignedIn();
       allow create: if isOwner(userId)
         && hasNoPrivateProfileFields()
-        && (!request.resource.data.keys().hasAny(['role']) || request.resource.data.role == 'USER' || request.resource.data.role == 'PROFESSIONAL')
+        && hasNoClientManagedTrustFieldsOnCreate()
+        && (!request.resource.data.keys().hasAny(['role']) || request.resource.data.role == 'USER')
         && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode != 'ADMIN');
       allow update: if isAdmin() || (isOwner(userId)
         && request.resource.data.role == resource.data.role
@@ -38,7 +44,7 @@ service cloud.firestore {
       allow read: if isSignedIn() && (resource.data.clientId == request.auth.uid || (resource.data.assignedProfessionalId != null && resource.data.assignedProfessionalId == request.auth.uid) || isTargetedProfessional() || isOpenDiscoveryRequest() || isAdmin());
       allow create: if false;
       allow update: if isAdmin() || (isSignedIn() && resource.data.clientId == request.auth.uid && request.resource.data.clientId == resource.data.clientId && request.resource.data.discoveryMode == resource.data.discoveryMode && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status','assignedProfessionalId','biddingProfessionalIds','discoveryMode']));
-      allow delete: if isSignedIn() && (resource.data.clientId == request.auth.uid || isAdmin());
+      allow delete: if false;
     }
 
     match /quotes/{quoteId} {
@@ -103,9 +109,9 @@ service cloud.firestore {
 
     match /reports/{reportId} { allow create: if isSignedIn() && request.resource.data.reporterId == request.auth.uid; allow read, update, delete: if isAdmin(); }
     match /reviews/{reviewId} { allow read: if isSignedIn(); allow create: if false; allow update, delete: if isAdmin(); }
-    match /verifications/{verifId} { allow create: if false; allow read, update, delete: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid); }
+    match /verifications/{verifId} { allow create, update, delete: if false; allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid); }
     match /radar_opportunities/{opportunityId} { allow read, create, update, delete: if isAdmin(); }
-    match /admin_audit_logs/{logId} { allow read, create: if isAdmin(); allow update, delete: if false; }
+    match /admin_audit_logs/{logId} { allow read: if isAdmin(); allow create, update, delete: if false; }
     match /beta_config/{configId} { allow read: if isSignedIn(); allow write: if isAdmin(); }
     match /invite_codes/{codeId} { allow read, write: if false; }
   }
