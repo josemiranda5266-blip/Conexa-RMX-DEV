@@ -23,6 +23,17 @@
 
 Pendiente inmediato: revisar la propagación de errores en ServiceRequestForm y continuar con la separación pública/privada de UserProfile y PrivateUserInfo.
 
+
+### UX de creación autoritativa de solicitudes
+
+- Se adaptó ServiceRequestForm al nuevo contrato async de createServiceRequest().
+- El formulario ya no se cierra inmediatamente después de enviar.
+- Mientras el backend procesa la operación se bloquean envíos duplicados y se muestra el estado Publicando.
+- Si el backend rechaza o falla la creación, el formulario permanece abierto y muestra un error recuperable.
+- El cierre del formulario ocurre únicamente después de una respuesta exitosa del backend.
+
+Commit funcional: 3e847cbc841872bbd0802bafdd9ad5043d4c4b04.
+
 ### Pendientes inmediatos
 
 1. Separar definitivamente `UserProfile/LocationData` de `PrivateUserInfo` y migrar referencias a `phonePrivate`/`exactAddressPrivate`.
