@@ -12,68 +12,75 @@
 - Se confirmó que `Quote` mantiene los identificadores y datos comerciales sin incorporar datos privados; `quotes/{quoteId}` debe seguir siendo la fuente canónica.
 - Se confirmó que `conversation.ts` ya dispone de utilidades de membresía (`isConversationParticipant`) y de privacidad de conversación (`phoneShared`, `addressShared`), base sobre la que debe cerrarse la autorización de mensajes.
 
-
 ### Creación autoritativa de ServiceRequest
 
 - Se cerró el hueco principal de persistencia directa del cliente para solicitudes normales: se añadió el endpoint de creación backend correspondiente en server.ts.
-- El backend ahora deriva clientId, clientName y clientAvatar desde la identidad autenticada y el perfil persistido; el navegador no puede imponer identidad, estado comercial ni modo de descubrimiento.
-- El backend valida campos obligatorios, urgencia y presupuesto antes de crear la solicitud con estado inicial REQUEST_CREATED, sourceType DIRECT y discoveryMode OPEN.
-- AppContext.createServiceRequest() dejó de escribir directamente en Firestore y ahora utiliza la API autoritativa con Firebase ID token.
-- Esto alinea la implementación con firestore.rules, donde service_requests mantiene la creación directa del cliente cerrada.
+- El backend deriva `clientId`, `clientName` y `clientAvatar` desde la identidad autenticada y el perfil persistido.
+- Se validan campos obligatorios, urgencia y presupuesto antes de crear la solicitud con estado inicial `REQUEST_CREATED`, `sourceType: DIRECT` y `discoveryMode: OPEN`.
+- `AppContext.createServiceRequest()` dejó de escribir directamente en Firestore y ahora utiliza la API autoritativa con Firebase ID token.
 
-Pendiente inmediato: revisar la propagación de errores en ServiceRequestForm y continuar con la separación pública/privada de UserProfile y PrivateUserInfo.
-
+Commit funcional: `d3522f7e3403e5bfeb13bc5d997c38e4531b7223`.
 
 ### UX de creación autoritativa de solicitudes
 
-- Se adaptó ServiceRequestForm al nuevo contrato async de createServiceRequest().
-- El formulario ya no se cierra inmediatamente después de enviar.
-- Mientras el backend procesa la operación se bloquean envíos duplicados y se muestra el estado Publicando.
-- Si el backend rechaza o falla la creación, el formulario permanece abierto y muestra un error recuperable.
-- El cierre del formulario ocurre únicamente después de una respuesta exitosa del backend.
+- `ServiceRequestForm` se adaptó al contrato async de `createServiceRequest()`.
+- El formulario ya no se cierra antes de recibir confirmación del backend.
+- Se bloquean envíos duplicados durante el procesamiento.
+- Los fallos dejan el formulario abierto y muestran un error recuperable.
 
-Commit funcional: 3e847cbc841872bbd0802bafdd9ad5043d4c4b04.
-
+Commit funcional: `3e847cbc841872bbd0802bafdd9ad5043d4c4b04`.
 
 ### Separación pública/privada: contrato de tipos
 
-- Se eliminó phonePrivate del contrato público UserProfile.
-- Se eliminó exactAddressPrivate de LocationData.
-- Se incorporó PrivateUserInfo como contrato explícito para datos de contacto y domicilio exacto.
+- Se eliminó `phonePrivate` del contrato público `UserProfile`.
+- Se eliminó `exactAddressPrivate` de `LocationData`.
+- Se incorporó `PrivateUserInfo` como contrato explícito para contacto y domicilio exacto.
 - Se documentó que documentos de identidad y verificación no deben formar parte del perfil público.
-- La migración de lectura/escritura existente en AppContext se conserva temporalmente y será revisada como siguiente paso para evitar romper datos ya persistidos.
 
-Commit funcional: caa530ad3ac92f143e41aaa80e0ee68c74190f30.
-
+Commit funcional: `caa530ad3ac92f143e41aaa80e0ee68c74190f30`.
 
 ### Separación pública/privada: runtime y migración legacy
 
-- Se corrigió AppContext para importar deleteField explícitamente y evitar una referencia implícita durante la migración.
-- La carga de /users/{uid} ahora conserva el perfil público separado del documento privado /users/{uid}/private/info.
-- Los campos legacy phonePrivate y location.exactAddressPrivate se migran una vez al documento privado y luego se eliminan del documento público.
-- currentUser vuelve a contener únicamente el contrato UserProfile; los datos privados ya no se reinyectan en el estado público de runtime.
-- Los perfiles nuevos se crean sin teléfono ni domicilio exacto dentro del documento público.
+- `AppContext` importa explícitamente `deleteField`.
+- Los datos legacy `phonePrivate` y `location.exactAddressPrivate` se migran a `/users/{uid}/private/info` y luego se eliminan del documento público.
+- `currentUser` mantiene únicamente el contrato público `UserProfile`.
+- Los perfiles nuevos no contienen teléfono ni domicilio exacto en `/users/{uid}`.
 
-Commit funcional: 1fcda768c7ec435a78f8854ef27d4c4bfa4bd567.
-
+Commit funcional: `1fcda768c7ec435a78f8854ef27d4c4bfa4bd567`.
 
 ### Separación pública/privada: reglas de Firestore
 
-- Se restringió /users/{uid}/private/info a un contrato explícito de campos privados.
-- Los usuarios propietarios pueden crear o actualizar únicamente phonePrivate, exactAddressPrivate y metadatos temporales de actualización/migración.
-- La creación y la actualización se validan por separado para evitar depender de diff(resource.data) cuando el documento todavía no existe.
-- La lectura sigue limitada al propietario o administración autorizada.
+- `/users/{uid}/private/info` quedó restringido a un contrato explícito de campos privados.
+- La creación y actualización se validan por separado.
+- La lectura está limitada al propietario o administración autorizada.
 
-Commits funcionales: c36d02ced76c11e7def4beb23d56d56e6fb00383 y aa172c3b9bbdee7e3c18a7872b43e17cf8bb87b1.
+Commits funcionales: `c36d02ced76c11e7def4beb23d56d56e6fb00383` y `aa172c3b9bbdee7e3c18a7872b43e17cf8bb87b1`.
 
-### Pendientes inmediatos
+### Conversaciones: integridad de participantes
 
-1. Separar definitivamente `UserProfile/LocationData` de `PrivateUserInfo` y migrar referencias a `phonePrivate`/`exactAddressPrivate`.
-2. Corregir el import de `deleteField` en `AppContext`.
-3. Implementar la operación backend autoritativa de creación de `ServiceRequest`.
-4. Cerrar la máquina de estados RADAR y su conversión hacia `ServiceRequest`.
-5. Autorizar mensajes exclusivamente por membresía de conversación.
-6. Continuar con `startJob`, `completeJob`, reviews y whitelist de updates.
+- Se centralizó la validación de conversaciones de exactamente dos participantes distintos.
+- `getOtherParticipantId()` e `isConversationParticipant()` ahora rechazan listas de participantes estructuralmente inválidas antes de considerar la membresía.
+- `createConversationPrivacy()` reutiliza la misma validación de integridad antes de construir el mapa de privacidad.
+- Esto reduce divergencias entre el modelo de conversación, el servicio de mensajería y las reglas de Firestore.
+
+Commit funcional: `4d9c6b4745e96ef3832c823aa34044a68c72cf47`.
+
+### Estado de P0 actualizado
+
+1. Contrato público/privado de usuario: **CERRADO**.
+2. Migración runtime de datos privados legacy: **CERRADO**.
+3. Reglas de `/private/info`: **CERRADO**.
+4. Creación autoritativa de `ServiceRequest`: **CERRADO**.
+5. UX de publicación de `ServiceRequest`: **CERRADO**.
+6. Integridad estructural de conversaciones: **CERRADO**.
+7. Autorización efectiva de lectura de contacto compartido: **EN REVISIÓN**.
+8. Autorización de mensajes y consistencia conversación/mensaje: **PENDIENTE**.
+9. Máquina de estados RADAR → `ServiceRequest`: **PENDIENTE**.
+10. `startJob` / `completeJob` / reviews / whitelist de updates: **PENDIENTE**.
+
+### Próximo bloque
+
+Auditar y cerrar la autorización efectiva de `shared-contact` y, inmediatamente después, la autorización de mensajes. El objetivo es que ningún dato privado pueda salir del backend salvo que el solicitante autenticado sea participante de una conversación válida y el propietario del dato haya otorgado explícitamente el permiso correspondiente.
 
 ## 2026-08-29
 
@@ -85,4 +92,4 @@ Commits funcionales: c36d02ced76c11e7def4beb23d56d56e6fb00383 y aa172c3b9bbdee7e
 
 ## Regla
 
-Cada corrección relevante debe quedar asociada a un commit y, cuando corresponda, actualizar este registro con el resultado de las pruebas y los pendientes restantes.
+Cada corrección relevante debe quedar asociada a un commit y actualizar este registro con el resultado y los pendientes restantes. La verificación funcional completa se realizará al finalizar las correcciones pendientes.
