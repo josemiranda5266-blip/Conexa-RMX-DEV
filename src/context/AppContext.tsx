@@ -1,12 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, updateDoc, collection, getDocs, getDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, collection, getDocs, getDoc, onSnapshot, query, where, deleteField } from 'firebase/firestore';
 import { auth, db, isFirebaseConfigured } from '../lib/firebase';
 import { 
   UserProfile, Category, Profession, ServiceRequest, Quote, 
   Conversation, Message, Review, UserReport, VerificationRequest, 
   NotificationItem, LocationData, InviteCode, FeedbackItem, AnalyticsEvent, BetaConfig,
-  RadarOpportunity, RadarStats, ApprovalMode, OpportunityStatus, Role, Transaction
+  RadarOpportunity, RadarStats, ApprovalMode, OpportunityStatus, Role, Transaction, PrivateUserInfo
 } from '../types';
 import { 
   INITIAL_CATEGORIES, INITIAL_PROFESSIONS, INITIAL_PROFILES, 
@@ -98,7 +98,7 @@ interface AppContextType {
   subscribeConversationMessages: (conversationId: string) => Unsubscribe;
   markConversationAsRead: (conversationId: string) => Promise<void>;
   createConversation: (targetUserId: string) => Promise<string>;
-  createServiceRequest: (req: Omit<ServiceRequest, 'id' | 'clientId' | 'clientName' | 'clientAvatar' | 'createdAt' | 'status' | 'quotesCount'>) => void;
+  createServiceRequest: (req: Omit<ServiceRequest, 'id' | 'clientId' | 'clientName' | 'clientAvatar' | 'createdAt' | 'status' | 'quotesCount'>) => Promise<ServiceRequest>;
   submitQuote: (quote: Omit<Quote, 'id' | 'createdAt' | 'status'>) => void;
   acceptQuote: (quoteId: string) => Promise<Transaction | null>;
   connectMercadoPago: () => Promise<void>;
@@ -287,20 +287,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const userDocSnap = await getDoc(userDocRef);
             
             let profileData: Partial<UserProfile> = {};
+            let privateInfo: PrivateUserInfo = {};
+
             if (userDocSnap.exists()) {
               profileData = userDocSnap.data() as Partial<UserProfile>;
 
-              // Private contact data must never remain in the publicly readable
-              // /users document. Migrate legacy fields when found.
-              const legacyPhonePrivate = profileData.phonePrivate;
-              const legacyExactAddressPrivate = profileData.location?.exactAddressPrivate;
-
+              const legacyPhonePrivate = (profileData as any).phonePrivate;
+              const legacyExactAddressPrivate = (profileData.location as any)?.exactAddressPrivate;
               const privateInfoRef = doc(db, 'users', firebaseUser.uid, 'private', 'info');
               const privateInfoSnap = await getDoc(privateInfoRef);
 
-              let privateData: Record<string, unknown> = {};
               if (privateInfoSnap.exists()) {
-                privateData = privateInfoSnap.data() as Record<string, unknown>;
+                privateInfo = privateInfoSnap.data() as PrivateUserInfo;
               }
 
               if (legacyPhonePrivate || legacyExactAddressPrivate) {
@@ -310,44 +308,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   migratedAt: new Date().toISOString(),
                 }, { merge: true });
 
-                await updateDoc(userDocRef, {
-                  ...(legacyPhonePrivate ? { phonePrivate: deleteField() } : {}),
-                  ...(legacyExactAddressPrivate ? { 'location.exactAddressPrivate': deleteField() } : {}),
-                });
+                const legacyCleanup: Record<string, unknown> = {};
+                if (legacyPhonePrivate) legacyCleanup.phonePrivate = deleteField();
+                if (legacyExactAddressPrivate) legacyCleanup['location.exactAddressPrivate'] = deleteField();
+                if (Object.keys(legacyCleanup).length > 0) {
+                  await updateDoc(userDocRef, legacyCleanup);
+                }
 
                 delete (profileData as any).phonePrivate;
                 if (profileData.location) delete (profileData.location as any).exactAddressPrivate;
-
-                privateData = {
-                  ...privateData,
+                privateInfo = {
+                  ...privateInfo,
                   ...(legacyPhonePrivate ? { phonePrivate: legacyPhonePrivate } : {}),
                   ...(legacyExactAddressPrivate ? { exactAddressPrivate: legacyExactAddressPrivate } : {}),
                 };
               }
 
-              profileData = {
-                ...profileData,
-                ...(typeof privateData.phonePrivate === 'string'
-                  ? { phonePrivate: privateData.phonePrivate }
-                  : {}),
-                ...(typeof privateData.exactAddressPrivate === 'string'
-                  ? {
-                      location: {
-                        ...(profileData.location || {}),
-                        exactAddressPrivate: privateData.exactAddressPrivate,
-                      },
-                    }
-                  : {}),
-              };
-
-              console.log('[CONEXA AUTH] Perfil público y datos privados del propietario cargados.');
+              // Private data intentionally remains outside UserProfile/currentUser.
+              console.log('[CONEXA AUTH] Perfil público cargado; datos privados aislados.');
             } else {
-              // Create default profile for newly registered users
+              // Create default profile for newly registered users.
               const defaultProfile: UserProfile = {
                 id: firebaseUser.uid,
                 name: firebaseUser.displayName || 'Usuario CONEXA',
                 email: firebaseUser.email || '',
-                phonePrivate: '',
                 avatar: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150',
                 role: claimRole,
                 activeMode: claimRole === 'PROFESSIONAL' ? 'PROFESSIONAL' : claimRole === 'ADMIN' ? 'ADMIN' : 'CLIENT',
@@ -372,7 +356,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               };
               await setDoc(userDocRef, defaultProfile);
               profileData = defaultProfile;
-              console.log('[CONEXA AUTH] Perfil por defecto guardado en Firestore.');
+              console.log('[CONEXA AUTH] Perfil público por defecto guardado en Firestore.');
             }
             
             // Core Auth Synch Rules: Firestore is the Source of Truth for Role & Profile (except ADMIN/SUPER_ADMIN checks)
