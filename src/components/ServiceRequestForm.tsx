@@ -23,6 +23,8 @@ export const ServiceRequestForm: React.FC<ServiceRequestFormProps> = ({
   const [preferredTimeSlot, setPreferredTimeSlot] = useState('Por la mañana');
   const [naturalPrompt, setNaturalPrompt] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -49,23 +51,33 @@ export const ServiceRequestForm: React.FC<ServiceRequestFormProps> = ({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !description.trim()) return;
+    if (isSubmitting || !title.trim() || !description.trim()) return;
 
-    createServiceRequest({
-      title: title.trim(),
-      category,
-      professionName,
-      description: description.trim(),
-      approxLocation: `📍 ${currentUser.location.approxZone}`,
-      preferredDate,
-      preferredTimeSlot,
-      estimatedBudgetArs: Number(estimatedBudget) || undefined,
-      urgency
-    });
+    setSubmitError(null);
+    setIsSubmitting(true);
 
-    onClose();
+    try {
+      await createServiceRequest({
+        title: title.trim(),
+        category,
+        professionName,
+        description: description.trim(),
+        approxLocation: `📍 ${currentUser.location.approxZone}`,
+        preferredDate,
+        preferredTimeSlot,
+        estimatedBudgetArs: Number(estimatedBudget) || undefined,
+        urgency
+      });
+
+      onClose();
+    } catch (error) {
+      console.error('Error creating service request:', error);
+      setSubmitError('No pudimos publicar la solicitud. Revisá tu conexión e intentá nuevamente.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -118,6 +130,12 @@ export const ServiceRequestForm: React.FC<ServiceRequestFormProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="space-y-3.5 text-xs">
+          {submitError && (
+            <div role="alert" className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-700">
+              <AlertCircle size={16} className="mt-0.5 shrink-0" />
+              <span>{submitError}</span>
+            </div>
+          )}
           <div>
             <label className="font-bold text-slate-800 block mb-1">Título de la necesidad *</label>
             <input 
@@ -212,15 +230,17 @@ export const ServiceRequestForm: React.FC<ServiceRequestFormProps> = ({
             <button
               type="button"
               onClick={onClose}
+              disabled={isSubmitting}
               className="flex-1 py-3 border border-slate-300 rounded-xl font-bold text-slate-700 hover:bg-slate-100 transition-colors"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md shadow-blue-600/20 transition-all"
+              disabled={isSubmitting}
+              className="flex-1 py-3 bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed hover:bg-blue-700 text-white rounded-xl font-bold shadow-md shadow-blue-600/20 transition-all"
             >
-              Publicar Solicitud
+              {isSubmitting ? 'Publicando...' : 'Publicar Solicitud'}
             </button>
           </div>
         </form>
