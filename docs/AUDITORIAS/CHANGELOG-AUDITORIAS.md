@@ -74,6 +74,16 @@ Commit funcional: `4d9c6b4745e96ef3832c823aa34044a68c72cf47`.
 
 Commit funcional: `f1f05f82634ce130269bc21eaae9730e580a9dfa`.
 
+### Integridad canónica del servicio de conversaciones
+
+- `conversationService.normalizeConversation()` ahora exige que `participantKey` coincida exactamente con la clave canónica derivada de los dos participantes.
+- La normalización reconstruye `privacyByUser` únicamente para participantes válidos y rechaza estados de compartición que no sean booleanos.
+- `getOrCreateConversation()` valida tanto los participantes como el `participantKey` persistido antes de reutilizar una conversación existente.
+- `sendConversationMessage()` y `markConversationAsRead()` ahora operan sobre una conversación normalizada, evitando enviar o mutar datos asociados a conversaciones estructuralmente corruptas.
+- `updateConversationPrivacy()` también queda protegido por la misma validación canónica antes de modificar permisos de compartición.
+
+Commit funcional: `5cca8c0aed2bbf3a53f93ae928241e2c296cf68b`.
+
 ### Estado de P0 actualizado
 
 1. Contrato público/privado de usuario: **CERRADO**.
@@ -83,14 +93,15 @@ Commit funcional: `f1f05f82634ce130269bc21eaae9730e580a9dfa`.
 5. UX de publicación de `ServiceRequest`: **CERRADO**.
 6. Integridad estructural de conversaciones: **CERRADO**.
 7. Prevención de PII en mensajes `SHARED_*`: **CERRADO**.
-8. Autorización efectiva de lectura de contacto compartido: **EN REVISIÓN**.
-9. Autorización de mensajes y consistencia conversación/mensaje: **PENDIENTE**.
-10. Máquina de estados RADAR → `ServiceRequest`: **PENDIENTE**.
-11. `startJob` / `completeJob` / reviews / whitelist de updates: **PENDIENTE**.
+8. Integridad canónica en cliente para `shared-contact`: **CERRADO**.
+9. Autorización backend efectiva de lectura de contacto compartido: **EN REVISIÓN**.
+10. Autorización de mensajes y consistencia conversación/mensaje: **EN REVISIÓN**.
+11. Máquina de estados RADAR → `ServiceRequest`: **PENDIENTE**.
+12. `startJob` / `completeJob` / reviews / whitelist de updates: **PENDIENTE**.
 
 ### Próximo bloque
 
-Auditar y cerrar la autorización efectiva de `shared-contact` y, inmediatamente después, la autorización de mensajes. El objetivo es que ningún dato privado pueda salir del backend salvo que el solicitante autenticado sea participante de una conversación válida y el propietario del dato haya otorgado explícitamente el permiso correspondiente.
+Cerrar la autorización backend de `shared-contact`, verificando la clave canónica persistida y el mapa `privacyByUser`, y después completar la autorización de mensajes. Luego continuar con RADAR → `ServiceRequest` y el flujo comercial `Quote → aceptación → Job`.
 
 ## 2026-08-29
 
