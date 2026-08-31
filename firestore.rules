@@ -36,7 +36,6 @@ service cloud.firestore {
         && (!resource.data.keys().hasAny(['hasProfessionalProfile']) || request.resource.data.hasProfessionalProfile == resource.data.hasProfessionalProfile));
       allow delete: if isAdmin();
       match /private/info {
-        // Private contact/address data is not a client-side public profile.
         allow read: if isOwner(userId) || isAdmin();
         allow create: if (isOwner(userId)
           && request.resource.data.keys().hasOnly(['phonePrivate', 'exactAddressPrivate', 'updatedAt', 'migratedAt']))
@@ -113,6 +112,7 @@ service cloud.firestore {
         allow create: if isConversationParticipant() && request.resource.data.senderId == request.auth.uid && request.resource.data.conversationId == conversationId
           && request.resource.data.type in ['TEXT','IMAGE','VOICE','SHARED_PHONE','SHARED_ADDRESS','QUOTE_PROPOSAL']
           && request.resource.data.content is string && request.resource.data.content.size() <= 4000
+          && ((request.resource.data.type in ['SHARED_PHONE','SHARED_ADDRESS'] && request.resource.data.content in ['Teléfono compartido','Dirección compartida']) || request.resource.data.type in ['TEXT','IMAGE','VOICE','QUOTE_PROPOSAL'])
           && request.resource.data.keys().hasAll(['conversationId','senderId','senderName','type','content','createdAt']);
         allow update, delete: if false;
       }
