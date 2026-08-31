@@ -65,6 +65,15 @@ Commits funcionales: `c36d02ced76c11e7def4beb23d56d56e6fb00383` y `aa172c3b9bbde
 
 Commit funcional: `4d9c6b4745e96ef3832c823aa34044a68c72cf47`.
 
+### Privacidad de mensajes compartidos
+
+- Se detectó que `SHARED_PHONE` y `SHARED_ADDRESS` podían transportar potencialmente el dato privado real dentro del contenido del mensaje.
+- Las reglas de Firestore ahora obligan a que esos tipos utilicen únicamente los marcadores `Teléfono compartido` o `Dirección compartida`.
+- La información real debe obtenerse exclusivamente mediante el endpoint backend de `shared-contact`, que lee `/private/info` sin exponer esa colección directamente.
+- Se mantiene así la separación entre el evento de consentimiento/compartición y el valor privado.
+
+Commit funcional: `f1f05f82634ce130269bc21eaae9730e580a9dfa`.
+
 ### Estado de P0 actualizado
 
 1. Contrato público/privado de usuario: **CERRADO**.
@@ -73,10 +82,11 @@ Commit funcional: `4d9c6b4745e96ef3832c823aa34044a68c72cf47`.
 4. Creación autoritativa de `ServiceRequest`: **CERRADO**.
 5. UX de publicación de `ServiceRequest`: **CERRADO**.
 6. Integridad estructural de conversaciones: **CERRADO**.
-7. Autorización efectiva de lectura de contacto compartido: **EN REVISIÓN**.
-8. Autorización de mensajes y consistencia conversación/mensaje: **PENDIENTE**.
-9. Máquina de estados RADAR → `ServiceRequest`: **PENDIENTE**.
-10. `startJob` / `completeJob` / reviews / whitelist de updates: **PENDIENTE**.
+7. Prevención de PII en mensajes `SHARED_*`: **CERRADO**.
+8. Autorización efectiva de lectura de contacto compartido: **EN REVISIÓN**.
+9. Autorización de mensajes y consistencia conversación/mensaje: **PENDIENTE**.
+10. Máquina de estados RADAR → `ServiceRequest`: **PENDIENTE**.
+11. `startJob` / `completeJob` / reviews / whitelist de updates: **PENDIENTE**.
 
 ### Próximo bloque
 
