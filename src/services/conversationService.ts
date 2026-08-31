@@ -270,9 +270,10 @@ export async function markConversationAsRead(input: {
     throw new Error('User is not a conversation participant.');
   }
 
+  // Reading a conversation must not change its activity ordering.
+  // `updatedAt` is reserved for actual conversation activity (for example, messages).
   await updateDoc(conversationRef, {
     [`unreadCountByUser.${input.userId}`]: 0,
-    updatedAt: serverTimestamp(),
   });
 }
 
@@ -295,9 +296,7 @@ export async function updateConversationPrivacy(input: {
     throw new Error('User is not a conversation participant.');
   }
 
-  const updates: Record<string, unknown> = {
-    updatedAt: serverTimestamp(),
-  };
+  const updates: Record<string, unknown> = {};
 
   if (typeof input.phoneShared === 'boolean') {
     updates[`privacyByUser.${input.userId}.phoneShared`] = input.phoneShared;
@@ -305,6 +304,10 @@ export async function updateConversationPrivacy(input: {
 
   if (typeof input.addressShared === 'boolean') {
     updates[`privacyByUser.${input.userId}.addressShared`] = input.addressShared;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return;
   }
 
   await updateDoc(conversationRef, updates);
