@@ -56,6 +56,16 @@ Commit funcional: caa530ad3ac92f143e41aaa80e0ee68c74190f30.
 
 Commit funcional: 1fcda768c7ec435a78f8854ef27d4c4bfa4bd567.
 
+
+### Separación pública/privada: reglas de Firestore
+
+- Se restringió /users/{uid}/private/info a un contrato explícito de campos privados.
+- Los usuarios propietarios pueden crear o actualizar únicamente phonePrivate, exactAddressPrivate y metadatos temporales de actualización/migración.
+- La creación y la actualización se validan por separado para evitar depender de diff(resource.data) cuando el documento todavía no existe.
+- La lectura sigue limitada al propietario o administración autorizada.
+
+Commits funcionales: c36d02ced76c11e7def4beb23d56d56e6fb00383 y aa172c3b9bbdee7e3c18a7872b43e17cf8bb87b1.
+
 ### Pendientes inmediatos
 
 1. Separar definitivamente `UserProfile/LocationData` de `PrivateUserInfo` y migrar referencias a `phonePrivate`/`exactAddressPrivate`.
