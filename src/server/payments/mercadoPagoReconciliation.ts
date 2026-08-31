@@ -1,5 +1,5 @@
 import { getAdminDb } from '../firebaseAdmin.js';
-import { MercadoPagoOAuthConnection, decryptOAuthToken } from './mercadoPagoOAuthTokenStore.js';
+import { MercadoPagoOAuthConnection } from './mercadoPagoOAuthTokenStore.js';
 import { fetchMercadoPagoPaymentWithConnection } from './mercadoPagoPayment.js';
 
 const TRANSACTION_COLLECTION = 'transactions';
@@ -50,6 +50,10 @@ export async function reconcileMercadoPagoPayment(
   if (!transactionSnapshot.exists) return { status: 'IGNORED', reason: 'TRANSACTION_NOT_FOUND' };
 
   const transaction = transactionSnapshot.data() || {};
+  if (!transaction.professionalId || String(transaction.professionalId) !== String(connection.merchantId)) {
+    return { status: 'IGNORED', reason: 'TRANSACTION_MERCHANT_MISMATCH' };
+  }
+
   const expectedAmount = normalizeAmount(transaction.amountArs);
   if (!Number.isFinite(expectedAmount) || expectedAmount !== paymentAmount) {
     return { status: 'IGNORED', reason: 'PAYMENT_AMOUNT_MISMATCH' };
@@ -69,6 +73,10 @@ export async function reconcileMercadoPagoPayment(
     if (!fresh.exists) return { status: 'IGNORED', reason: 'TRANSACTION_NOT_FOUND' };
     const current = fresh.data() || {};
 
+    if (!current.professionalId || String(current.professionalId) !== String(connection.merchantId)) {
+      return { status: 'IGNORED', reason: 'TRANSACTION_MERCHANT_CHANGED' };
+    }
+
     if (String(current.status || '').toUpperCase() === 'PAID') {
       if (current.mercadoPagoPaymentId && String(current.mercadoPagoPaymentId) !== String(paymentId)) {
         return { status: 'IGNORED', reason: 'PAID_WITH_DIFFERENT_PAYMENT' };
@@ -84,11 +92,12 @@ export async function reconcileMercadoPagoPayment(
       return { status: 'IGNORED', reason: 'PAYMENT_AMOUNT_CHANGED' };
     }
 
+    const now = new Date().toISOString();
     tx.update(transactionRef, {
       status: 'PAID',
       mercadoPagoPaymentId: String(paymentId),
-      paidAt: new Date().toISOString(),
-      paymentUpdatedAt: new Date().toISOString(),
+      paidAt: now,
+      paymentUpdatedAt: now,
     });
 
     return { status: 'PAID', transactionId };
