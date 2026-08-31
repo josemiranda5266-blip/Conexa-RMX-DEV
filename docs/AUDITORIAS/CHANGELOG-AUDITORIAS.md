@@ -45,6 +45,17 @@ Commit funcional: 3e847cbc841872bbd0802bafdd9ad5043d4c4b04.
 
 Commit funcional: caa530ad3ac92f143e41aaa80e0ee68c74190f30.
 
+
+### Separación pública/privada: runtime y migración legacy
+
+- Se corrigió AppContext para importar deleteField explícitamente y evitar una referencia implícita durante la migración.
+- La carga de /users/{uid} ahora conserva el perfil público separado del documento privado /users/{uid}/private/info.
+- Los campos legacy phonePrivate y location.exactAddressPrivate se migran una vez al documento privado y luego se eliminan del documento público.
+- currentUser vuelve a contener únicamente el contrato UserProfile; los datos privados ya no se reinyectan en el estado público de runtime.
+- Los perfiles nuevos se crean sin teléfono ni domicilio exacto dentro del documento público.
+
+Commit funcional: 1fcda768c7ec435a78f8854ef27d4c4bfa4bd567.
+
 ### Pendientes inmediatos
 
 1. Separar definitivamente `UserProfile/LocationData` de `PrivateUserInfo` y migrar referencias a `phonePrivate`/`exactAddressPrivate`.
