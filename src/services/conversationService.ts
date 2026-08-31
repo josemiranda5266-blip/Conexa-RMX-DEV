@@ -77,14 +77,38 @@ function normalizeConversation(id: string, data: Record<string, unknown>): Store
     throw new Error(`Conversation ${id} has an invalid participant list.`);
   }
 
+  const participantKey = typeof data.participantKey === 'string'
+    ? data.participantKey.trim()
+    : '';
+  const expectedParticipantKey = createParticipantKey(participantIds);
+  if (participantKey !== expectedParticipantKey) {
+    throw new Error(`Conversation ${id} has an invalid participant key.`);
+  }
+
+  const rawPrivacy = data.privacyByUser;
+  const privacyByUser: ConversationPrivacy = {};
+  for (const userId of participantIds) {
+    const entry = (rawPrivacy && typeof rawPrivacy === 'object')
+      ? (rawPrivacy as Record<string, unknown>)[userId]
+      : undefined;
+    const privacy = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {};
+    if (privacy.phoneShared !== undefined && typeof privacy.phoneShared !== 'boolean') {
+      throw new Error(`Conversation ${id} has invalid phone sharing state.`);
+    }
+    if (privacy.addressShared !== undefined && typeof privacy.addressShared !== 'boolean') {
+      throw new Error(`Conversation ${id} has invalid address sharing state.`);
+    }
+    privacyByUser[userId] = {
+      phoneShared: privacy.phoneShared === true,
+      addressShared: privacy.addressShared === true,
+    };
+  }
+
   return {
     id,
     participantIds: [participantIds[0], participantIds[1]],
-    participantKey: typeof data.participantKey === 'string'
-      ? data.participantKey
-      : createParticipantKey(participantIds),
-    privacyByUser: (data.privacyByUser as ConversationPrivacy | undefined)
-      ?? createConversationPrivacy(participantIds),
+    participantKey,
+    privacyByUser,
     createdAt: data.createdAt instanceof Timestamp ? data.createdAt : null,
     updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt : null,
     lastMessagePreview: typeof data.lastMessagePreview === 'string'
@@ -122,7 +146,8 @@ export async function getOrCreateConversation(
       if (!Array.isArray(existingParticipantIds)
         || existingParticipantIds.length !== 2
         || existingParticipantIds.some((value) => typeof value !== 'string')
-        || createParticipantKey(existingParticipantIds) !== participantKey) {
+        || createParticipantKey(existingParticipantIds) !== participantKey
+        || existing.data().participantKey !== participantKey) {
         throw new Error('Conversation participant integrity check failed.');
       }
       return;
@@ -217,12 +242,12 @@ export async function sendConversationMessage(input: {
     throw new Error('Conversation not found.');
   }
 
-  const participantIds = conversationSnapshot.data().participantIds as string[];
-  if (!isConversationParticipant(participantIds, input.senderId)) {
+  const conversation = normalizeConversation(input.conversationId, conversationSnapshot.data());
+  if (!isConversationParticipant(conversation.participantIds, input.senderId)) {
     throw new Error('Sender is not a conversation participant.');
   }
 
-  const recipientId = participantIds.find((userId) => userId !== input.senderId);
+  const recipientId = conversation.participantIds.find((userId) => userId !== input.senderId);
   if (!recipientId) {
     throw new Error('Conversation recipient could not be resolved.');
   }
@@ -265,13 +290,11 @@ export async function markConversationAsRead(input: {
     throw new Error('Conversation not found.');
   }
 
-  const participantIds = snapshot.data().participantIds as string[];
-  if (!isConversationParticipant(participantIds, input.userId)) {
+  const conversation = normalizeConversation(input.conversationId, snapshot.data());
+  if (!isConversationParticipant(conversation.participantIds, input.userId)) {
     throw new Error('User is not a conversation participant.');
   }
 
-  // Reading a conversation must not change its activity ordering.
-  // `updatedAt` is reserved for actual conversation activity (for example, messages).
   await updateDoc(conversationRef, {
     [`unreadCountByUser.${input.userId}`]: 0,
   });
@@ -291,8 +314,8 @@ export async function updateConversationPrivacy(input: {
     throw new Error('Conversation not found.');
   }
 
-  const participantIds = snapshot.data().participantIds as string[];
-  if (!isConversationParticipant(participantIds, input.userId)) {
+  const conversation = normalizeConversation(input.conversationId, snapshot.data());
+  if (!isConversationParticipant(conversation.participantIds, input.userId)) {
     throw new Error('User is not a conversation participant.');
   }
 
