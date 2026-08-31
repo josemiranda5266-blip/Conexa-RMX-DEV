@@ -35,7 +35,15 @@ service cloud.firestore {
         && (!resource.data.keys().hasAny(['isProfessionalVerified']) || request.resource.data.isProfessionalVerified == resource.data.isProfessionalVerified)
         && (!resource.data.keys().hasAny(['hasProfessionalProfile']) || request.resource.data.hasProfessionalProfile == resource.data.hasProfessionalProfile));
       allow delete: if isAdmin();
-      match /private/info { allow read, write: if isOwner(userId) || isAdmin(); }
+      match /private/info {
+        // Private contact/address data is not a client-side public profile.
+        allow read: if isOwner(userId) || isAdmin();
+        allow create, update: if isOwner(userId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['phonePrivate', 'exactAddressPrivate', 'updatedAt', 'migratedAt'])
+          || isAdmin();
+        allow delete: if isOwner(userId) || isAdmin();
+      }
     }
 
     match /service_requests/{requestId} {
