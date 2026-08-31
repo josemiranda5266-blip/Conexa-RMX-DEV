@@ -55,6 +55,19 @@ function requireDb() {
   return db;
 }
 
+function getSafeMessagePreview(type: StoredMessage['type'], content: string): string {
+  switch (type) {
+    case 'SHARED_PHONE':
+      return 'Teléfono compartido';
+    case 'SHARED_ADDRESS':
+      return 'Dirección compartida';
+    case 'QUOTE_PROPOSAL':
+      return 'Propuesta enviada';
+    default:
+      return content.slice(0, 500);
+  }
+}
+
 function normalizeConversation(id: string, data: Record<string, unknown>): StoredConversation {
   const participantIds = Array.isArray(data.participantIds)
     ? data.participantIds.filter((value): value is string => typeof value === 'string')
@@ -101,8 +114,6 @@ export async function getOrCreateConversation(
   const participantKey = createParticipantKey(participantIds);
   const conversationRef = doc(firestore, 'conversations', participantKey);
 
-  // Make creation atomic so concurrent clients cannot race on a missing
-  // conversation for the same participant pair.
   await runTransaction(firestore, async (transaction) => {
     const existing = await transaction.get(conversationRef);
 
@@ -231,7 +242,7 @@ export async function sendConversationMessage(input: {
   });
 
   batch.update(conversationRef, {
-    lastMessagePreview: input.content,
+    lastMessagePreview: getSafeMessagePreview(input.type, input.content),
     lastMessageId: messageRef.id,
     lastMessageAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
