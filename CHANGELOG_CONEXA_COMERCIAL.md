@@ -47,3 +47,20 @@ No se pudo ejecutar `npm install`/`npm run build` en este entorno porque la inst
 - Un presupuesto no puede convertirse en contratación pagable si el profesional no tiene Mercado Pago vinculado y activo. Esto evita crear contratos que luego no puedan cobrarse mediante Split 1:1.
 - La interfaz del profesional incorpora el acceso `Conectar Mercado Pago`.
 - La aceptación del presupuesto intenta crear el checkout después de crear la transacción; si el profesional no está conectado, se bloquea con un estado explícito.
+
+
+## Auditoría de continuidad — Fase 2 Marketplace
+
+La auditoría del código actual detectó una divergencia entre la documentación comercial y el árbol activo de la rama unificada.
+
+- La documentación declara implementados OAuth, Checkout Pro y webhook de Mercado Pago.
+- El árbol activo contiene la configuración y parte de la frontera comercial, pero las búsquedas y el inventario de archivos disponibles no localizaron los módulos/rutas activas que materialicen el checkout y la confirmación de pago.
+- Por lo tanto, la integración debe considerarse **incompleta o parcialmente migrada** hasta recuperar o reimplementar en la rama activa:
+  1. creación server-side del checkout para una Transaction;
+  2. asociación persistida con la referencia externa del proveedor;
+  3. webhook autenticado e idempotente;
+  4. consulta server-side del estado real del pago;
+  5. transición atómica PAYMENT_PENDING → PAID;
+  6. registro de auditoría de confirmaciones repetidas.
+
+Esta nota sustituye cualquier interpretación de que la documentación por sí sola pruebe la existencia operativa de esas rutas en la rama unificada.
