@@ -16,13 +16,14 @@ export function getOtherParticipantId(
   participantIds: readonly string[],
   currentUserId: string,
 ): string | null {
-  if (!participantIds.includes(currentUserId)) return null;
+  if (!isValidConversationParticipants(participantIds) || !participantIds.includes(currentUserId)) return null;
   return participantIds.find((participantId) => participantId !== currentUserId) ?? null;
 }
 
 export function createConversationPrivacy(
   participantIds: readonly string[],
 ): ConversationPrivacy {
+  createParticipantKey(participantIds);
   return Object.fromEntries(
     participantIds.map((participantId) => [
       participantId,
@@ -31,9 +32,20 @@ export function createConversationPrivacy(
   );
 }
 
+export function isValidConversationParticipants(
+  participantIds: readonly string[],
+): participantIds is [string, string] {
+  return participantIds.length === 2
+    && typeof participantIds[0] === 'string'
+    && typeof participantIds[1] === 'string'
+    && participantIds[0].trim().length > 0
+    && participantIds[1].trim().length > 0
+    && participantIds[0] !== participantIds[1];
+}
+
 export function isConversationParticipant(
   participantIds: readonly string[],
   userId: string,
 ): boolean {
-  return participantIds.includes(userId);
+  return isValidConversationParticipants(participantIds) && participantIds.includes(userId);
 }
