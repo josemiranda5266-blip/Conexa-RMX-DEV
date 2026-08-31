@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, updateDoc, collection, getDocs, getDoc, onSnapshot, query, where, deleteField } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, collection, getDoc, onSnapshot, query, where, deleteField } from 'firebase/firestore';
 import { auth, db, isFirebaseConfigured } from '../lib/firebase';
 import { 
   UserProfile, Category, Profession, ServiceRequest, Quote, 
@@ -348,7 +348,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 },
                 isIdentityVerified: firebaseUser.emailVerified || false,
                 identityVerificationStatus: 'NONE',
-                rating: claimRole === 'PROFESSIONAL' ? 5.0 : 0,
+                rating: 0,
                 reviewCount: 0,
                 jobsCompleted: 0,
                 trustScore: 50,
@@ -465,36 +465,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     console.log("[CONEXA SYNCHRONIZER] Sincronización activa con Firestore...");
 
-    // Helper to seed a collection with mock data if empty
-    const seedCollectionIfEmpty = async (collectionName: string, initialData: any[]) => {
-      // ABSOLUTE SECURITY RULE: Never seed simulation data on real production/cloud environment
-      const isProdOrCloud = import.meta.env.PROD || import.meta.env.MODE === 'production' || window.location.hostname !== 'localhost';
-      if (isProdOrCloud) {
-        console.log(`[CONEXA SEED] Evitando siembra de datos de simulación en producción para: ${collectionName}`);
-        return;
-      }
-      try {
-        const querySnapshot = await getDocs(collection(db, collectionName));
-        if (querySnapshot.empty) {
-          console.log(`[CONEXA SEED] Sembrando datos para ${collectionName}...`);
-          for (const item of initialData) {
-            await setDoc(doc(db, collectionName, item.id || `doc-${Math.random()}`), item);
-          }
-        }
-      } catch (err) {
-        console.warn(`[CONEXA SEED] Error en ${collectionName}:`, err);
-      }
-    };
-
-    // Seed collections asynchronously
-    const seedAll = async () => {
-      await seedCollectionIfEmpty('users', INITIAL_PROFILES);
-      await seedCollectionIfEmpty('reviews', INITIAL_REVIEWS);
-      await seedCollectionIfEmpty('service_requests', INITIAL_SERVICE_REQUESTS);
-      await seedCollectionIfEmpty('quotes', INITIAL_QUOTES);
-      await seedCollectionIfEmpty('conversations', INITIAL_CONVERSATIONS);
-    };
-    seedAll();
+    // Demo data is intentionally never written to Firestore from the running application.
+    // Initial mock data remains available only for explicit no-Firebase/demo mode.
 
     // Set up real-time sub subscriptions
 
