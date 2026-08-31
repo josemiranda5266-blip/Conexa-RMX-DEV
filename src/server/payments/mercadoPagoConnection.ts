@@ -1,9 +1,6 @@
-import { MercadoPagoOAuthConnection, decryptOAuthToken } from './mercadoPagoConfig';
+import { MercadoPagoOAuthConnection, decryptOAuthToken } from './mercadoPagoOAuthTokenStore.js';
 
-export interface MercadoPagoConnectionDocument extends MercadoPagoOAuthConnection {
-  encryptedAccessToken: { ciphertext: string; iv: string; authTag: string };
-  encryptedRefreshToken?: { ciphertext: string; iv: string; authTag: string };
-}
+export interface MercadoPagoConnectionDocument extends MercadoPagoOAuthConnection {}
 
 export function getAccessToken(connection: MercadoPagoConnectionDocument): string {
   if (connection.provider !== 'MERCADO_PAGO' || connection.revokedAt) {
