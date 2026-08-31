@@ -1,14 +1,13 @@
 import {
   Timestamp,
-  addDoc,
   collection,
   doc,
   getDoc,
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
-  setDoc,
   updateDoc,
   where,
   increment,
@@ -93,7 +92,7 @@ export async function getOrCreateConversation(
   currentUserId: string,
   targetUserId: string,
 ): Promise<string> {
-  if (currentUserId === targetUserId) {
+  if (!currentUserId || !targetUserId || currentUserId === targetUserId) {
     throw new Error('A conversation requires two distinct users.');
   }
 
@@ -101,26 +100,34 @@ export async function getOrCreateConversation(
   const participantIds = [currentUserId, targetUserId] as [string, string];
   const participantKey = createParticipantKey(participantIds);
   const conversationRef = doc(firestore, 'conversations', participantKey);
-  const existing = await getDoc(conversationRef);
 
-  if (existing.exists()) {
-    const existingParticipantIds = existing.data().participantIds as string[] | undefined;
-    if (!existingParticipantIds || createParticipantKey(existingParticipantIds) !== participantKey) {
-      throw new Error('Conversation participant integrity check failed.');
+  // Make creation atomic so concurrent clients cannot race on a missing
+  // conversation for the same participant pair.
+  await runTransaction(firestore, async (transaction) => {
+    const existing = await transaction.get(conversationRef);
+
+    if (existing.exists()) {
+      const existingParticipantIds = existing.data().participantIds;
+      if (!Array.isArray(existingParticipantIds)
+        || existingParticipantIds.length !== 2
+        || existingParticipantIds.some((value) => typeof value !== 'string')
+        || createParticipantKey(existingParticipantIds) !== participantKey) {
+        throw new Error('Conversation participant integrity check failed.');
+      }
+      return;
     }
-    return conversationRef.id;
-  }
 
-  await setDoc(conversationRef, {
-    participantIds,
-    participantKey,
-    privacyByUser: createConversationPrivacy(participantIds),
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    lastMessagePreview: '',
-    lastMessageId: null,
-    lastMessageAt: null,
-    unreadCountByUser: Object.fromEntries(participantIds.map((userId) => [userId, 0])),
+    transaction.set(conversationRef, {
+      participantIds,
+      participantKey,
+      privacyByUser: createConversationPrivacy(participantIds),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastMessagePreview: '',
+      lastMessageId: null,
+      lastMessageAt: null,
+      unreadCountByUser: Object.fromEntries(participantIds.map((userId) => [userId, 0])),
+    });
   });
 
   return conversationRef.id;
@@ -298,7 +305,6 @@ export function getOtherConversationParticipant(
 ): string | null {
   return getOtherParticipantId(conversation.participantIds, currentUserId);
 }
-
 
 export async function getSharedConversationContact(input: {
   conversationId: string;
