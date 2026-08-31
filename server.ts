@@ -860,7 +860,100 @@ Responde en JSON con:
   function hasClientCapability(user: any): boolean {
     return Boolean(user) && user.isClient !== false;
   }
-  app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) => {
+  
+  // Creates a direct service request through the backend. The authenticated
+  // user is always the client; identity and commercial state never come from
+  // the browser payload.
+  app.post("/api/service-requests/create", rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const auth = await verifyAuthToken(req);
+      if (!auth.isAuthenticated || !auth.userId) {
+        return res.status(401).json({ success: false, code: "UNAUTHORIZED" });
+      }
+
+      const {
+        title,
+        category,
+        professionName,
+        description,
+        approxLocation,
+        preferredDate,
+        preferredTimeSlot,
+        estimatedBudgetArs,
+        urgency
+      } = req.body || {};
+
+      if (
+        typeof title !== "string" || !title.trim() ||
+        typeof category !== "string" || !category.trim() ||
+        typeof professionName !== "string" || !professionName.trim() ||
+        typeof description !== "string" || !description.trim() ||
+        typeof approxLocation !== "string" || !approxLocation.trim() ||
+        typeof preferredDate !== "string" || !preferredDate.trim() ||
+        typeof preferredTimeSlot !== "string" || !preferredTimeSlot.trim() ||
+        !["NORMAL", "ALTA", "URGENTE"].includes(urgency)
+      ) {
+        return res.status(400).json({ success: false, code: "INVALID_SERVICE_REQUEST_DATA" });
+      }
+
+      const budget = estimatedBudgetArs === undefined || estimatedBudgetArs === null || estimatedBudgetArs === ""
+        ? undefined
+        : Number(estimatedBudgetArs);
+      if (budget !== undefined && (!Number.isFinite(budget) || budget < 0)) {
+        return res.status(400).json({ success: false, code: "INVALID_ESTIMATED_BUDGET" });
+      }
+
+      const firestore = await getAdminDb();
+      const clientRef = firestore.collection("users").doc(auth.userId);
+      const requestRef = firestore.collection("service_requests").doc();
+      const now = new Date().toISOString();
+
+      const serviceRequest = await firestore.runTransaction(async (tx: any) => {
+        const clientSnap = await tx.get(clientRef);
+        if (!clientSnap.exists || !hasClientCapability(clientSnap.data())) {
+          throw new Error("CLIENT_CAPABILITY_REQUIRED");
+        }
+
+        const client = clientSnap.data() || {};
+        const request = {
+          id: requestRef.id,
+          clientId: auth.userId,
+          clientName: typeof client.name === "string" && client.name.trim()
+            ? client.name.trim()
+            : "Usuario CONEXA",
+          clientAvatar: typeof client.avatar === "string" ? client.avatar : "",
+          title: title.trim().slice(0, 160),
+          category: category.trim().slice(0, 120),
+          professionName: professionName.trim().slice(0, 120),
+          description: description.trim().slice(0, 5000),
+          approxLocation: approxLocation.trim().slice(0, 240),
+          preferredDate: preferredDate.trim().slice(0, 160),
+          preferredTimeSlot: preferredTimeSlot.trim().slice(0, 160),
+          ...(budget === undefined ? {} : { estimatedBudgetArs: budget }),
+          urgency,
+          status: "REQUEST_CREATED",
+          quotesCount: 0,
+          sourceType: "DIRECT",
+          discoveryMode: "OPEN",
+          createdAt: now,
+          updatedAt: now
+        };
+
+        tx.set(requestRef, request);
+        return request;
+      });
+
+      return res.status(201).json({ success: true, serviceRequest });
+    } catch (err: any) {
+      const code = err?.message || "SERVICE_REQUEST_CREATE_ERROR";
+      const map: Record<string, number> = {
+        CLIENT_CAPABILITY_REQUIRED: 403
+      };
+      return res.status(map[code] || 500).json({ success: false, code });
+    }
+  });
+
+app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) => {
     try {
       const auth = await verifyAuthToken(req);
       if (!auth.isAuthenticated || !auth.userId) {
