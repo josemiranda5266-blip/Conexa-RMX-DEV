@@ -19,21 +19,26 @@ export interface LocationData {
   lat: number;
   lng: number;
   approxZone: string;
+}
+
+export interface PrivateUserInfo {
+  phonePrivate?: string;
   exactAddressPrivate?: string;
 }
+
 
 export interface UserProfile {
   id: string;
   name: string;
   email: string;
-  phonePrivate: string;
+  /** Private contact data is stored separately and must not be published in /users. */
   avatar: string;
   role: Role;
   joinedDate: string;
   location: LocationData;
   isIdentityVerified: boolean;
   identityVerificationStatus: VerificationStatus;
-  identityDocUrl?: string;
+  /** Private identity documents must never be stored in the public profile. */
   isBlocked?: boolean;
   activeMode?: 'CLIENT' | 'PROFESSIONAL' | 'ADMIN';
   hasClientProfile?: boolean;
@@ -49,7 +54,7 @@ export interface UserProfile {
   isProfessionalVerified?: boolean;
   professionalVerificationStatus?: VerificationStatus;
   matriculaOrDegree?: string;
-  verificationDocUrl?: string;
+  /** Private professional verification documents must be stored outside the public profile. */
   rating: number;
   reviewCount: number;
   jobsCompleted: number;
