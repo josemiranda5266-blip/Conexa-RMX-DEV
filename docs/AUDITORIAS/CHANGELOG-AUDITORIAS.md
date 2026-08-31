@@ -34,6 +34,17 @@ Pendiente inmediato: revisar la propagación de errores en ServiceRequestForm y 
 
 Commit funcional: 3e847cbc841872bbd0802bafdd9ad5043d4c4b04.
 
+
+### Separación pública/privada: contrato de tipos
+
+- Se eliminó phonePrivate del contrato público UserProfile.
+- Se eliminó exactAddressPrivate de LocationData.
+- Se incorporó PrivateUserInfo como contrato explícito para datos de contacto y domicilio exacto.
+- Se documentó que documentos de identidad y verificación no deben formar parte del perfil público.
+- La migración de lectura/escritura existente en AppContext se conserva temporalmente y será revisada como siguiente paso para evitar romper datos ya persistidos.
+
+Commit funcional: caa530ad3ac92f143e41aaa80e0ee68c74190f30.
+
 ### Pendientes inmediatos
 
 1. Separar definitivamente `UserProfile/LocationData` de `PrivateUserInfo` y migrar referencias a `phonePrivate`/`exactAddressPrivate`.
