@@ -1106,26 +1106,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
 
   const createServiceRequest = async (reqData: Omit<ServiceRequest, 'id' | 'clientId' | 'clientName' | 'clientAvatar' | 'createdAt' | 'status' | 'quotesCount'>) => {
-    const newReq: ServiceRequest = {
-      ...reqData,
-      id: `req-${Date.now()}`,
-      clientId: currentUser.id,
-      clientName: currentUser.name,
-      clientAvatar: currentUser.avatar,
-      createdAt: new Date().toLocaleDateString('es-AR'),
-      status: 'REQUEST_CREATED',
-      quotesCount: 0,
-      sourceType: 'DIRECT',
-      discoveryMode: 'OPEN'
-    };
-    setRequests(prev => [newReq, ...prev]);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error('AUTH_TOKEN_REQUIRED');
 
-    if (db) {
-      try {
-        await setDoc(doc(db, 'service_requests', newReq.id), newReq);
-      } catch (e) {
-        console.warn('[Firestore] Error guardando solicitud de servicio:', e);
+      const response = await fetch('/api/service-requests/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(reqData)
+      });
+
+      const payload = await response.json();
+      if (!response.ok || !payload?.success || !payload?.serviceRequest) {
+        throw new Error(payload?.code || 'SERVICE_REQUEST_CREATE_ERROR');
       }
+
+      const newReq = payload.serviceRequest as ServiceRequest;
+      setRequests(prev => [newReq, ...prev.filter(request => request.id !== newReq.id)]);
+      trackEvent('service_request_created', {
+        requestId: newReq.id,
+        category: newReq.category,
+        sourceType: newReq.sourceType || 'DIRECT'
+      });
+      return newReq;
+    } catch (error) {
+      console.warn('[CONEXA] Error creando solicitud de servicio:', error);
+      throw error;
     }
   };
 
