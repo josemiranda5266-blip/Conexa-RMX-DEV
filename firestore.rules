@@ -78,10 +78,15 @@ service cloud.firestore {
       function isConversationParticipant() { return isSignedIn() && request.auth.uid in resource.data.participantIds; }
       function createsValidConversation() {
         return request.resource.data.participantIds is list && request.resource.data.participantIds.size() == 2
+          && request.resource.data.participantIds[0] is string && request.resource.data.participantIds[1] is string
+          && request.resource.data.participantIds[0].size() > 0 && request.resource.data.participantIds[1].size() > 0
           && request.resource.data.participantIds[0] != request.resource.data.participantIds[1]
           && request.auth.uid in request.resource.data.participantIds
-          && request.resource.data.unreadCountByUser.keys().hasAll(request.resource.data.participantIds)
-          && request.resource.data.privacyByUser.keys().hasAll(request.resource.data.participantIds);
+          && request.resource.data.participantKey == (request.resource.data.participantIds[0] < request.resource.data.participantIds[1]
+            ? request.resource.data.participantIds[0] + '_' + request.resource.data.participantIds[1]
+            : request.resource.data.participantIds[1] + '_' + request.resource.data.participantIds[0])
+          && request.resource.data.unreadCountByUser.keys().hasOnly(request.resource.data.participantIds)
+          && request.resource.data.privacyByUser.keys().hasOnly(request.resource.data.participantIds);
       }
       function participantOtherThan(userId) { return resource.data.participantIds[0] == userId ? resource.data.participantIds[1] : resource.data.participantIds[0]; }
       function updatesOnlyOwnReadState() {
@@ -90,8 +95,13 @@ service cloud.firestore {
           && request.resource.data.unreadCountByUser[request.auth.uid] == 0;
       }
       function updatesOnlyOwnPrivacy() {
+        let ownPrivacy = request.resource.data.privacyByUser[request.auth.uid];
         return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['privacyByUser','updatedAt'])
-          && request.resource.data.privacyByUser.diff(resource.data.privacyByUser).affectedKeys().hasOnly([request.auth.uid]);
+          && request.resource.data.privacyByUser.keys().hasOnly(resource.data.participantIds)
+          && request.resource.data.privacyByUser.diff(resource.data.privacyByUser).affectedKeys().hasOnly([request.auth.uid])
+          && ownPrivacy.keys().hasOnly(['phoneShared','addressShared'])
+          && ownPrivacy.phoneShared is bool
+          && ownPrivacy.addressShared is bool;
       }
       function updatesConversationFromValidMessage() {
         let otherUserId = participantOtherThan(request.auth.uid);
