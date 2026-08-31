@@ -1,5 +1,49 @@
 # Changelog de auditorías — CONEXA
 
+## 2026-08-31
+
+### Continuidad de auditoría — Quote / Transaction / AppContext / Reviews
+
+- Se confirmó nuevamente `josemiranda5266-blip/Conexa-RMX-DEV` como único repositorio objetivo y `integration/conexa-unified` como única rama de correcciones.
+- `createServiceRequest()` ya utiliza la API backend autoritativa; el cliente no debe construir ni persistir la identidad comercial de la solicitud.
+- `submitQuote()` ya utiliza `/api/quotes/submit` y el backend recibe los datos propios de la oferta; se identificó que la construcción de un Quote provisional en frontend es innecesaria y debe eliminarse cuando se aplique la corrección.
+- No se encontró una implementación identificable de `acceptQuote`, `acceptedQuote`, `selectQuote`, `chooseQuote` ni `/api/quotes/accept`. Se clasifica como funcionalidad faltante: la aceptación del Quote debe implementarse como comando backend, no mediante `updateDoc()` directo desde UI.
+- Se confirmó el contrato canónico de aceptación: `quoteId` es el único identificador aportado por el cliente; el backend debe derivar `requestId`, `professionalId`, `priceArs`, `clientId` y estado desde los documentos persistidos.
+- Se confirmó que `Transaction` ya contiene `serviceRequestId`, `quoteId`, `clientId`, `professionalId`, `amountArs`, comisión, importe profesional y estado; queda pendiente cerrar la creación transaccional a partir del Quote aceptado.
+- Se confirmó que `AppContext` todavía contiene lógica de seed/demo y que cualquier escritura de datos demo debe quedar aislada de Firebase producción mediante una condición explícita de desarrollo/emulador.
+- Se detectó que los perfiles profesionales nuevos pueden nacer con `rating: 5.0` aunque `reviewCount` y `jobsCompleted` sean cero. Se clasifica como P1 de reputación: un profesional sin reviews no debe aparecer como profesional calificado con 5 estrellas.
+- Se confirmó que las Rules de conversaciones ya atan `senderId` al `request.auth.uid`, por lo que el riesgo de suplantación mediante `senderId` no constituye un bypass de autorización. `senderName` queda como dato declarativo/snapshot.
+- `quoteData` dentro del mensaje debe considerarse representación de chat y nunca autoridad comercial; el documento `quotes/{quoteId}` continúa siendo la fuente canónica.
+- Se confirmó nuevamente la divergencia P0 del ciclo Job: `startJob` utiliza `IN_PROGRESS`, mientras `completeJob` actualmente intenta usar `SERVICE_COMPLETED` sobre `ServiceRequest`, estado que pertenece a `TransactionStatus` y no a `JobStatus`.
+- Reviews continúan incompletas como operación backend autoritativa: falta cerrar autorización por `auth.uid`, unicidad por `serviceRequestId`/cliente, agregación de reputación y transición final a `CLOSED`.
+
+### Estado operativo actualizado
+
+1. Contrato público/privado de usuario: **CERRADO**.
+2. Migración runtime de datos privados legacy: **CERRADO**.
+3. Reglas de `/private/info`: **CERRADO**.
+4. Creación autoritativa de `ServiceRequest`: **CERRADO**.
+5. UX de publicación de `ServiceRequest`: **CERRADO**.
+6. Integridad estructural de conversaciones: **CERRADO**.
+7. Prevención de PII en mensajes `SHARED_*`: **CERRADO**.
+8. Identidad canónica y esquema de privacidad en Rules: **CERRADO**.
+9. Autorización backend de contacto compartido: **EN REVISIÓN**.
+10. Autorización y consistencia de mensajes: **EN REVISIÓN**.
+11. Consistencia RADAR → `ServiceRequest`: **EN REVISIÓN**.
+12. Bypass de simulación en endpoints RADAR: **P0 PENDIENTE DE CORRECCIÓN**.
+13. Máquina de estados `ServiceRequest` / Job: **P0 PENDIENTE DE CORRECCIÓN**.
+14. `Quote → ACCEPTED`: **FUNCIONALIDAD FALTANTE / PENDIENTE**.
+15. `Quote → Transaction PAYMENT_PENDING`: **PENDIENTE**.
+16. Webhook / máquina financiera Mercado Pago: **PENDIENTE**.
+17. Review backend: **PENDIENTE**.
+18. Agregación `rating` / `reviewCount` / `trustScore`: **PENDIENTE**.
+19. Seed automático/demo en `AppContext`: **P0 PENDIENTE DE AISLAMIENTO**.
+20. Rating inicial ficticio de profesionales nuevos: **P1 PENDIENTE**.
+
+### Próximo bloque
+
+Cerrar primero el contrato de `POST /api/quotes/accept` y su relación atómica con `Transaction PAYMENT_PENDING`, reutilizando los tipos y endpoints existentes y evitando una segunda fuente de verdad.
+
 ## 2026-08-30
 
 ### Consolidación de contratos y privacidad
