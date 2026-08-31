@@ -189,3 +189,12 @@ Recuperar el bloque backend exacto de `shared-contact` y del ciclo Job, aplicar 
 ## Regla
 
 Cada corrección relevante debe quedar asociada a un commit y actualizar este registro con el resultado y los pendientes restantes. La verificación funcional completa se realizará al finalizar las correcciones pendientes.
+
+
+### Auditoría — contratación UI, pago y Review (continuación)
+
+- Se confirmó en `AppContext` que la acción de contratación **sí existe** como `acceptQuote(quoteId)` y llama a `POST /api/transactions/create` enviando únicamente `quoteId`. El backend mantiene la autoridad comercial.
+- Se confirmó que el checkout también tiene frontera backend: `createMercadoPagoCheckout(transactionId)` llama a `POST /api/mercadopago/checkout/create` con identidad Firebase.
+- Hallazgo P0 de flujo financiero: el contrato del backend declara que solo el backend puede mover `PAYMENT_PENDING → PAID`, pero inmediatamente después no existe en el bloque auditado una implementación de confirmación que materialice esa transición. `/api/jobs/start` exige `Transaction.status === PAID`, por lo que el tramo debe cerrarse antes de que un trabajo pueda comenzar de forma fiable.
+- Hallazgo crítico de Review: `AppContext.addReview()` todavía escribe directamente en `reviews` y recalcula desde el cliente `rating`, `reviewCount` y además incrementa `jobsCompleted`. Esto contradice la regla de autoridad ya definida y puede producir duplicados o contadores inconsistentes. La lógica debe migrar a una única operación backend atómica asociada a `serviceRequestId`.
+- Próximo bloque prioritario: cerrar `PAYMENT_PENDING → PAID` con autoridad de backend/webhook y luego sustituir la creación/agregación directa de Reviews del cliente por un comando backend autoritativo.
