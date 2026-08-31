@@ -198,3 +198,13 @@ Cada corrección relevante debe quedar asociada a un commit y actualizar este re
 - Hallazgo P0 de flujo financiero: el contrato del backend declara que solo el backend puede mover `PAYMENT_PENDING → PAID`, pero inmediatamente después no existe en el bloque auditado una implementación de confirmación que materialice esa transición. `/api/jobs/start` exige `Transaction.status === PAID`, por lo que el tramo debe cerrarse antes de que un trabajo pueda comenzar de forma fiable.
 - Hallazgo crítico de Review: `AppContext.addReview()` todavía escribe directamente en `reviews` y recalcula desde el cliente `rating`, `reviewCount` y además incrementa `jobsCompleted`. Esto contradice la regla de autoridad ya definida y puede producir duplicados o contadores inconsistentes. La lógica debe migrar a una única operación backend atómica asociada a `serviceRequestId`.
 - Próximo bloque prioritario: cerrar `PAYMENT_PENDING → PAID` con autoridad de backend/webhook y luego sustituir la creación/agregación directa de Reviews del cliente por un comando backend autoritativo.
+
+
+### Corrección de evidencia — Mercado Pago Fase 2
+
+- El archivo `CHANGELOG_CONEXA_COMERCIAL.md` declaraba implementados OAuth, Checkout Pro y webhook.
+- La auditoría del árbol activo de `integration/conexa-unified` no pudo localizar los módulos/rutas activos que materialicen esas operaciones; el código comercial visible llega hasta `PAYMENT_PENDING` y la siguiente transición requerida por `jobs/start` es `PAID`.
+- Se registra una divergencia entre documentación histórica y código activo: la integración Marketplace no debe considerarse operativamente cerrada hasta que checkout, referencia externa, webhook idempotente y transición `PAYMENT_PENDING → PAID` estén presentes en la rama activa.
+- Se actualizó la documentación comercial para reflejar esta reconciliación.
+
+Commit de reconciliación comercial: `a542c579239960253d17d518ed271467228bf867`.
