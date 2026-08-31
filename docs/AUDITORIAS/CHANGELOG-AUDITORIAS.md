@@ -80,15 +80,22 @@ Commit funcional: `f1f05f82634ce130269bc21eaae9730e580a9dfa`.
 
 Commit funcional: `5cca8c0aed2bbf3a53f93ae928241e2c296cf68b`.
 
+### Endurecimiento de identidad y privacidad de conversaciones
+
+- Las Rules de `conversations/{conversationId}` ahora exigen que `participantKey` sea la combinación canónica ordenada de los dos participantes.
+- `unreadCountByUser` y `privacyByUser` ya no pueden contener claves adicionales fuera de los participantes de la conversación.
+- `privacyByUser` solo puede modificar la entrada propia y exige `phoneShared`/`addressShared` booleanos.
+- Se mantiene la restricción de mensajes `SHARED_PHONE`/`SHARED_ADDRESS` a marcadores no sensibles.
+
+Commit funcional: `058e366b9e5c90d3304dc1576a0dc6c617337e45`.
+
 ### Auditoría del ciclo comercial y máquina de estados
 
-- Se confirmó que `src/domain/jobStateMachine.ts` define como estado de finalización del `ServiceRequest` `COMPLETED`, seguido de `REVIEW_PENDING` y `CLOSED`. fileciteturn700file0L2-L6
-- Se detectó una inconsistencia P0 en `server.ts`: `/api/jobs/complete` persiste `SERVICE_COMPLETED` en `service_requests`, mientras que el contrato `JobStatus` y la máquina de estados utilizan `COMPLETED`. Posteriormente `/api/jobs/review-complete` también espera `SERVICE_COMPLETED`.
-- Esta divergencia impide considerar el ciclo de Job canónico hasta que se unifique el estado de `service_requests` con `JobStatus`.
-- No se modifica a ciegas mientras el archivo backend completo no pueda recuperarse de forma íntegra mediante el conector; la corrección debe hacerse sobre el bloque exacto para evitar alterar otras rutas comerciales.
-- El estado de `transactions` sí puede conservar `SERVICE_COMPLETED`, porque `TransactionStatus` es un contrato distinto y representa el estado financiero/comercial de la transacción. fileciteturn699file0L2-L4
+- `src/domain/jobStateMachine.ts` define `COMPLETED`, seguido de `REVIEW_PENDING` y `CLOSED` para el ciclo de Job.
+- Se mantiene abierto el P0 de divergencia `SERVICE_COMPLETED` vs `COMPLETED` en `server.ts` hasta recuperar y editar el bloque backend exacto de forma íntegra.
+- `SERVICE_COMPLETED` debe permanecer exclusivamente dentro de `TransactionStatus`.
 
-Hallazgo P0: **ABIERTO — unificar `service_requests.status` con `JobStatus` y dejar `SERVICE_COMPLETED` exclusivamente para `transactions.status`.**
+Hallazgo P0: **ABIERTO — unificar `service_requests.status` con `JobStatus`.**
 
 ### Estado de P0 actualizado
 
@@ -99,16 +106,16 @@ Hallazgo P0: **ABIERTO — unificar `service_requests.status` con `JobStatus` y 
 5. UX de publicación de `ServiceRequest`: **CERRADO**.
 6. Integridad estructural de conversaciones: **CERRADO**.
 7. Prevención de PII en mensajes `SHARED_*`: **CERRADO**.
-8. Integridad canónica en cliente para conversaciones: **CERRADO**.
+8. Identidad canónica y esquema de privacidad en Rules: **CERRADO**.
 9. Autorización backend efectiva de lectura de contacto compartido: **EN REVISIÓN**.
 10. Autorización de mensajes y consistencia conversación/mensaje: **EN REVISIÓN**.
 11. Consistencia RADAR → `ServiceRequest`: **EN REVISIÓN**.
-12. Máquina de estados `ServiceRequest` / Job: **BLOQUEADO POR INCONSISTENCIA DE ESTADOS P0**.
+12. Máquina de estados `ServiceRequest` / Job: **BLOQUEADO POR INCONSISTENCIA P0**.
 13. `startJob` / `completeJob` / reviews / whitelist de updates: **PENDIENTE**.
 
 ### Próximo bloque
 
-Corregir en `server.ts` la divergencia `SERVICE_COMPLETED` vs `COMPLETED` del `ServiceRequest`, manteniendo `SERVICE_COMPLETED` únicamente en `TransactionStatus`. Después continuar con `startJob`, reviews y whitelist de updates.
+Recuperar el bloque backend exacto de `shared-contact` y del ciclo Job, aplicar la autoridad canónica de conversación y luego unificar `service_requests.status` con `JobStatus`.
 
 ## 2026-08-29
 
