@@ -17,6 +17,23 @@
 - Se confirmó nuevamente la divergencia P0 del ciclo Job: `startJob` utiliza `IN_PROGRESS`, mientras `completeJob` actualmente intenta usar `SERVICE_COMPLETED` sobre `ServiceRequest`, estado que pertenece a `TransactionStatus` y no a `JobStatus`.
 - Reviews continúan incompletas como operación backend autoritativa: falta cerrar autorización por `auth.uid`, unicidad por `serviceRequestId`/cliente, agregación de reputación y transición final a `CLOSED`.
 
+
+### Corrección aplicada — aislamiento de datos demo y reputación inicial
+
+- Se eliminó de `AppContext` la siembra automática de colecciones Firestore desde la aplicación en ejecución. Los datos mock permanecen como soporte de modo demo/sin Firebase, pero ya no se escriben automáticamente en Firestore por ejecutar la app desde localhost.
+- Se eliminó `getDocs` de la ruta de seed del contexto, reduciendo además una lectura global innecesaria durante el arranque.
+- Los perfiles profesionales nuevos ya no nacen con `rating: 5.0`. El valor inicial queda en `rating: 0` con `reviewCount: 0`, evitando que la ausencia de reviews se presente como una calificación perfecta.
+
+Commit funcional: `2ccb8aed1e7b0709f62abed5401e39f86619f976`.
+
+### Corrección de diagnóstico — Quote → Transaction
+
+- Se verificó directamente `POST /api/transactions/create`: la aceptación comercial ya existe dentro de esta operación autoritativa.
+- El navegador aporta únicamente `quoteId`; el backend deriva `requestId`, `clientId`, `professionalId`, `amountArs` y comisión desde documentos persistidos.
+- La creación usa una transacción Firestore y realiza atómicamente: `Transaction → PAYMENT_PENDING`, `Quote → ACCEPTED` y `ServiceRequest → PROFESSIONAL_SELECTED`.
+- La conclusión anterior que clasificaba `Quote → ACCEPTED` como funcionalidad faltante queda corregida: **la funcionalidad existe, pero debe ser expuesta y utilizada explícitamente como contratación/aceptación desde la UI sin duplicar autoridad**.
+- Pendiente inmediato: localizar o implementar la acción UI que invoque `/api/transactions/create` con solo `quoteId`, y revisar el siguiente tramo `PAYMENT_PENDING → PAID`.
+
 ### Estado operativo actualizado
 
 1. Contrato público/privado de usuario: **CERRADO**.
