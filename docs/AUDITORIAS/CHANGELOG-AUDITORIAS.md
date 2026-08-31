@@ -59,30 +59,36 @@ Commits funcionales: `c36d02ced76c11e7def4beb23d56d56e6fb00383` y `aa172c3b9bbde
 ### Conversaciones: integridad de participantes
 
 - Se centralizó la validación de conversaciones de exactamente dos participantes distintos.
-- `getOtherParticipantId()` e `isConversationParticipant()` ahora rechazan listas de participantes estructuralmente inválidas antes de considerar la membresía.
-- `createConversationPrivacy()` reutiliza la misma validación de integridad antes de construir el mapa de privacidad.
-- Esto reduce divergencias entre el modelo de conversación, el servicio de mensajería y las reglas de Firestore.
+- `getOtherParticipantId()` e `isConversationParticipant()` ahora rechazan listas de participantes estructuralmente inválidas.
+- `createConversationPrivacy()` reutiliza la misma validación de integridad.
 
 Commit funcional: `4d9c6b4745e96ef3832c823aa34044a68c72cf47`.
 
 ### Privacidad de mensajes compartidos
 
 - Se detectó que `SHARED_PHONE` y `SHARED_ADDRESS` podían transportar potencialmente el dato privado real dentro del contenido del mensaje.
-- Las reglas de Firestore ahora obligan a que esos tipos utilicen únicamente los marcadores `Teléfono compartido` o `Dirección compartida`.
-- La información real debe obtenerse exclusivamente mediante el endpoint backend de `shared-contact`, que lee `/private/info` sin exponer esa colección directamente.
-- Se mantiene así la separación entre el evento de consentimiento/compartición y el valor privado.
+- Las reglas de Firestore ahora obligan a que esos tipos utilicen únicamente marcadores.
+- La información real debe obtenerse exclusivamente mediante el endpoint backend de `shared-contact`.
 
 Commit funcional: `f1f05f82634ce130269bc21eaae9730e580a9dfa`.
 
 ### Integridad canónica del servicio de conversaciones
 
-- `conversationService.normalizeConversation()` ahora exige que `participantKey` coincida exactamente con la clave canónica derivada de los dos participantes.
-- La normalización reconstruye `privacyByUser` únicamente para participantes válidos y rechaza estados de compartición que no sean booleanos.
-- `getOrCreateConversation()` valida tanto los participantes como el `participantKey` persistido antes de reutilizar una conversación existente.
-- `sendConversationMessage()` y `markConversationAsRead()` ahora operan sobre una conversación normalizada, evitando enviar o mutar datos asociados a conversaciones estructuralmente corruptas.
-- `updateConversationPrivacy()` también queda protegido por la misma validación canónica antes de modificar permisos de compartición.
+- `conversationService.normalizeConversation()` exige que `participantKey` coincida con la clave canónica derivada de los participantes.
+- `privacyByUser` se reconstruye únicamente para participantes válidos.
+- Las operaciones de conversación utilizan una representación normalizada.
 
 Commit funcional: `5cca8c0aed2bbf3a53f93ae928241e2c296cf68b`.
+
+### Auditoría del ciclo comercial y máquina de estados
+
+- Se confirmó que `src/domain/jobStateMachine.ts` define como estado de finalización del `ServiceRequest` `COMPLETED`, seguido de `REVIEW_PENDING` y `CLOSED`. fileciteturn700file0L2-L6
+- Se detectó una inconsistencia P0 en `server.ts`: `/api/jobs/complete` persiste `SERVICE_COMPLETED` en `service_requests`, mientras que el contrato `JobStatus` y la máquina de estados utilizan `COMPLETED`. Posteriormente `/api/jobs/review-complete` también espera `SERVICE_COMPLETED`.
+- Esta divergencia impide considerar el ciclo de Job canónico hasta que se unifique el estado de `service_requests` con `JobStatus`.
+- No se modifica a ciegas mientras el archivo backend completo no pueda recuperarse de forma íntegra mediante el conector; la corrección debe hacerse sobre el bloque exacto para evitar alterar otras rutas comerciales.
+- El estado de `transactions` sí puede conservar `SERVICE_COMPLETED`, porque `TransactionStatus` es un contrato distinto y representa el estado financiero/comercial de la transacción. fileciteturn699file0L2-L4
+
+Hallazgo P0: **ABIERTO — unificar `service_requests.status` con `JobStatus` y dejar `SERVICE_COMPLETED` exclusivamente para `transactions.status`.**
 
 ### Estado de P0 actualizado
 
@@ -93,15 +99,16 @@ Commit funcional: `5cca8c0aed2bbf3a53f93ae928241e2c296cf68b`.
 5. UX de publicación de `ServiceRequest`: **CERRADO**.
 6. Integridad estructural de conversaciones: **CERRADO**.
 7. Prevención de PII en mensajes `SHARED_*`: **CERRADO**.
-8. Integridad canónica en cliente para `shared-contact`: **CERRADO**.
+8. Integridad canónica en cliente para conversaciones: **CERRADO**.
 9. Autorización backend efectiva de lectura de contacto compartido: **EN REVISIÓN**.
 10. Autorización de mensajes y consistencia conversación/mensaje: **EN REVISIÓN**.
-11. Máquina de estados RADAR → `ServiceRequest`: **PENDIENTE**.
-12. `startJob` / `completeJob` / reviews / whitelist de updates: **PENDIENTE**.
+11. Consistencia RADAR → `ServiceRequest`: **EN REVISIÓN**.
+12. Máquina de estados `ServiceRequest` / Job: **BLOQUEADO POR INCONSISTENCIA DE ESTADOS P0**.
+13. `startJob` / `completeJob` / reviews / whitelist de updates: **PENDIENTE**.
 
 ### Próximo bloque
 
-Cerrar la autorización backend de `shared-contact`, verificando la clave canónica persistida y el mapa `privacyByUser`, y después completar la autorización de mensajes. Luego continuar con RADAR → `ServiceRequest` y el flujo comercial `Quote → aceptación → Job`.
+Corregir en `server.ts` la divergencia `SERVICE_COMPLETED` vs `COMPLETED` del `ServiceRequest`, manteniendo `SERVICE_COMPLETED` únicamente en `TransactionStatus`. Después continuar con `startJob`, reviews y whitelist de updates.
 
 ## 2026-08-29
 
