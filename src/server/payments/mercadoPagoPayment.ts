@@ -1,0 +1,42 @@
+import { MercadoPagoOAuthConnection, decryptOAuthToken } from './mercadoPagoOAuthTokenStore.js';
+
+function accessToken(connection: MercadoPagoOAuthConnection): string {
+  if (connection.provider !== 'MERCADO_PAGO' || connection.revokedAt) throw new Error('MERCADO_PAGO_CONNECTION_INVALID');
+  if (connection.expiresAt && Date.parse(connection.expiresAt) <= Date.now()) throw new Error('MERCADO_PAGO_ACCESS_TOKEN_EXPIRED');
+  return decryptOAuthToken(connection.encryptedAccessToken);
+}
+
+export async function createMercadoPagoPreference(connection: MercadoPagoOAuthConnection, input: {
+  transactionId: string;
+  title: string;
+  amountArs: number;
+  clientEmail?: string;
+  appUrl: string;
+}) {
+  if (!Number.isFinite(input.amountArs) || input.amountArs <= 0) throw new Error('INVALID_PAYMENT_AMOUNT');
+  const token = accessToken(connection);
+  const base = input.appUrl.replace(/\/$/, '');
+  const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      items: [{ id: input.transactionId, title: input.title, quantity: 1, currency_id: 'ARS', unit_price: input.amountArs }],
+      payer: input.clientEmail ? { email: input.clientEmail } : undefined,
+      external_reference: input.transactionId,
+      back_urls: { success: `${base}/payment/success`, failure: `${base}/payment/failure`, pending: `${base}/payment/pending` },
+      auto_return: 'approved',
+      notification_url: `${base}/api/mercadopago/webhook`,
+    }),
+  });
+  if (!response.ok) throw new Error(`MP_CHECKOUT_${response.status}`);
+  const data = await response.json() as any;
+  if (!data.id || !data.init_point) throw new Error('MP_CHECKOUT_RESPONSE_INVALID');
+  return { preferenceId: String(data.id), checkoutUrl: String(data.init_point) };
+}
+
+export async function fetchMercadoPagoPaymentWithConnection(connection: MercadoPagoOAuthConnection, paymentId: string) {
+  const token = accessToken(connection);
+  const response = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) throw new Error(`MP_PAYMENT_LOOKUP_${response.status}`);
+  return response.json() as Promise<any>;
+}
