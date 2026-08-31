@@ -38,9 +38,12 @@ service cloud.firestore {
       match /private/info {
         // Private contact/address data is not a client-side public profile.
         allow read: if isOwner(userId) || isAdmin();
-        allow create, update: if isOwner(userId)
+        allow create: if (isOwner(userId)
+          && request.resource.data.keys().hasOnly(['phonePrivate', 'exactAddressPrivate', 'updatedAt', 'migratedAt']))
+          || isAdmin();
+        allow update: if (isOwner(userId)
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['phonePrivate', 'exactAddressPrivate', 'updatedAt', 'migratedAt'])
+            .hasOnly(['phonePrivate', 'exactAddressPrivate', 'updatedAt', 'migratedAt']))
           || isAdmin();
         allow delete: if isOwner(userId) || isAdmin();
       }
