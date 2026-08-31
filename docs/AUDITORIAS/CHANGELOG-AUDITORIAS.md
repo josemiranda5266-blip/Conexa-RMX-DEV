@@ -12,6 +12,17 @@
 - Se confirmó que `Quote` mantiene los identificadores y datos comerciales sin incorporar datos privados; `quotes/{quoteId}` debe seguir siendo la fuente canónica.
 - Se confirmó que `conversation.ts` ya dispone de utilidades de membresía (`isConversationParticipant`) y de privacidad de conversación (`phoneShared`, `addressShared`), base sobre la que debe cerrarse la autorización de mensajes.
 
+
+### Creación autoritativa de ServiceRequest
+
+- Se cerró el hueco principal de persistencia directa del cliente para solicitudes normales: se añadió el endpoint de creación backend correspondiente en server.ts.
+- El backend ahora deriva clientId, clientName y clientAvatar desde la identidad autenticada y el perfil persistido; el navegador no puede imponer identidad, estado comercial ni modo de descubrimiento.
+- El backend valida campos obligatorios, urgencia y presupuesto antes de crear la solicitud con estado inicial REQUEST_CREATED, sourceType DIRECT y discoveryMode OPEN.
+- AppContext.createServiceRequest() dejó de escribir directamente en Firestore y ahora utiliza la API autoritativa con Firebase ID token.
+- Esto alinea la implementación con firestore.rules, donde service_requests mantiene la creación directa del cliente cerrada.
+
+Pendiente inmediato: revisar la propagación de errores en ServiceRequestForm y continuar con la separación pública/privada de UserProfile y PrivateUserInfo.
+
 ### Pendientes inmediatos
 
 1. Separar definitivamente `UserProfile/LocationData` de `PrivateUserInfo` y migrar referencias a `phonePrivate`/`exactAddressPrivate`.
