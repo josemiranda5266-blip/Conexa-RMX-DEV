@@ -21,6 +21,23 @@ service cloud.firestore {
           && (!request.resource.data.keys().hasAny(['isProfessionalVerified']) || request.resource.data.isProfessionalVerified == false)
           && (!request.resource.data.keys().hasAny(['hasProfessionalProfile']) || request.resource.data.hasProfessionalProfile == false);
       }
+      function hasNoClientManagedAuthoritativeFieldsOnUpdate() {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'isIdentityVerified',
+          'identityVerificationStatus',
+          'isProfessionalVerified',
+          'professionalVerificationStatus',
+          'hasProfessionalProfile',
+          'rating',
+          'reviewCount',
+          'jobsCompleted',
+          'trustScore',
+          'isBlocked',
+          'isFeatured',
+          'isProSubscriber',
+          'isDemoData'
+        ]);
+      }
       allow read: if isSignedIn();
       allow create: if isOwner(userId)
         && hasNoPrivateProfileFields()
@@ -30,10 +47,8 @@ service cloud.firestore {
       allow update: if isAdmin() || (isOwner(userId)
         && request.resource.data.role == resource.data.role
         && hasNoPrivateProfileFields()
-        && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode != 'ADMIN')
-        && (!resource.data.keys().hasAny(['isIdentityVerified']) || request.resource.data.isIdentityVerified == resource.data.isIdentityVerified)
-        && (!resource.data.keys().hasAny(['isProfessionalVerified']) || request.resource.data.isProfessionalVerified == resource.data.isProfessionalVerified)
-        && (!resource.data.keys().hasAny(['hasProfessionalProfile']) || request.resource.data.hasProfessionalProfile == resource.data.hasProfessionalProfile));
+        && hasNoClientManagedAuthoritativeFieldsOnUpdate()
+        && (!request.resource.data.keys().hasAny(['activeMode']) || request.resource.data.activeMode != 'ADMIN'));
       allow delete: if isAdmin();
       match /private/info {
         allow read: if isOwner(userId) || isAdmin();
