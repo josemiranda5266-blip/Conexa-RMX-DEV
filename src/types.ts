@@ -330,6 +330,7 @@ export type OpportunitySourceType =
 
 export type ContactMethod = 'CANAL_OFICIAL' | 'RESPUESTA_PUBLICA_PERMITIDA' | 'FORMULARIO_LANDING' | 'WHATSAPP_API' | 'EMAIL';
 export type ApprovalMode = 'AUTOMÁTICO' | 'ASISTIDO' | 'MANUAL';
+export type RadarMatchingStatus = 'NOT_RUN' | 'RUNNING' | 'COMPLETED' | 'FAILED';
 
 export interface MatchedProfessional {
   professionalId: string;
@@ -350,6 +351,8 @@ export interface RadarOpportunity {
   externalReference?: string;
   clientUserId?: string;
   linkedAt?: string;
+  serviceRequestId?: string;
+  convertedAt?: string;
   category: string;
   subcategory: string;
   description: string;
@@ -364,6 +367,7 @@ export interface RadarOpportunity {
   lastUpdated: string;
   assignedOperator?: string;
   matchedProfessionals: MatchedProfessional[];
+  matchingStatus?: RadarMatchingStatus;
   conversionStatus: 'NOT_STARTED' | 'PENDING' | 'CONVERTED' | 'FAILED';
   consentStatus: 'PENDING_CONSENT' | 'CONSENT_GRANTED' | 'NOT_REQUIRED';
   contactMethod: ContactMethod;
@@ -384,7 +388,7 @@ export interface RadarOpportunity {
   attribution?: {
     source: string;
     campaign?: string;
-    opportunityId: string;
+    opportunityId?: string;
   };
 }
 
