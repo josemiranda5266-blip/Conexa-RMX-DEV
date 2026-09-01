@@ -1641,6 +1641,67 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
     });
   }
 
+  app.post('/api/verifications/submit', rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const authResult = await verifyAuthToken(req);
+      if (!authResult.isAuthenticated || !authResult.userId) {
+        return res.status(401).json({ success: false, error: 'Se requiere autenticación válida.', code: authResult.errorReason || 'UNAUTHORIZED' });
+      }
+
+      const { type, documentName, documentUrl } = req.body || {};
+      if (!['IDENTITY', 'PROFESSIONAL'].includes(type)) {
+        return res.status(400).json({ success: false, error: 'Tipo de verificación inválido.', code: 'INVALID_VERIFICATION_TYPE' });
+      }
+      if (typeof documentName !== 'string' || !documentName.trim() || typeof documentUrl !== 'string' || !documentUrl.trim()) {
+        return res.status(400).json({ success: false, error: 'Documento y nombre de documento son obligatorios.', code: 'INVALID_VERIFICATION_DOCUMENT' });
+      }
+
+      const firestore = await getAdminDb();
+      const userRef = firestore.collection('users').doc(authResult.userId);
+      const userSnap = await userRef.get();
+      if (!userSnap.exists) {
+        return res.status(404).json({ success: false, error: 'Usuario no encontrado.', code: 'USER_NOT_FOUND' });
+      }
+
+      const user = userSnap.data() || {};
+      if (type === 'PROFESSIONAL' && !(user.hasProfessionalProfile === true || user.isProfessional === true || user.role === 'PROFESSIONAL')) {
+        return res.status(409).json({ success: false, error: 'Debés completar tu perfil profesional antes de solicitar la verificación.', code: 'PROFESSIONAL_PROFILE_REQUIRED' });
+      }
+
+      const verificationRef = firestore.collection('verifications').doc();
+      const createdAt = new Date().toISOString();
+
+      await firestore.runTransaction(async (tx: any) => {
+        tx.set(verificationRef, {
+          userId: authResult.userId,
+          userName: user.name || '',
+          userRole: user.role || 'USER',
+          type,
+          documentName: documentName.trim(),
+          documentUrl: documentUrl.trim(),
+          status: 'PENDING',
+          createdAt
+        });
+
+        tx.update(userRef, type === 'IDENTITY'
+          ? { identityVerificationStatus: 'PENDING' }
+          : { professionalVerificationStatus: 'PENDING' }
+        );
+      });
+
+      return res.status(201).json({
+        success: true,
+        verificationId: verificationRef.id,
+        status: 'PENDING',
+        type,
+        createdAt
+      });
+    } catch (err: any) {
+      console.error('[CONEXA VERIFICATION] Error creating verification request:', err);
+      return res.status(500).json({ success: false, error: 'No se pudo registrar la solicitud de verificación.', code: err?.message || 'VERIFICATION_SUBMISSION_ERROR' });
+    }
+  });
+
   app.post('/api/admin/verifications/:verificationId/approve', rateLimiter, async (req: Request, res: Response) => {
     try {
       const adminIdentity = await requireAdminRequest(req, res);

@@ -107,7 +107,7 @@ interface AppContextType {
   startJob: (jobId: string) => Promise<void>;
   completeJob: (jobId: string) => Promise<void>;
   addReview: (review: Omit<Review, 'id' | 'createdAt' | 'isVerifiedJob'>) => Promise<void>;
-  submitVerification: (type: 'IDENTITY' | 'PROFESSIONAL', documentName: string, docUrl: string) => void;
+  submitVerification: (type: 'IDENTITY' | 'PROFESSIONAL', documentName: string, docUrl: string) => Promise<void>;
   approveVerification: (verificationId: string) => void;
   reportUser: (reportedUserId: string, reason: UserReport['reason'], description: string) => void;
   blockUser: (userIdToBlock: string) => void;
@@ -1348,9 +1348,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ));
   };
 
-  const submitVerification = (type: 'IDENTITY' | 'PROFESSIONAL', documentName: string, docUrl: string) => {
+  const submitVerification = async (type: 'IDENTITY' | 'PROFESSIONAL', documentName: string, docUrl: string) => {
+    if (!currentUser) throw new Error('Debés iniciar sesión para solicitar una verificación.');
+
+    const headers = await getAuthenticatedRequestHeaders();
+    const response = await fetch('/api/verifications/submit', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ type, documentName, documentUrl: docUrl })
+    });
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'No se pudo registrar la solicitud de verificación.');
+    }
+
     const newReq: VerificationRequest = {
-      id: `ver-${Date.now()}`,
+      id: data.verificationId,
       userId: currentUser.id,
       userName: currentUser.name,
       userRole: currentUser.role,
@@ -1358,21 +1372,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       documentName,
       documentUrl: docUrl,
       status: 'PENDING',
-      createdAt: 'Hace un instante'
+      createdAt: data.createdAt
     };
-    setVerifications(prev => [newReq, ...prev]);
 
-    // Update current user pending status
-    setUsers(prev => prev.map(u => {
-      if (u.id === currentUser.id) {
-        if (type === 'IDENTITY') return { ...u, identityVerificationStatus: 'PENDING' };
-        return { ...u, professionalVerificationStatus: 'PENDING' };
-      }
-      return u;
+    setVerifications(prev => [newReq, ...prev]);
+    setUsers(prev => prev.map(user => {
+      if (user.id !== currentUser.id) return user;
+      return type === 'IDENTITY'
+        ? { ...user, identityVerificationStatus: 'PENDING' }
+        : { ...user, professionalVerificationStatus: 'PENDING' };
     }));
     setCurrentUser(prev => {
-      if (type === 'IDENTITY') return { ...prev, identityVerificationStatus: 'PENDING' };
-      return { ...prev, professionalVerificationStatus: 'PENDING' };
+      if (!prev) return prev;
+      return type === 'IDENTITY'
+        ? { ...prev, identityVerificationStatus: 'PENDING' }
+        : { ...prev, professionalVerificationStatus: 'PENDING' };
     });
   };
 
