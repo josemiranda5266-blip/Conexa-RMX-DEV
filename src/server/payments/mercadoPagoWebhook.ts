@@ -13,16 +13,17 @@ function notificationDataId(req: Request): string | undefined {
 }
 
 function requestId(req: Request): string | undefined {
-  const value = req.header('x-request-id');
-  return value || undefined;
+  return req.header('x-request-id') || undefined;
 }
 
 function signature(req: Request): string | undefined {
   return req.header('x-signature') || undefined;
 }
 
-function connectionForMerchant(merchantId: string): Promise<FirebaseFirestore.DocumentSnapshot> {
-  return getAdminDb().collection(CONNECTION_COLLECTION).doc(merchantId).get();
+async function connectionForMerchant(merchantId: string): Promise<MercadoPagoOAuthConnection | null> {
+  const snapshot = await getAdminDb().collection(CONNECTION_COLLECTION).doc(merchantId).get();
+  if (!snapshot.exists) return null;
+  return snapshot.data() as MercadoPagoOAuthConnection;
 }
 
 export async function handleMercadoPagoWebhook(req: Request, res: Response): Promise<Response> {
@@ -38,10 +39,8 @@ export async function handleMercadoPagoWebhook(req: Request, res: Response): Pro
       return res.status(401).json({ success: false, code: 'WEBHOOK_SIGNATURE_INVALID' });
     }
 
-    const snapshot = await connectionForMerchant(merchantId);
-    if (!snapshot.exists) return res.status(404).json({ success: false, code: 'MERCADO_PAGO_CONNECTION_NOT_FOUND' });
-
-    const connection = snapshot.data() as MercadoPagoOAuthConnection;
+    const connection = await connectionForMerchant(merchantId);
+    if (!connection) return res.status(404).json({ success: false, code: 'MERCADO_PAGO_CONNECTION_NOT_FOUND' });
     if (String(connection.merchantId) !== merchantId) return res.status(403).json({ success: false, code: 'MERCADO_PAGO_CONNECTION_MISMATCH' });
 
     const result = await reconcileMercadoPagoPayment(dataId, connection);
