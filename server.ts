@@ -1759,6 +1759,67 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
     }
   });
 
+  app.post('/api/admin/verifications/:verificationId/reject', rateLimiter, async (req: Request, res: Response) => {
+    try {
+      const adminIdentity = await requireAdminRequest(req, res);
+      if (!adminIdentity) return;
+
+      const verificationId = req.params.verificationId;
+      if (!verificationId) {
+        return res.status(400).json({ success: false, error: 'verificationId es obligatorio.', code: 'INVALID_VERIFICATION_ID' });
+      }
+
+      const firestore = await getAdminDb();
+      const verificationRef = firestore.collection('verifications').doc(verificationId);
+
+      const result = await firestore.runTransaction(async (tx: any) => {
+        const verificationSnap = await tx.get(verificationRef);
+        if (!verificationSnap.exists) throw new Error('VERIFICATION_NOT_FOUND');
+
+        const verification = verificationSnap.data() || {};
+        if (!verification.userId || !['IDENTITY', 'PROFESSIONAL'].includes(verification.type)) {
+          throw new Error('INVALID_VERIFICATION_DATA');
+        }
+        if (verification.status && verification.status !== 'PENDING') {
+          throw new Error('INVALID_VERIFICATION_STATE');
+        }
+
+        const userRef = firestore.collection('users').doc(verification.userId);
+        const userSnap = await tx.get(userRef);
+        if (!userSnap.exists) throw new Error('USER_NOT_FOUND');
+
+        const rejectedAt = new Date().toISOString();
+        tx.update(verificationRef, {
+          status: 'REJECTED',
+          rejectedAt,
+          rejectedBy: adminIdentity.userId
+        });
+        tx.update(userRef, verification.type === 'IDENTITY'
+          ? { isIdentityVerified: false, identityVerificationStatus: 'REJECTED' }
+          : { isProfessionalVerified: false, professionalVerificationStatus: 'REJECTED' }
+        );
+
+        return { userId: verification.userId, type: verification.type, rejectedAt };
+      });
+
+      await writeAdminAudit(firestore, adminIdentity, 'REJECT_VERIFICATION', 'VERIFICATION', verificationId, 'SUCCESS', result);
+      return res.json({ success: true, verificationId, status: 'REJECTED', ...result });
+    } catch (err: any) {
+      const code = err?.message || 'ADMIN_VERIFICATION_REJECTION_ERROR';
+      const statusMap: Record<string, number> = {
+        VERIFICATION_NOT_FOUND: 404,
+        USER_NOT_FOUND: 404,
+        INVALID_VERIFICATION_DATA: 400,
+        INVALID_VERIFICATION_STATE: 409
+      };
+      return res.status(statusMap[code] || 500).json({
+        success: false,
+        error: statusMap[code] ? code : 'No se pudo rechazar la verificación.',
+        code
+      });
+    }
+  });
+
   app.post('/api/admin/users/:userId/block', rateLimiter, async (req: Request, res: Response) => {
     try {
       const adminIdentity = await requireAdminRequest(req, res);
