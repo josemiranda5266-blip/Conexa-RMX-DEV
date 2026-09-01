@@ -1417,6 +1417,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!response.ok || !data.success) {
       throw new Error(data.error || 'No se pudo aprobar la verificación.');
     }
+
+    const verification = verifications.find(item => item.id === verificationId);
+    const approvedAt = data.approvedAt || new Date().toISOString();
+
+    setVerifications(prev => prev.map(item =>
+      item.id === verificationId ? { ...item, status: 'VERIFIED' } : item
+    ));
+
+    if (verification) {
+      const applyVerification = (user: UserProfile): UserProfile => {
+        if (user.id !== verification.userId) return user;
+        return verification.type === 'IDENTITY'
+          ? { ...user, isIdentityVerified: true, identityVerificationStatus: 'VERIFIED' }
+          : { ...user, isProfessionalVerified: true, professionalVerificationStatus: 'VERIFIED' };
+      };
+
+      setUsers(prev => prev.map(applyVerification));
+      setCurrentUser(prev => prev ? applyVerification(prev) : prev);
+    }
+
+    await logAdminAction('APPROVE_VERIFICATION', verificationId, 'Aprobada el ' + approvedAt);
   };
 
   const reportUser = async (reportedUserId: string, reason: UserReport['reason'], description: string) => {
