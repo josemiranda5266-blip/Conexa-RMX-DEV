@@ -62,12 +62,15 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
     };
 
     if (auth?.currentUser && db) {
+      const userDocRef = doc(db, 'users', auth.currentUser.uid);
       try {
-        const userDocRef = doc(db, 'users', auth.currentUser.uid);
         await setDoc(userDocRef, updatedUser, { merge: true });
         console.log('[CONEXA PROFILE] Perfil profesional guardado en Firestore para UID:', auth.currentUser.uid);
       } catch (err) {
         console.error('[CONEXA PROFILE] Error guardando en Firestore:', err);
+        // Do not switch local state into professional mode when the
+        // authoritative profile write failed.
+        return;
       }
     }
 
