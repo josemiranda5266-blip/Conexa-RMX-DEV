@@ -1,9 +1,10 @@
 import { MercadoPagoOAuthConnection, decryptOAuthToken } from './mercadoPagoOAuthTokenStore.js';
+import { ensureMercadoPagoOAuthConnectionValid } from './mercadoPagoOAuth.js';
 
-function accessToken(connection: MercadoPagoOAuthConnection): string {
-  if (connection.provider !== 'MERCADO_PAGO' || connection.revokedAt) throw new Error('MERCADO_PAGO_CONNECTION_INVALID');
-  if (connection.expiresAt && Date.parse(connection.expiresAt) <= Date.now()) throw new Error('MERCADO_PAGO_ACCESS_TOKEN_EXPIRED');
-  return decryptOAuthToken(connection.encryptedAccessToken);
+async function accessToken(connection: MercadoPagoOAuthConnection): Promise<{ token: string; connection: MercadoPagoOAuthConnection }> {
+  const validConnection = await ensureMercadoPagoOAuthConnectionValid(connection);
+  if (validConnection.provider !== 'MERCADO_PAGO') throw new Error('MERCADO_PAGO_CONNECTION_INVALID');
+  return { token: decryptOAuthToken(validConnection.encryptedAccessToken), connection: validConnection };
 }
 
 export async function createMercadoPagoPreference(connection: MercadoPagoOAuthConnection, input: {
@@ -16,9 +17,9 @@ export async function createMercadoPagoPreference(connection: MercadoPagoOAuthCo
   if (!connection.merchantId) throw new Error('MERCADO_PAGO_MERCHANT_REQUIRED');
   if (!Number.isFinite(input.amountArs) || input.amountArs <= 0) throw new Error('INVALID_PAYMENT_AMOUNT');
   if (!input.transactionId?.trim()) throw new Error('TRANSACTION_ID_REQUIRED');
-  const token = accessToken(connection);
+  const { token, connection: validConnection } = await accessToken(connection);
   const base = input.appUrl.replace(/\/$/, '');
-  const webhookUrl = `${base}/api/mercadopago/webhook?merchantId=${encodeURIComponent(connection.merchantId)}`;
+  const webhookUrl = `${base}/api/mercadopago/webhook?merchantId=${encodeURIComponent(validConnection.merchantId)}`;
   const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -38,7 +39,8 @@ export async function createMercadoPagoPreference(connection: MercadoPagoOAuthCo
 }
 
 export async function fetchMercadoPagoPaymentWithConnection(connection: MercadoPagoOAuthConnection, paymentId: string) {
-  const token = accessToken(connection);
+  if (!paymentId?.trim()) throw new Error('MP_PAYMENT_ID_REQUIRED');
+  const { token } = await accessToken(connection);
   const response = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`, { headers: { Authorization: `Bearer ${token}` } });
   if (!response.ok) throw new Error(`MP_PAYMENT_LOOKUP_${response.status}`);
   return response.json() as Promise<any>;
