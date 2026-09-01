@@ -1,8 +1,11 @@
 import * as adminModule from 'firebase-admin';
 import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
+import fs from 'fs';
+import path from 'path';
 
 const firebaseAdmin: any = (adminModule as any).default || adminModule;
 let firebaseAdminApp: any = null;
+let cachedDatabaseId: string | null = null;
 
 export function getFirebaseAdmin(): any {
   if (firebaseAdminApp) return firebaseAdminApp;
@@ -12,6 +15,7 @@ export function getFirebaseAdmin(): any {
   }
 
   const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT?.trim();
+  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
   let credential: any = null;
 
   if (serviceAccount) {
@@ -22,6 +26,14 @@ export function getFirebaseAdmin(): any {
       credential = firebaseAdmin.cert(parsed);
     } catch (error: any) {
       console.error('[FIREBASE ADMIN] Invalid FIREBASE_SERVICE_ACCOUNT:', error?.message || error);
+    }
+  }
+
+  if (!credential && credentialsPath) {
+    try {
+      credential = firebaseAdmin.applicationDefault();
+    } catch (error: any) {
+      console.error('[FIREBASE ADMIN] GOOGLE_APPLICATION_CREDENTIALS unavailable:', error?.message || error);
     }
   }
 
@@ -44,6 +56,23 @@ export function getFirebaseAdmin(): any {
   }
 }
 
+function getFirestoreDatabaseId(): string {
+  if (cachedDatabaseId) return cachedDatabaseId;
+  try {
+    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    if (fs.existsSync(configPath)) {
+      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      if (typeof parsed.firestoreDatabaseId === 'string' && parsed.firestoreDatabaseId.trim()) {
+        cachedDatabaseId = parsed.firestoreDatabaseId.trim();
+        return cachedDatabaseId;
+      }
+    }
+  } catch (error: any) {
+    console.error('[FIREBASE ADMIN] Error reading firestoreDatabaseId:', error?.message || error);
+  }
+  return '(default)';
+}
+
 export function getAdminDb(): any {
   const app = getFirebaseAdmin();
   if (!app) {
@@ -51,5 +80,9 @@ export function getAdminDb(): any {
     (error as any).code = 'FIREBASE_ADMIN_NOT_INITIALIZED';
     throw error;
   }
-  return getAdminFirestore(app);
+
+  const databaseId = getFirestoreDatabaseId();
+  return databaseId !== '(default)'
+    ? getAdminFirestore(app, databaseId)
+    : getAdminFirestore(app);
 }
