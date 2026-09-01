@@ -1312,7 +1312,9 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
         if (!hasProfessionalCapability(userSnap.data())) throw new Error('PROFESSIONAL_ROLE_REQUIRED');
         if (requestData.status !== 'PROFESSIONAL_SELECTED' || transactionData.status !== 'PAID' || quoteData.status !== 'ACCEPTED') throw new Error('INVALID_JOB_STATE');
         if (quoteData.professionalId !== auth.userId || transactionData.professionalId !== auth.userId) throw new Error('FORBIDDEN');
-        tx.update(requestRef, { status: 'IN_PROGRESS', startedAt: new Date().toISOString(), startedBy: auth.userId });
+        const startedAt = new Date().toISOString();
+        tx.update(requestRef, { status: 'IN_PROGRESS', startedAt, startedBy: auth.userId });
+        tx.update(transactionRef, { status: 'SERVICE_IN_PROGRESS', serviceStartedAt: startedAt });
       });
       return res.json({ success: true, requestId, status: 'IN_PROGRESS' });
     } catch (err: any) {
@@ -1372,7 +1374,7 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
         return res.status(403).json({ success: false, error: "No estás autorizado a completar este trabajo.", code: "FORBIDDEN" });
       }
       if (quote.status !== 'ACCEPTED') return res.status(409).json({ success: false, error: "El presupuesto no está aceptado.", code: "QUOTE_NOT_ACCEPTED" });
-      if (transaction.status !== 'PAID') return res.status(409).json({ success: false, error: "El pago del trabajo no está confirmado.", code: "PAYMENT_NOT_CONFIRMED" });
+      if (transaction.status !== 'SERVICE_IN_PROGRESS') return res.status(409).json({ success: false, error: "El trabajo no está marcado como iniciado después de un pago confirmado.", code: "SERVICE_NOT_IN_PROGRESS" });
       if (serviceRequest.status === 'REVIEW_PENDING') return res.status(409).json({ success: false, error: "El trabajo ya fue completado.", code: "JOB_ALREADY_COMPLETED" });
       if (serviceRequest.status !== 'IN_PROGRESS') {
         return res.status(409).json({ success: false, error: "El trabajo debe estar en ejecución antes de completarse.", code: "INVALID_JOB_STATE" });
@@ -1386,7 +1388,7 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
         const currentRequest = currentRequestSnap.data() || {};
         const currentTransaction = currentTransactionSnap.data() || {};
         const currentQuote = currentQuoteSnap.data() || {};
-        if (currentRequest.status !== 'IN_PROGRESS' || currentTransaction.status !== 'PAID' || currentQuote.status !== 'ACCEPTED') {
+        if (currentRequest.status !== 'IN_PROGRESS' || currentTransaction.status !== 'SERVICE_IN_PROGRESS' || currentQuote.status !== 'ACCEPTED') {
           throw new Error('INVALID_JOB_STATE');
         }
         const completedAt = new Date().toISOString();
@@ -1413,7 +1415,8 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
       const code = err?.message || 'JOB_COMPLETION_ERROR';
       const map: Record<string, number> = {
         RESOURCE_NOT_FOUND: 404,
-        INVALID_JOB_STATE: 409
+        INVALID_JOB_STATE: 409,
+        SERVICE_NOT_IN_PROGRESS: 409
       };
       return res.status(map[code] || 500).json({ success: false, error: map[code] ? `No se puede completar el trabajo: ${code}.` : "Error interno al completar el trabajo.", code });
     }
