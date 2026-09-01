@@ -27,8 +27,6 @@ service cloud.firestore {
           'identityVerificationStatus',
           'isProfessionalVerified',
           'professionalVerificationStatus',
-          'isProfessional',
-          'hasProfessionalProfile',
           'rating',
           'reviewCount',
           'jobsCompleted',
@@ -172,7 +170,30 @@ service cloud.firestore {
 
     match /reports/{reportId} { allow create: if isSignedIn() && request.resource.data.reporterId == request.auth.uid; allow read, update, delete: if isAdmin(); }
     match /reviews/{reviewId} { allow read: if isSignedIn(); allow create: if false; allow update, delete: if isAdmin(); }
-    match /verifications/{verifId} { allow create, update, delete: if false; allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid); }
+
+    match /verifications/{verifId} {
+      function validVerificationCreate() {
+        return isSignedIn()
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.type in ['IDENTITY', 'PROFESSIONAL']
+          && request.resource.data.status == 'PENDING'
+          && request.resource.data.documentName is string
+          && request.resource.data.documentName.size() > 0
+          && request.resource.data.documentUrl is string
+          && request.resource.data.documentUrl.size() > 0
+          && request.resource.data.keys().hasAll(['userId','userName','userRole','type','documentName','documentUrl','status','createdAt']);
+      }
+      function adminStatusTransition() {
+        return isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+          && request.resource.data.status in ['VERIFIED', 'REJECTED'];
+      }
+      allow create: if validVerificationCreate();
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow update: if adminStatusTransition();
+      allow delete: if isAdmin();
+    }
+
     match /radar_opportunities/{opportunityId} { allow read, create, update, delete: if isAdmin(); }
     match /admin_audit_logs/{logId} { allow read: if isAdmin(); allow create, update, delete: if false; }
     match /beta_config/{configId} { allow read: if isSignedIn(); allow write: if isAdmin(); }
