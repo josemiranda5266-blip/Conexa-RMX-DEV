@@ -4,7 +4,7 @@ import { verifyMercadoPagoWebhookSignature } from './mercadoPagoConfig.js';
 import { reconcileMercadoPagoPayment } from './mercadoPagoReconciliation.js';
 import { MercadoPagoOAuthConnection, normalizeMercadoPagoOAuthConnection } from './mercadoPagoOAuthTokenStore.js';
 
-const CONNECTION_COLLECTION = 'mercadopago_connections';
+const CONNECTION_COLLECTION = 'mercado_pago_connections';
 
 function notificationDataId(req: Request): string | undefined {
   const body = req.body as any;
