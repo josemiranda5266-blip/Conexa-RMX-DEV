@@ -13,9 +13,12 @@ export async function createMercadoPagoPreference(connection: MercadoPagoOAuthCo
   clientEmail?: string;
   appUrl: string;
 }) {
+  if (!connection.merchantId) throw new Error('MERCADO_PAGO_MERCHANT_REQUIRED');
   if (!Number.isFinite(input.amountArs) || input.amountArs <= 0) throw new Error('INVALID_PAYMENT_AMOUNT');
+  if (!input.transactionId?.trim()) throw new Error('TRANSACTION_ID_REQUIRED');
   const token = accessToken(connection);
   const base = input.appUrl.replace(/\/$/, '');
+  const webhookUrl = `${base}/api/mercadopago/webhook?merchantId=${encodeURIComponent(connection.merchantId)}`;
   const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -25,7 +28,7 @@ export async function createMercadoPagoPreference(connection: MercadoPagoOAuthCo
       external_reference: input.transactionId,
       back_urls: { success: `${base}/payment/success`, failure: `${base}/payment/failure`, pending: `${base}/payment/pending` },
       auto_return: 'approved',
-      notification_url: `${base}/api/mercadopago/webhook`,
+      notification_url: webhookUrl,
     }),
   });
   if (!response.ok) throw new Error(`MP_CHECKOUT_${response.status}`);
