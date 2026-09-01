@@ -147,7 +147,12 @@ service cloud.firestore {
           && request.resource.data.unreadCountByUser[request.auth.uid] == 0
           && request.resource.data.unreadCountByUser[otherUserId] == resource.data.unreadCountByUser[otherUserId] + 1
           && message.data.senderId == request.auth.uid && message.data.conversationId == conversationId
-          && request.resource.data.lastMessagePreview == message.data.content;
+          && request.resource.data.lastMessagePreview == (
+            message.data.type == 'SHARED_PHONE' ? 'Teléfono compartido' :
+            message.data.type == 'SHARED_ADDRESS' ? 'Dirección compartida' :
+            message.data.type == 'QUOTE_PROPOSAL' ? 'Propuesta enviada' :
+            message.data.content
+          );
       }
       allow read: if isConversationParticipant() || isAdmin();
       allow create: if createsValidConversation();
