@@ -294,7 +294,7 @@ export function toMatchedProfessional(match: ProfessionalMatch): MatchedProfessi
     matchScore: match.matchScore,
     trustScore: candidate.trustScore,
     locationApprox: candidate.approxZone || candidate.city || candidate.province,
-    isVerified: candidate.isIdentityVerified || candidate.isProfessionalVerified,
+    isVerified: candidate.isProfessionalVerified,
     matchReasons: match.matchReasons
   };
 }
