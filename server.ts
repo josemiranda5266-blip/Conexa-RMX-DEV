@@ -1234,7 +1234,32 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
 
         const existing = await tx.get(transactionRef);
         if (existing.exists) {
-          return existing.data();
+          const existingData = existing.data() || {};
+          // A cancelled checkout never completed the financial operation. Keep the
+          // commercial selection but make the same authoritative transaction payable
+          // again instead of creating a duplicate transaction for the quote.
+          if (existingData.status === 'CANCELLED') {
+            tx.update(transactionRef, {
+              status: 'PAYMENT_PENDING',
+              mercadoPagoPaymentId: null,
+              mercadoPagoPreferenceId: null,
+              paidAt: null,
+              paymentStatus: 'retry_pending',
+              paymentRetryAt: now,
+              updatedAt: now
+            });
+            return {
+              ...existingData,
+              status: 'PAYMENT_PENDING',
+              mercadoPagoPaymentId: null,
+              mercadoPagoPreferenceId: null,
+              paidAt: null,
+              paymentStatus: 'retry_pending',
+              paymentRetryAt: now,
+              updatedAt: now
+            };
+          }
+          return existingData;
         }
 
         const amountArs = Number(quote.priceArs);
