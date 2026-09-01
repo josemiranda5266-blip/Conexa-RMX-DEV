@@ -212,7 +212,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="text-left hidden lg:block">
                 <p className="text-xs font-bold leading-none text-white">{currentUser.name}</p>
                 <p className="text-[10px] text-blue-300 font-semibold leading-tight">
-                  {currentUser.isProfessional || currentUser.hasProfessionalProfile ? 'Cliente + Profesional' : 'Cliente'}
+                  {hasProfessionalCapability ? 'Cliente + Profesional' : 'Cliente'}
                 </p>
               </div>
               <ChevronDown size={14} className="text-slate-300" />
@@ -227,7 +227,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <div>
                       <p className="font-black text-slate-900 text-sm">{currentUser.name}</p>
                       <span className="text-[10px] font-extrabold uppercase tracking-wider bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full inline-block mt-0.5">
-                        {currentUser.isProfessional || currentUser.hasProfessionalProfile ? '👤 Cliente + 🧰 Profesional' : '👤 Cliente'}
+                        {hasProfessionalCapability ? '👤 Cliente + 🧰 Profesional' : '👤 Cliente'}
                       </span>
                     </div>
                   </div>
@@ -251,7 +251,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
 
                 {/* Convert to professional if not pro yet */}
-                {(!currentUser.isProfessional && !currentUser.hasProfessionalProfile) ? (
+                {!hasProfessionalCapability ? (
                   <button
                     onClick={() => {
                       setShowRoleMenu(false);
@@ -298,7 +298,7 @@ export const Header: React.FC<HeaderProps> = ({
                           <div>
                             <p className="font-bold text-slate-900 leading-tight">{u.name}</p>
                             <p className="text-[10px] text-slate-500">
-                              {u.role === 'ADMIN' || u.role === 'SUPER_ADMIN' ? '👑 Admin' : u.isProfessional || u.hasProfessionalProfile ? 'Cliente + Profesional' : 'Cliente'}
+                              {u.role === 'ADMIN' || u.role === 'SUPER_ADMIN' ? '👑 Admin' : isProfessionalCapable(u) ? 'Cliente + Profesional' : 'Cliente'}
                             </p>
                           </div>
                         </div>
