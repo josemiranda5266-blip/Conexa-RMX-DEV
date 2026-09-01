@@ -572,7 +572,7 @@ Responde en JSON con:
       if (!token.access_token || !token.refresh_token) return res.status(502).send('Mercado Pago no devolvió credenciales completas.');
 
       const db = await getAdminDb();
-      await db.collection('mercadopago_connections').doc(stateData.uid).set({
+      await db.collection('mercado_pago_connections').doc(stateData.uid).set({
         userId: stateData.uid,
         connected: true,
         mpUserId: String(token.user_id || ''),
@@ -621,7 +621,7 @@ Responde en JSON con:
       }
 
       try {
-        const snap = await db.collection('mercadopago_connections').doc(auth.userId).get();
+        const snap = await db.collection('mercado_pago_connections').doc(auth.userId).get();
         if (!snap.exists) return res.json({ connected: false });
         const data = snap.data() || {};
         return res.json({ connected: data.connected === true, mpUserId: data.mpUserId || null, publicKey: data.publicKey || null, updatedAt: data.updatedAt || null });
@@ -641,7 +641,7 @@ Responde en JSON con:
       if (!auth.isAuthenticated || !auth.userId) return res.status(401).json({ error: 'UNAUTHORIZED' });
 
       const db = await getAdminDb();
-      await db.collection('mercadopago_connections').doc(auth.userId).set({ connected: false, accessTokenEnc: null, refreshTokenEnc: null, disconnectedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, { merge: true });
+      await db.collection('mercado_pago_connections').doc(auth.userId).set({ connected: false, accessTokenEnc: null, refreshTokenEnc: null, disconnectedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, { merge: true });
       return res.json({ success: true });
     } catch (err: any) {
       return res.status(500).json({ error: 'MERCADO_PAGO_DISCONNECT_FAILED' });
@@ -667,7 +667,7 @@ Responde en JSON con:
       if (transaction.clientId !== auth.userId) return res.status(403).json({ error: 'FORBIDDEN' });
       if (transaction.status !== 'PAYMENT_PENDING') return res.status(409).json({ error: 'TRANSACTION_NOT_PAYABLE' });
 
-      const connectionSnap = await db.collection('mercadopago_connections').doc(transaction.professionalId).get();
+      const connectionSnap = await db.collection('mercado_pago_connections').doc(transaction.professionalId).get();
       if (!connectionSnap.exists) return res.status(409).json({ error: 'PROFESSIONAL_MERCADO_PAGO_NOT_CONNECTED' });
       const connection = connectionSnap.data() || {};
       if (!connection.connected || !connection.accessTokenEnc) return res.status(409).json({ error: 'PROFESSIONAL_MERCADO_PAGO_NOT_CONNECTED' });
@@ -685,7 +685,7 @@ Responde en JSON con:
           external_reference: transaction.id,
           back_urls: { success: `${appUrl}/?payment=success&transaction=${encodeURIComponent(transaction.id)}`, failure: `${appUrl}/?payment=failure&transaction=${encodeURIComponent(transaction.id)}`, pending: `${appUrl}/?payment=pending&transaction=${encodeURIComponent(transaction.id)}` },
           auto_return: 'approved',
-          notification_url: `${appUrl}/api/mercadopago/webhook`
+          notification_url: `${appUrl}/api/mercadopago/webhook?transactionId=${encodeURIComponent(transaction.id)}`
         })
       });
 
@@ -754,16 +754,33 @@ Responde en JSON con:
       let txDocRef: any = null;
       let transactionData: any = null;
 
-      const querySnap = await db.collection('transactions').where('mercadoPagoPaymentId', '==', paymentId).limit(1).get();
-      if (!querySnap.empty) {
-        txDocRef = querySnap.docs[0].ref;
-        transactionData = querySnap.docs[0].data();
+      // The checkout embeds the internal transaction ID in notification_url.
+      // This lets the webhook select the correct merchant token before the first
+      // notification has persisted mercadoPagoPaymentId.
+      const hintedTransactionId = typeof req.query.transactionId === 'string'
+        ? req.query.transactionId.trim()
+        : '';
+      if (hintedTransactionId) {
+        const hintedRef = db.collection('transactions').doc(hintedTransactionId);
+        const hintedSnap = await hintedRef.get();
+        if (hintedSnap.exists) {
+          txDocRef = hintedRef;
+          transactionData = hintedSnap.data();
+        }
+      }
+
+      if (!txDocRef) {
+        const querySnap = await db.collection('transactions').where('mercadoPagoPaymentId', '==', paymentId).limit(1).get();
+        if (!querySnap.empty) {
+          txDocRef = querySnap.docs[0].ref;
+          transactionData = querySnap.docs[0].data();
+        }
       }
 
       // Fetch payment details directly from Mercado Pago S2S using platform or seller access token
       let payment: any = null;
       if (transactionData) {
-        const connectionSnap = await db.collection('mercadopago_connections').doc(transactionData.professionalId).get();
+        const connectionSnap = await db.collection('mercado_pago_connections').doc(transactionData.professionalId).get();
         if (connectionSnap.exists) {
           const sellerToken = decryptSecret(connectionSnap.data().accessTokenEnc);
           const paymentResponse = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`, { headers: { Authorization: `Bearer ${sellerToken}`, accept: 'application/json' } });
@@ -1209,7 +1226,7 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
           throw new Error('PROFESSIONAL_CONTEXT_MISMATCH');
         }
 
-        const connectionRef = firestore.collection('mercadopago_connections').doc(String(quote.professionalId));
+        const connectionRef = firestore.collection('mercado_pago_connections').doc(String(quote.professionalId));
         const connectionSnap = await tx.get(connectionRef);
         if (!connectionSnap.exists || connectionSnap.data()?.connected !== true || !connectionSnap.data()?.accessTokenEnc) {
           throw new Error('PROFESSIONAL_MERCADO_PAGO_NOT_CONNECTED');
