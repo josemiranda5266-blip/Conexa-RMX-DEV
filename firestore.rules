@@ -95,9 +95,14 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Mercado Pago credentials are backend-only secrets. No browser may read
+    // or mutate either the canonical or legacy connection collection.
+    match /mercado_pago_connections/{merchantId} {
+      allow read, create, update, delete: if false;
+    }
+
     match /mercadopago_connections/{userId} {
-      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow create, update, delete: if false;
+      allow read, create, update, delete: if false;
     }
 
     match /transactions/{transactionId} {
