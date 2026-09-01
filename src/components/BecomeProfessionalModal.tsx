@@ -5,6 +5,7 @@ import { INITIAL_PROFESSIONS } from '../data/mockData';
 import { auth, db } from '../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 
+import { isProfessionalCapable } from '../domain/professionalMatching';
 interface BecomeProfessionalModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -96,7 +97,7 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
               Perfil Profesional
             </span>
             <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-              {currentUser.hasProfessionalProfile ? 'Editar mi Perfil Profesional' : 'Convertite en Profesional'}
+              {isProfessionalCapable(currentUser) ? 'Editar mi Perfil Profesional' : 'Convertite en Profesional'}
             </h2>
             <p className="text-xs text-slate-500">
               Completá tus datos de servicio para empezar a recibir solicitudes en Santiago del Estero.
