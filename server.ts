@@ -1555,15 +1555,23 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
           status: 'CLOSED',
           closedAt: now
         });
+        // The client review is the commercial completion event. In the current
+        // Mercado Pago marketplace model the professional already receives the
+        // seller amount at payment time, so there is no second payout operation
+        // to execute. Mark settlement explicitly to make accounting final and
+        // prevent a later worker from treating REVIEW_COMPLETED as unpaid.
         tx.update(transactionDoc.ref, {
-          status: 'REVIEW_COMPLETED',
-          reviewCompletedAt: now
+          status: 'SETTLED',
+          reviewCompletedAt: now,
+          settledAt: now,
+          settlementStatus: 'SETTLED'
         });
 
         return {
           review,
           transactionId: transactionDoc.id,
-          completedAt: now
+          completedAt: now,
+          settlementStatus: 'SETTLED'
         };
       });
 
