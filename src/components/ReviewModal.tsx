@@ -26,29 +26,39 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
   const [treatment, setTreatment] = useState(5);
   const [price, setPrice] = useState(5);
   const [compliance, setCompliance] = useState(5);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!comment.trim()) return;
+    if (!currentUser || !comment.trim() || isSubmitting) return;
 
-    addReview({
-      jobId,
-      clientId: currentUser.id,
-      clientName: currentUser.name,
-      clientAvatar: currentUser.avatar,
-      professionalId,
-      comment: comment.trim(),
-      overallRating: overall,
-      qualityRating: quality,
-      punctualityRating: punctuality,
-      treatmentRating: treatment,
-      priceRating: price,
-      complianceRating: compliance
-    });
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      await addReview({
+        jobId,
+        clientId: currentUser.id,
+        clientName: currentUser.name,
+        clientAvatar: currentUser.avatar,
+        professionalId,
+        comment: comment.trim(),
+        overallRating: overall,
+        qualityRating: quality,
+        punctualityRating: punctuality,
+        treatmentRating: treatment,
+        priceRating: price,
+        complianceRating: compliance
+      });
 
-    onClose();
+      onClose();
+    } catch (error: any) {
+      setSubmitError(error?.message || 'No se pudo publicar la calificación.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const StarRatingSelector = ({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) => (
@@ -117,6 +127,12 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
             />
           </div>
 
+          {submitError && (
+            <p className="text-xs font-semibold text-red-700 bg-red-50 border border-red-200 rounded-xl p-2.5">
+              {submitError}
+            </p>
+          )}
+
           <div className="pt-2 flex gap-3">
             <button
               type="button"
@@ -127,9 +143,10 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
             </button>
             <button
               type="submit"
-              className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md shadow-emerald-600/20 transition-all"
+              disabled={isSubmitting}
+              className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl font-bold shadow-md shadow-emerald-600/20 transition-all"
             >
-              Publicar Calificación
+              {isSubmitting ? 'Publicando...' : 'Publicar Calificación'}
             </button>
           </div>
         </form>
