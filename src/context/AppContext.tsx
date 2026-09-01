@@ -1345,8 +1345,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       transaction.id === result.transactionId
         ? {
             ...transaction,
-            status: 'REVIEW_COMPLETED',
-            reviewCompletedAt: result.completedAt
+            status: result.settlementStatus === 'SETTLED' ? 'SETTLED' : 'REVIEW_COMPLETED',
+            reviewCompletedAt: result.completedAt,
+            ...(result.settlementStatus === 'SETTLED'
+              ? { settledAt: result.completedAt, settlementStatus: 'SETTLED' }
+              : {})
           }
         : transaction
     ));
