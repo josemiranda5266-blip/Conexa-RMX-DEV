@@ -17,8 +17,8 @@ export interface EncryptedOAuthToken { ciphertext: string; iv: string; authTag: 
 export interface MercadoPagoOAuthConnection {
   merchantId: string;
   provider: 'MERCADO_PAGO';
-  encryptedAccessToken: EncryptedOAuthToken;
-  encryptedRefreshToken?: EncryptedOAuthToken;
+  encryptedAccessToken: EncryptedOAuthToken | string;
+  encryptedRefreshToken?: EncryptedOAuthToken | string;
   expiresAt?: string;
   externalUserId?: string;
   connectedAt: string;
@@ -52,47 +52,26 @@ export function decryptOAuthToken(payload: EncryptedOAuthToken | string): string
 }
 
 /**
- * Normalizes the legacy Firestore connection shape into the unified payment
- * contract. This is deliberately read-compatible so existing OAuth records
- * remain usable while the application migrates to the unified schema.
+ * Converts the legacy Firestore connection shape to the unified contract while
+ * preserving the legacy encrypted token string. This allows a controlled
+ * migration without forcing existing merchants to reconnect Mercado Pago.
  */
 export function normalizeMercadoPagoOAuthConnection(data: any, fallbackMerchantId?: string): MercadoPagoOAuthConnection | null {
   if (!data) return null;
-
   const merchantId = String(data.merchantId || data.userId || fallbackMerchantId || '').trim();
   if (!merchantId) return null;
 
-  const access = data.encryptedAccessToken || data.accessTokenEnc;
+  const access = data.encryptedAccessToken ?? data.accessTokenEnc;
   if (!access) return null;
-
-  const encryptedAccessToken: EncryptedOAuthToken = typeof access === 'string'
-    ? { ciphertext: access, iv: '', authTag: '' }
-    : access;
-
-  // Legacy accessTokenEnc is handled by decryptOAuthToken(string). Keep the
-  // normalized object only for the unified schema; callers that receive the
-  // legacy value should retain the original string when decrypting.
-  if (typeof access === 'string') {
-    return {
-      merchantId,
-      provider: 'MERCADO_PAGO',
-      encryptedAccessToken: encryptedAccessToken,
-      encryptedRefreshToken: undefined,
-      expiresAt: data.expiresAt || undefined,
-      externalUserId: data.externalUserId || data.mpUserId || undefined,
-      connectedAt: data.connectedAt || data.tokenCreatedAt || new Date().toISOString(),
-      revokedAt: data.revokedAt || (data.connected === false ? new Date(0).toISOString() : undefined),
-    };
-  }
 
   return {
     merchantId,
     provider: 'MERCADO_PAGO',
-    encryptedAccessToken,
-    encryptedRefreshToken: data.encryptedRefreshToken,
+    encryptedAccessToken: access,
+    encryptedRefreshToken: data.encryptedRefreshToken ?? data.refreshTokenEnc,
     expiresAt: data.expiresAt,
-    externalUserId: data.externalUserId || data.mpUserId,
+    externalUserId: data.externalUserId || data.mpUserId || undefined,
     connectedAt: data.connectedAt || data.tokenCreatedAt || new Date().toISOString(),
-    revokedAt: data.revokedAt,
+    revokedAt: data.revokedAt || (data.connected === false ? new Date(0).toISOString() : undefined),
   };
 }
