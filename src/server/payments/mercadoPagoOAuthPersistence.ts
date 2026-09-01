@@ -1,5 +1,6 @@
 import { getFirestore } from 'firebase-admin/firestore';
 import type { FirebaseAdminProvider } from '../auth.js';
+import { normalizeMercadoPagoOAuthConnection } from './mercadoPagoOAuthTokenStore.js';
 import type { MercadoPagoOAuthConnection } from './mercadoPagoOAuthTokenStore.js';
 
 const COLLECTION = 'mercado_pago_connections';
@@ -37,6 +38,20 @@ export async function saveOAuthConnection(getAdminApp: FirebaseAdminProvider, co
 
 export async function getOAuthConnection(getAdminApp: FirebaseAdminProvider, merchantId: string) {
   const db = getPaymentDb(getAdminApp);
-  const snap = await db.collection(COLLECTION).doc(merchantId).get();
-  return snap.exists ? (snap.data() as MercadoPagoOAuthConnection) : null;
+  const ref = db.collection(COLLECTION).doc(merchantId);
+  const snap = await ref.get();
+  if (!snap.exists) return null;
+
+  const connection = normalizeMercadoPagoOAuthConnection(snap.data(), merchantId);
+  if (!connection) return null;
+
+  // Migrate legacy field names opportunistically on read so all consumers
+  // converge on the canonical encrypted-token contract without requiring
+  // merchants to reconnect their Mercado Pago account.
+  const data = snap.data() || {};
+  if (data.encryptedAccessToken === undefined || data.accessTokenEnc !== undefined) {
+    await ref.set(connection, { merge: true });
+  }
+
+  return connection;
 }
