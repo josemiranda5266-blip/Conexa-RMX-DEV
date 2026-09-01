@@ -26,6 +26,12 @@ export interface PrivateUserInfo {
   exactAddressPrivate?: string;
 }
 
+export type InternalPrivateProfileData = {
+  phonePrivate?: string;
+  location: LocationData & {
+    exactAddressPrivate?: string;
+  };
+};
 
 export interface UserProfile {
   id: string;
@@ -38,6 +44,7 @@ export interface UserProfile {
   location: LocationData;
   isIdentityVerified: boolean;
   identityVerificationStatus: VerificationStatus;
+  bioPublic?: string;
   /** Private identity documents must never be stored in the public profile. */
   isBlocked?: boolean;
   activeMode?: 'CLIENT' | 'PROFESSIONAL' | 'ADMIN';
@@ -216,6 +223,9 @@ export interface Message {
 export interface Conversation {
   id: string;
   participantIds: [string, string];
+  participants?: string[];
+  participantProfiles?: Array<{ id: string; name: string; avatar: string; profession?: string; isIdentityVerified?: boolean; isProfessionalVerified?: boolean; }>;
+  privacyByUser?: Record<string, { phoneShared?: boolean; addressShared?: boolean }>;
   otherUser: {
     id: string;
     name: string;
@@ -346,7 +356,13 @@ export interface MatchedProfessional {
   trustScore: number;
   locationApprox: string;
   isVerified: boolean;
+  isIdentityVerified?: boolean;
+  isProfessionalVerified?: boolean;
+  rank?: number;
+  rankTag?: string;
+  phoneProtected?: string;
   matchReasons: string[];
+  scoreBreakdown?: Record<string, string>;
 }
 
 export interface RadarOpportunity {

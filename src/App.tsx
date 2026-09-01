@@ -91,8 +91,8 @@ const MainAppContent: React.FC = () => {
     return true;
   });
 
-  const handleStartChatWithPro = (pro: UserProfile) => {
-    const convId = createConversation(pro.id);
+  const handleStartChatWithPro = async (pro: UserProfile) => {
+    const convId = await createConversation(pro.id);
     setActiveConversationId(convId);
     setActiveTab('MENSAJES');
   };
@@ -197,7 +197,7 @@ const MainAppContent: React.FC = () => {
 
                     <div className="flex flex-wrap items-center gap-2 pt-1">
                       <button
-                        onClick={() => setActiveTab('SOLICITUDES')}
+                        onClick={() => setActiveTab('BUSCAR')}
                         className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black rounded-2xl text-xs shadow-lg transition-all flex items-center gap-2 cursor-pointer"
                       >
                         <span>Ver Solicitudes Compatibles ({requests.length})</span>
@@ -379,8 +379,8 @@ const MainAppContent: React.FC = () => {
                     setQuoteTargetRequest(req);
                     setIsQuoteModalOpen(true);
                   }}
-                  onOpenChatWithClient={(clientId) => {
-                    const convId = createConversation(clientId);
+                  onOpenChatWithClient={async (clientId) => {
+                    const convId = await createConversation(clientId);
                     setActiveConversationId(convId);
                     setActiveTab('MENSAJES');
                   }}
@@ -643,8 +643,7 @@ const MainAppContent: React.FC = () => {
                   {/* Private Data Card */}
                   <div className="p-3.5 bg-slate-50/70 backdrop-blur-sm rounded-2xl border border-slate-200/60 space-y-2">
                     <h4 className="font-bold text-slate-900">Datos Privados (Confidenciales)</h4>
-                    <p className="text-slate-600">📱 Teléfono: <strong className="text-slate-800">{currentUser.phonePrivate}</strong></p>
-                    <p className="text-slate-600">📍 Domicilio: <strong className="text-slate-800">{currentUser.location.exactAddressPrivate || 'No provisto'}</strong></p>
+                    <p className="text-slate-600">📱 Teléfono y domicilio exacto quedan protegidos fuera del perfil público.</p>
                     <p className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">🔒 Solo se comparten mediante tu autorización explícita en el chat.</p>
                   </div>
 

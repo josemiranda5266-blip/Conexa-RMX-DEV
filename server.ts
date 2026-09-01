@@ -403,9 +403,12 @@ Responde en JSON con:
       if (fs.existsSync(configPath)) {
         const raw = fs.readFileSync(configPath, 'utf8');
         const parsed = JSON.parse(raw);
-        if (parsed.firestoreDatabaseId) {
-          cachedDbId = parsed.firestoreDatabaseId;
-          return cachedDbId;
+        const firestoreDatabaseId = typeof parsed.firestoreDatabaseId === 'string'
+          ? parsed.firestoreDatabaseId.trim()
+          : '';
+        if (firestoreDatabaseId) {
+          cachedDbId = firestoreDatabaseId;
+          return firestoreDatabaseId;
         }
       }
     } catch (err) {
@@ -1641,66 +1644,98 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
     });
   }
 
-  app.post('/api/verifications/submit', rateLimiter, async (req: Request, res: Response) => {
+  async function handleVerificationSubmission(req: Request, res: Response): Promise<void> {
     try {
-      const authResult = await verifyAuthToken(req);
-      if (!authResult.isAuthenticated || !authResult.userId) {
-        return res.status(401).json({ success: false, error: 'Se requiere autenticación válida.', code: authResult.errorReason || 'UNAUTHORIZED' });
+      const auth = await verifyAuthToken(req);
+      if (!auth.isAuthenticated || !auth.userId) {
+        res.status(401).json({ success: false, error: 'Se requiere autenticación válida.', code: auth.errorReason || 'UNAUTHORIZED' });
+        return;
       }
 
       const { type, documentName, documentUrl } = req.body || {};
       if (!['IDENTITY', 'PROFESSIONAL'].includes(type)) {
-        return res.status(400).json({ success: false, error: 'Tipo de verificación inválido.', code: 'INVALID_VERIFICATION_TYPE' });
+        res.status(400).json({ success: false, error: 'Tipo de verificación inválido.', code: 'INVALID_VERIFICATION_TYPE' });
+        return;
       }
       if (typeof documentName !== 'string' || !documentName.trim() || typeof documentUrl !== 'string' || !documentUrl.trim()) {
-        return res.status(400).json({ success: false, error: 'Documento y nombre de documento son obligatorios.', code: 'INVALID_VERIFICATION_DOCUMENT' });
+        res.status(400).json({ success: false, error: 'Documento y nombre de documento son obligatorios.', code: 'INVALID_VERIFICATION_DOCUMENT' });
+        return;
       }
 
       const firestore = await getAdminDb();
-      const userRef = firestore.collection('users').doc(authResult.userId);
+      const userRef = firestore.collection('users').doc(auth.userId);
       const userSnap = await userRef.get();
       if (!userSnap.exists) {
-        return res.status(404).json({ success: false, error: 'Usuario no encontrado.', code: 'USER_NOT_FOUND' });
+        res.status(404).json({ success: false, error: 'Usuario no encontrado.', code: 'USER_NOT_FOUND' });
+        return;
       }
 
       const user = userSnap.data() || {};
       if (type === 'PROFESSIONAL' && !(user.hasProfessionalProfile === true || user.isProfessional === true || user.role === 'PROFESSIONAL')) {
-        return res.status(409).json({ success: false, error: 'Debés completar tu perfil profesional antes de solicitar la verificación.', code: 'PROFESSIONAL_PROFILE_REQUIRED' });
+        res.status(409).json({ success: false, error: 'Debés completar tu perfil profesional antes de solicitar la verificación.', code: 'PROFESSIONAL_PROFILE_REQUIRED' });
+        return;
+      }
+
+      const existingPending = await firestore.collection('verifications')
+        .where('userId', '==', auth.userId)
+        .where('type', '==', type)
+        .where('status', '==', 'PENDING')
+        .limit(1)
+        .get();
+
+      if (!existingPending.empty) {
+        const existing = existingPending.docs[0].data();
+        res.status(409).json({
+          success: false,
+          error: 'Ya existe una verificación pendiente para este tipo.',
+          code: 'VERIFICATION_ALREADY_PENDING',
+          verification: {
+            id: existingPending.docs[0].id,
+            ...existing
+          }
+        });
+        return;
       }
 
       const verificationRef = firestore.collection('verifications').doc();
       const createdAt = new Date().toISOString();
+      const verificationData = {
+        id: verificationRef.id,
+        userId: auth.userId,
+        userName: user.name || 'Usuario CONEXA',
+        userRole: user.role || 'USER',
+        type,
+        documentName: documentName.trim(),
+        documentUrl: documentUrl.trim(),
+        status: 'PENDING',
+        createdAt
+      };
 
       await firestore.runTransaction(async (tx: any) => {
-        tx.set(verificationRef, {
-          userId: authResult.userId,
-          userName: user.name || '',
-          userRole: user.role || 'USER',
-          type,
-          documentName: documentName.trim(),
-          documentUrl: documentUrl.trim(),
-          status: 'PENDING',
-          createdAt
-        });
-
+        tx.set(verificationRef, verificationData);
         tx.update(userRef, type === 'IDENTITY'
           ? { identityVerificationStatus: 'PENDING' }
           : { professionalVerificationStatus: 'PENDING' }
         );
       });
 
-      return res.status(201).json({
+      res.status(201).json({
         success: true,
         verificationId: verificationRef.id,
         status: 'PENDING',
         type,
-        createdAt
+        createdAt,
+        verification: verificationData
       });
+      return;
     } catch (err: any) {
-      console.error('[CONEXA VERIFICATION] Error creating verification request:', err);
-      return res.status(500).json({ success: false, error: 'No se pudo registrar la solicitud de verificación.', code: err?.message || 'VERIFICATION_SUBMISSION_ERROR' });
+      console.error('[CONEXA VERIFICATION] Error creando verificación:', err);
+      res.status(500).json({ success: false, error: 'No se pudo registrar la solicitud de verificación.', code: err?.message || 'VERIFICATION_SUBMISSION_ERROR' });
     }
-  });
+  }
+
+  app.post('/api/verifications/create', rateLimiter, handleVerificationSubmission);
+  app.post('/api/verifications/submit', rateLimiter, handleVerificationSubmission);
 
   app.post('/api/admin/verifications/:verificationId/approve', rateLimiter, async (req: Request, res: Response) => {
     try {

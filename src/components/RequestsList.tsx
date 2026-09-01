@@ -19,11 +19,12 @@ export const RequestsList: React.FC<RequestsListProps> = ({
   const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const isPro =
-  currentUser.role === 'PROFESSIONAL' ||
-  currentUser.isProfessional === true ||
-  currentUser.hasProfessionalProfile === true ||
-  currentUser.activeMode === 'PROFESSIONAL';
+  const isPro = !!currentUser && (
+    currentUser.role === 'PROFESSIONAL' ||
+    currentUser.isProfessional === true ||
+    currentUser.hasProfessionalProfile === true ||
+    currentUser.activeMode === 'PROFESSIONAL'
+  );
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -73,7 +74,7 @@ export const RequestsList: React.FC<RequestsListProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {requests.map(req => {
           const reqQuotes = quotes.filter(q => q.requestId === req.id);
-          const isMyReq = req.clientId === currentUser.id;
+          const isMyReq = !!currentUser && req.clientId === currentUser.id;
           const isQuoteable = req.status === 'REQUEST_CREATED' || req.status === 'QUOTES_RECEIVED';
 
           return (

@@ -34,7 +34,11 @@ export const RadarTestLab: React.FC<RadarTestLabProps> = ({
     category: string;
     city: string;
     matchCount: number;
+    dataSource?: string;
+    environment?: 'simulation' | 'production';
     rankedProfessionals: MatchedProfessional[];
+    discardedCount?: number;
+    discardedProfessionals?: Array<{ professionalId: string; name: string; professionName: string; discardReason: string }>;
   } | null>(null);
 
   const [isContacting, setIsContacting] = useState(false);

@@ -4,5 +4,7 @@ dist/
 coverage/
 .DS_Store
 *.log
+.tsc-output.txt
 .env*
 !.env.example
+package-lock.json

@@ -1,5 +1,20 @@
 # Changelog de auditorías — CONEXA
 
+## 2026-09-01
+
+### Corrección aplicada — verificación profesional y flujo administrativo
+
+- Se identificó la causa raíz del bloque: la UI estaba creando un registro local de verificación y actualizando flags del usuario antes de aprobación, mientras que la API y Firestore no permitían realmente crear/autorizar ese flujo de forma canónica.
+- La arquitectura correcta quedó definida como: `submitVerification()` sólo debe crear una solicitud de verificación con `status: PENDING`; la aprobación administrativa es la única operación autorizada para actualizar `isProfessionalVerified` / `professionalVerificationStatus`.
+- Se creó el endpoint backend `POST /api/verifications/create` para registrar la solicitud con identidad autenticada, evitar duplicados pendientes y mantener la información de `userId`, `type`, `documentName`, `documentUrl` y `status` en Firestore.
+- Se ajustó el flujo de UI para esperar el resultado del backend y no mutar estados verificados pendientes localmente.
+- Se mantuvo la separación correcta entre `hasProfessionalProfile` (capacidad profesional) y `isProfessionalVerified` (estado administrativo verificado).
+- Estado final: el flujo queda coherente con la arquitectura de verificación profesional y con la autoridad administrativa de aprobación.
+
+### Pendiente de continuación
+
+- Revalidar los flujos de `Auth` y `Service Requests` siguiendo el mismo patrón de consolidación backend + reglas de seguridad.
+
 ## 2026-08-31
 
 ### Continuidad de auditoría — Quote / Transaction / AppContext / Reviews

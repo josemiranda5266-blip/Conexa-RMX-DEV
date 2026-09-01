@@ -1,4 +1,4 @@
-import { UserProfile, Review, ServiceRequest, Quote, Conversation } from '../types';
+import { UserProfile, Review, ServiceRequest, Quote, Conversation, InternalPrivateProfileData } from '../types';
 
 export interface AuditTestResult {
   testId: string;
@@ -12,8 +12,8 @@ export function runSecurityAndPrivacyAudit(sampleUsers: UserProfile[]): AuditTes
   const results: AuditTestResult[] = [];
 
   // TEST 1: Phone Privacy Test - Unshared Phone Exposure Check
-  const userA = sampleUsers[0]; // e.g. client
-  const userB = sampleUsers[1]; // e.g. pro
+  const userA = sampleUsers[0] as UserProfile; // e.g. client
+  const userB = sampleUsers[1] as UserProfile & InternalPrivateProfileData; // e.g. pro
 
   if (userA && userB) {
     const isPhoneExposedInPublicDTO = Boolean(userB.phonePrivate && (userB as any).isPhonePublic === true);

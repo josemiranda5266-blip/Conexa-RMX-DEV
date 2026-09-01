@@ -1,4 +1,4 @@
-import { Category, Profession, UserProfile, Review, ServiceRequest, Quote, Conversation, Message } from '../types';
+import { Category, Profession, UserProfile, Review, ServiceRequest, Quote, Conversation, Message, InternalPrivateProfileData } from '../types';
 
 export const INITIAL_CATEGORIES: Category[] = [
   { id: 'cat-hogar', name: 'Hogar & Construcción', iconName: 'Home', description: 'Electricistas, plomeros, albañiles, pintores y gasistas.' },
@@ -27,7 +27,7 @@ export const INITIAL_PROFESSIONS: Profession[] = [
   { id: 'prof-limpieza', categoryId: 'cat-eventos', name: 'Servicio de Limpieza', popularSpecialties: ['Limpieza posobra', 'Oficinas y comercios', 'Alfombras y tapizados', 'Limpieza residencial'] }
 ];
 
-export const INITIAL_PROFILES: UserProfile[] = [
+export const INITIAL_PROFILES: Array<UserProfile & InternalPrivateProfileData> = [
   // Current user standard particular
   {
     id: 'user-particular-1',

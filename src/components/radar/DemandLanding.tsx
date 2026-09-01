@@ -44,13 +44,10 @@ export const DemandLanding: React.FC<DemandLandingProps> = ({
       category: opp.category,
       professionName: opp.subcategory || opp.category,
       description: opp.description,
-      location: {
-        city: opp.city,
-        province: opp.province,
-        neighborhoodPrivate: opp.neighborhood,
-        exactAddressPrivate: ''
-      },
-      urgency: opp.urgency === 'EMERGENCY' ? 'URGENTE' : 'ESTE_MES'
+      approxLocation: `📍 ${opp.city}${opp.neighborhood ? ` - ${opp.neighborhood}` : ''}`,
+      preferredDate: 'Lo antes posible',
+      preferredTimeSlot: 'Cuando sea posible',
+      urgency: opp.urgency === 'EMERGENCY' ? 'URGENTE' : 'ALTA'
     });
     setIsCreatingRequest(true);
     setTimeout(() => {

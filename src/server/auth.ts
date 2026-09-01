@@ -85,7 +85,6 @@ export function verifyS2SSecret(
   acceptedHeaders: string[] = ["x-radar-secret"]
 ): boolean {
   if (!expectedSecret) return false;
-
   for (const headerName of acceptedHeaders) {
   const presented = req.headers[headerName];
 

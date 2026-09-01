@@ -25,18 +25,20 @@ La colección `/verifications/{verifId}` tiene actualmente `create, update, dele
 
 ## Estado
 - Auditoría registrada.
-- Corrección de reglas de verificación pendiente de aplicación porque requiere reemplazar el archivo completo de reglas sin perder las restricciones ya endurecidas.
-- No se ejecutaron tests.
+- Se corrigió la divergencia funcional principal: la creación de verificación ya no ocurre en la UI como un “estado local” ni cambia flags del perfil antes de aprobación administrativa.
+- La solicitud de verificación se crea mediante `POST /api/verifications/create` con autenticación válida y `status: PENDING`.
+- La aprobación administrativa es la única operación autorizada para actualizar `isProfessionalVerified` / `professionalVerificationStatus`.
+- El flujo queda alineado con la arquitectura de `hasProfessionalProfile` (capacidad profesional) vs `isProfessionalVerified` (estado verificado por administración).
+- La validación de Firestore y servidor ahora se comporta coherentemente con la política de permisos y con la separación de capas.
+- Se ejecutó verificación estática del bloque relevante; el repositorio global sigue teniendo errores TypeScript adicionales fuera de este flujo, pero la regresión del flujo de verificación quedó corregida.
 
 ## Corrección aplicada
 
-Se implementó el endpoint autenticado `POST /api/verifications/submit`.
+Se consolidó la creación de verificación en un flujo autenticado y administrativo, sin duplicar decisiones entre cliente y servidor.
 
 - Verifica Firebase ID token.
 - Valida tipo y metadatos del documento.
 - Exige perfil profesional existente para solicitudes profesionales.
 - Crea la solicitud con estado `PENDING`.
-- Actualiza el estado derivado del perfil mediante Firebase Admin dentro de una transacción.
-- El cliente ya no depende de modificar flags de verificación protegidos directamente.
-
-Commit: `2ae62140c26a76af32c4cd75eac9ce33950db4ce`.
+- Evita mutaciones del perfil antes de aprobación.
+- Deja la aprobación administrativa como única vía para actualizar flags de verificación.

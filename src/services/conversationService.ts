@@ -14,6 +14,8 @@ import {
   writeBatch,
   type Unsubscribe,
 } from 'firebase/firestore';
+
+export type { Unsubscribe } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from '../lib/firebase';
 import {
   createConversationPrivacy,

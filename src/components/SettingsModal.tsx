@@ -185,7 +185,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <span>Privacidad de Datos Personales</span>
             </h4>
             <p className="text-slate-600 leading-relaxed">
-              Tus datos privados (teléfono {currentUser.phonePrivate} y domicilio exacto) están encriptados y guardados de forma estrictamente confidencial.
+              Tus datos privados quedan protegidos fuera del perfil público y solo se comparten con tu autorización explícita dentro de un chat privado.
             </p>
           </div>
 

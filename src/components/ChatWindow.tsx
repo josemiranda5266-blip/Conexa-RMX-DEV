@@ -43,8 +43,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const acknowledgedIncomingMessageIdsRef = useRef<Set<string>>(new Set());
 
   const convMessages = messages[conversation.id] || [];
-  const otherUserId = conversation.participants.find((participantId) => participantId !== currentUser?.id);
-  const otherUser = conversation.participantProfiles.find((participant) => participant.id === otherUserId);
+  const otherUserId = conversation.participantIds.find((participantId) => participantId !== currentUser?.id) ?? conversation.participantIds[0];
+  const otherUser = conversation.otherUser;
   const otherPrivacy = otherUserId ? conversation.privacyByUser?.[otherUserId] : undefined;
   const canViewSharedPhone = otherPrivacy?.phoneShared === true;
   const canViewSharedAddress = otherPrivacy?.addressShared === true;
@@ -376,8 +376,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         isOpen={showSharePhoneModal}
         type="PHONE"
         recipientName={conversation.otherUser.name}
-        userPhonePrivate={currentUser.phonePrivate}
-        userAddressPrivate={currentUser.location.exactAddressPrivate || ''}
+        userPhonePrivate={((currentUser as any)?.phonePrivate ?? '')}
+        userAddressPrivate={((currentUser as any)?.location?.exactAddressPrivate ?? '')}
         onConfirm={handleConfirmSharePhone}
         onCancel={() => setShowSharePhoneModal(false)}
       />
@@ -387,8 +387,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         isOpen={showShareAddressModal}
         type="ADDRESS"
         recipientName={conversation.otherUser.name}
-        userPhonePrivate={currentUser.phonePrivate}
-        userAddressPrivate={currentUser.location.exactAddressPrivate || ''}
+        userPhonePrivate={((currentUser as any)?.phonePrivate ?? '')}
+        userAddressPrivate={((currentUser as any)?.location?.exactAddressPrivate ?? '')}
         onConfirm={handleConfirmShareAddress}
         onCancel={() => setShowShareAddressModal(false)}
       />

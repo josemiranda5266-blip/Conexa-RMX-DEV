@@ -21,7 +21,7 @@ import {
   subscribeToUserConversations,
   updateConversationPrivacy,
   subscribeToMessages,
-  markConversationAsRead,
+  markConversationAsRead as markConversationAsReadInFirestore,
   type Unsubscribe,
   type StoredConversation,
   type StoredMessage,
@@ -108,7 +108,7 @@ interface AppContextType {
   completeJob: (jobId: string) => Promise<void>;
   addReview: (review: Omit<Review, 'id' | 'createdAt' | 'isVerifiedJob'>) => Promise<void>;
   submitVerification: (type: 'IDENTITY' | 'PROFESSIONAL', documentName: string, docUrl: string) => Promise<void>;
-  approveVerification: (verificationId: string) => void;
+  approveVerification: (verificationId: string) => Promise<void>;
   reportUser: (reportedUserId: string, reason: UserReport['reason'], description: string) => void;
   blockUser: (userIdToBlock: string) => void;
   resolveReport: (reportId: string, action: 'DISMISSED' | 'ACTION_TAKEN') => void;
@@ -143,6 +143,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
   const [authLoading, setAuthLoading] = useState<boolean>(true);
   const [authSessionReady, setAuthSessionReady] = useState<boolean>(!isFirebaseConfigured);
+
+  const logAdminAction = async (action: string, targetId: string, result: string, details: Record<string, unknown> = {}) => {
+    if (!isFirebaseConfigured || !db) return;
+    try {
+      const uid = currentUser?.id || auth?.currentUser?.uid;
+      if (!uid) return;
+      await setDoc(doc(collection(db, 'admin_audit_logs'), `${Date.now()}-${Math.random().toString(16).slice(2)}`), {
+        adminUid: uid,
+        action,
+        targetId,
+        result,
+        details,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.warn('[CONEXA ADMIN] No se pudo registrar auditoría:', error);
+    }
+  };
+
   const [categories] = useState<Category[]>(INITIAL_CATEGORIES);
   const [professions] = useState<Profession[]>(INITIAL_PROFESSIONS);
   const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS);
@@ -273,6 +292,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      const authenticatedUid = firebaseUser?.uid ?? null;
       setAuthSessionReady(false);
       try {
         if (firebaseUser) {
@@ -418,7 +438,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               id: firebaseUser.uid,
               name: firebaseUser.displayName || 'Usuario Piloto',
               email: firebaseUser.email || '',
-              phonePrivate: '385-555-0192',
               avatar: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150',
               role: claimRole,
               joinedDate: new Date().toLocaleDateString('es-AR'),
@@ -431,6 +450,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 approxZone: 'Centro'
               },
               isIdentityVerified: true,
+              identityVerificationStatus: 'VERIFIED',
               rating: 5,
               reviewCount: 1,
               jobsCompleted: 3,
@@ -461,7 +481,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Real-time synchronization with Firestore in production mode
   useEffect(() => {
-    if (!isFirebaseConfigured || !db || !auth) return;
+    const firebaseAuth = auth;
+    const firestoreDb = db;
+
+    if (!isFirebaseConfigured || !firestoreDb || !firebaseAuth) return;
 
     console.log("[CONEXA SYNCHRONIZER] Sincronización activa con Firestore...");
 
@@ -470,7 +493,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Set up real-time sub subscriptions
 
-    const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+    const unsubUsers = onSnapshot(collection(firestoreDb, 'users'), (snapshot) => {
       const uList: UserProfile[] = [];
 
       snapshot.forEach(userDoc => {
@@ -484,7 +507,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setUsers(uList);
 
-      const authenticatedUid = auth.currentUser?.uid;
+      const authenticatedUid = firebaseAuth.currentUser?.uid;
 
       if (authenticatedUid) {
         const updatedCurrentUser = uList.find(
@@ -507,7 +530,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    const unsubReviews = onSnapshot(collection(db, 'reviews'), (snapshot) => {
+    const unsubReviews = onSnapshot(collection(firestoreDb, 'reviews'), (snapshot) => {
       const list: Review[] = [];
 
       snapshot.forEach(doc => {
@@ -557,33 +580,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
 
       unsubOwnRequests = onSnapshot(
-        query(collection(db, 'service_requests'), where('clientId', '==', uid)),
+        query(collection(firestoreDb, 'service_requests'), where('clientId', '==', uid)),
         snapshot => syncBucket(own, snapshot),
         error => console.warn('[Firestore] Error sincronizando solicitudes propias:', error)
       );
 
       unsubAssignedRequests = onSnapshot(
-        query(collection(db, 'service_requests'), where('assignedProfessionalId', '==', uid)),
+        query(collection(firestoreDb, 'service_requests'), where('assignedProfessionalId', '==', uid)),
         snapshot => syncBucket(assigned, snapshot),
         error => console.warn('[Firestore] Error sincronizando trabajos asignados:', error)
       );
 
       unsubOpenRequests = onSnapshot(
-        query(collection(db, 'service_requests'), where('discoveryMode', '==', 'OPEN')),
+        query(collection(firestoreDb, 'service_requests'), where('discoveryMode', '==', 'OPEN')),
         snapshot => syncBucket(open, snapshot),
         error => console.warn('[Firestore] Error sincronizando oportunidades abiertas:', error)
       );
 
       unsubTargetedRequests = onSnapshot(
-        query(collection(db, 'service_requests'), where('biddingProfessionalIds', 'array-contains', uid)),
+        query(collection(firestoreDb, 'service_requests'), where('biddingProfessionalIds', 'array-contains', uid)),
         snapshot => syncBucket(targeted, snapshot),
         error => console.warn('[Firestore] Error sincronizando oportunidades dirigidas:', error)
       );
     };
 
+    const authenticatedUid = firebaseAuth.currentUser?.uid;
     syncRequests(authenticatedUid || null);
 
-    const unsubAuthRequests = auth.onAuthStateChanged(user => {
+    const unsubAuthRequests = firebaseAuth.onAuthStateChanged(user => {
       syncRequests(user?.uid || null);
     });
 
@@ -603,7 +627,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const publish = () => setQuotes(Array.from(byId.values()));
 
       unsubClientQuotes = onSnapshot(
-        query(collection(db, 'quotes'), where('clientId', '==', uid)),
+        query(collection(firestoreDb, 'quotes'), where('clientId', '==', uid)),
         snapshot => {
           snapshot.docs.forEach(quoteDoc => {
             const data = quoteDoc.data() as Quote;
@@ -618,7 +642,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
 
       unsubProfessionalQuotes = onSnapshot(
-        query(collection(db, 'quotes'), where('professionalId', '==', uid)),
+        query(collection(firestoreDb, 'quotes'), where('professionalId', '==', uid)),
         snapshot => {
           snapshot.docs.forEach(quoteDoc => {
             const data = quoteDoc.data() as Quote;
@@ -635,7 +659,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     syncQuotes(authenticatedUid || null);
 
-    const unsubAuthQuotes = auth.onAuthStateChanged(user => {
+    const unsubAuthQuotes = firebaseAuth.onAuthStateChanged(user => {
       syncQuotes(user?.uid || null);
     });
 
@@ -661,7 +685,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (messageUnsubscribers[conversationId]) return;
 
         messageUnsubscribers[conversationId] = onSnapshot(
-          collection(db, 'conversations', conversationId, 'messages'),
+          collection(firestoreDb, 'conversations', conversationId, 'messages'),
           snapshot => {
             const list: Message[] = [];
 
@@ -696,7 +720,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       stopConversationMessages();
 
       const conversationsQuery = query(
-        collection(db, 'conversations'),
+        collection(firestoreDb, 'conversations'),
         where('participantIds', 'array-contains', uid)
       );
 
@@ -716,12 +740,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     };
 
-    const authenticatedUid = auth.currentUser?.uid;
-    if (authenticatedUid) {
-      syncConversations(authenticatedUid);
+    const activeUid = firebaseAuth.currentUser?.uid;
+    if (activeUid) {
+      syncConversations(activeUid);
     }
 
-    const unsubAuthConversations = auth.onAuthStateChanged(user => {
+    const unsubAuthConversations = firebaseAuth.onAuthStateChanged(user => {
       if (user) {
         syncConversations(user.uid);
       } else {
@@ -731,13 +755,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    const unsubReports = onSnapshot(collection(db, 'reports'), (snapshot) => {
+    const unsubReports = onSnapshot(collection(firestoreDb, 'reports'), (snapshot) => {
       const list: UserReport[] = [];
       snapshot.forEach(doc => list.push(doc.data() as UserReport));
       setReports(list);
     });
 
-    const unsubVerifications = onSnapshot(collection(db, 'verifications'), (snapshot) => {
+    const unsubVerifications = onSnapshot(collection(firestoreDb, 'verifications'), (snapshot) => {
       const list: VerificationRequest[] = [];
       snapshot.forEach(doc => list.push(doc.data() as VerificationRequest));
       setVerifications(list);
@@ -759,7 +783,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const publish = () => setTransactions(Array.from(byId.values()));
 
       unsubClientTransactions = onSnapshot(
-        query(collection(db, 'transactions'), where('clientId', '==', uid)),
+        query(collection(firestoreDb, 'transactions'), where('clientId', '==', uid)),
         snapshot => {
           snapshot.docs.forEach(transactionDoc => {
             const data = transactionDoc.data() as Transaction;
@@ -774,7 +798,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
 
       unsubProfessionalTransactions = onSnapshot(
-        query(collection(db, 'transactions'), where('professionalId', '==', uid)),
+        query(collection(firestoreDb, 'transactions'), where('professionalId', '==', uid)),
         snapshot => {
           snapshot.docs.forEach(transactionDoc => {
             const data = transactionDoc.data() as Transaction;
@@ -791,7 +815,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     syncTransactions(authenticatedUid || null);
 
-    const unsubAuthTransactions = auth.onAuthStateChanged(user => {
+    const unsubAuthTransactions = firebaseAuth.onAuthStateChanged(user => {
       syncTransactions(user?.uid || null);
     });
 
@@ -1014,9 +1038,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
-  const markActiveConversationAsRead = async (conversationId: string): Promise<void> => {
+  const markConversationAsRead = async (conversationId: string): Promise<void> => {
     if (!currentUser || !isConversationParticipant(conversationId) || !isFirebaseConfigured) return;
-    await markConversationAsRead({ conversationId, userId: currentUser.id });
+    await markConversationAsReadInFirestore({ conversationId, userId: currentUser.id });
   };
 
   const createConversation = async (targetUserId: string): Promise<string> => {
@@ -1056,7 +1080,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const createServiceRequest = async (reqData: Omit<ServiceRequest, 'id' | 'clientId' | 'clientName' | 'clientAvatar' | 'createdAt' | 'status' | 'quotesCount'>) => {
     try {
-      const token = await auth.currentUser?.getIdToken();
+      const currentAuthUser = auth?.currentUser;
+      const token = currentAuthUser ? await currentAuthUser.getIdToken() : null;
       if (!token) throw new Error('AUTH_TOKEN_REQUIRED');
 
       const response = await fetch('/api/service-requests/create', {
@@ -1349,21 +1374,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const submitVerification = async (type: 'IDENTITY' | 'PROFESSIONAL', documentName: string, docUrl: string) => {
-    if (!currentUser) throw new Error('Debés iniciar sesión para solicitar una verificación.');
-
-    const headers = await getAuthenticatedRequestHeaders();
-    const response = await fetch('/api/verifications/submit', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ type, documentName, documentUrl: docUrl })
-    });
-    const data = await response.json();
-
-    if (!response.ok || !data.success) {
-      throw new Error(data.error || 'No se pudo registrar la solicitud de verificación.');
+    if (!currentUser) {
+      throw new Error('Debés iniciar sesión para enviar una verificación.');
     }
 
-    const newReq: VerificationRequest = {
+    const response = await fetch('/api/verifications/create', {
+      method: 'POST',
+      headers: await getAuthenticatedRequestHeaders(),
+      body: JSON.stringify({ type, documentName, documentUrl: docUrl })
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || data.code || 'No se pudo registrar la solicitud de verificación.');
+    }
+
+    const authoritativeVerification = (data.verification || {
       id: data.verificationId,
       userId: currentUser.id,
       userName: currentUser.name,
@@ -1372,16 +1398,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       documentName,
       documentUrl: docUrl,
       status: 'PENDING',
-      createdAt: data.createdAt
-    };
+      createdAt: data.createdAt || new Date().toISOString()
+    }) as VerificationRequest;
 
-    setVerifications(prev => [newReq, ...prev]);
+    setVerifications(prev => [
+      authoritativeVerification,
+      ...prev.filter(v => v.id !== authoritativeVerification.id)
+    ]);
+
     setUsers(prev => prev.map(user => {
       if (user.id !== currentUser.id) return user;
       return type === 'IDENTITY'
         ? { ...user, identityVerificationStatus: 'PENDING' }
         : { ...user, professionalVerificationStatus: 'PENDING' };
     }));
+
     setCurrentUser(prev => {
       if (!prev) return prev;
       return type === 'IDENTITY'
@@ -1555,6 +1586,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Track Analytics Event (PII Free)
   const trackEvent = (eventName: string, context?: Record<string, any>) => {
+    if (!currentUser) return;
     const newEv: AnalyticsEvent = {
       id: `ev-${Date.now()}`,
       eventName,
@@ -1566,6 +1598,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const submitFeedback = (category: FeedbackItem['category'], comment: string) => {
+    if (!currentUser) return;
     const newFb: FeedbackItem = {
       id: `fb-${Date.now()}`,
       userId: currentUser.id,
@@ -1910,7 +1943,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (existingRequest) return existingRequest;
 
     try {
-      const token = await auth.currentUser?.getIdToken();
+      const currentAuthUser = auth?.currentUser;
+      const token = currentAuthUser ? await currentAuthUser.getIdToken() : null;
       if (!token) throw new Error('AUTH_TOKEN_REQUIRED');
 
       const response = await fetch(
@@ -2031,6 +2065,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       selectedProfession, setSelectedProfession, selectedCity, setSelectedCity,
       maxDistanceKm, setMaxDistanceKm, onlyVerified, setOnlyVerified,
       toggleFavorite, sharePhoneWithUser, shareAddressWithUser, sendMessage,
+      subscribeConversationMessages, markConversationAsRead,
       createConversation, createServiceRequest, submitQuote, acceptQuote, connectMercadoPago, createMercadoPagoCheckout, getMercadoPagoStatus, startJob, completeJob,
       addReview, submitVerification, approveVerification, reportUser, blockUser,
       resolveReport, markNotificationRead, deleteAccount,

@@ -19,20 +19,24 @@ export const VerificationModal: React.FC<VerificationModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSimulatedUpload = (e: React.FormEvent) => {
+  const handleSimulatedUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fileName) return;
 
     setIsUploading(true);
-    setTimeout(() => {
-      submitVerification(
+    try {
+      await submitVerification(
         activeType,
         fileName,
         'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&q=80&w=400'
       );
-      setIsUploading(false);
       setSubmitted(true);
-    }, 1000);
+    } catch (error) {
+      console.error('[CONEXA VERIFICATION] Error enviando verificación:', error);
+      setSubmitted(false);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   return (

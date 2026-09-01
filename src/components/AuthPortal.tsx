@@ -60,12 +60,11 @@ export const AuthPortal: React.FC = () => {
         const docSnap = await getDoc(userDocRef);
 
         if (!docSnap.exists()) {
-          // Initialize user document if first time login
+          // Initialize user document if first time login without storing private fields in the public profile.
           await setDoc(userDocRef, {
             id: firebaseUser.uid,
             name: firebaseUser.displayName || name || 'Usuario Conexa',
             email: firebaseUser.email || '',
-            phonePrivate: phone || '',
             avatar: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150',
             role: selectedRole,
             joinedDate: new Date().toLocaleDateString('es-AR'),
@@ -91,6 +90,11 @@ export const AuthPortal: React.FC = () => {
             trustScore: 60,
             availabilityStatus: 'DISPONIBLE'
           });
+
+          const privateInfoRef = doc(db, 'users', firebaseUser.uid, 'private', 'info');
+          await setDoc(privateInfoRef, {
+            ...(phone ? { phonePrivate: phone } : {})
+          }, { merge: true });
         }
       }
 
@@ -148,7 +152,6 @@ export const AuthPortal: React.FC = () => {
             id: firebaseUser.uid,
             name,
             email,
-            phonePrivate: phone,
             avatar: selectedRole === 'PROFESSIONAL' 
               ? 'https://images.unsplash.com/photo-1540569014015-19a7be504e3a?auto=format&fit=crop&q=80&w=150'
               : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150',
@@ -176,6 +179,11 @@ export const AuthPortal: React.FC = () => {
             trustScore: 60,
             availabilityStatus: 'DISPONIBLE'
           });
+
+          const privateInfoRef = doc(db, 'users', firebaseUser.uid, 'private', 'info');
+          await setDoc(privateInfoRef, {
+            ...(phone ? { phonePrivate: phone } : {})
+          }, { merge: true });
         }
 
         await firebaseUser.getIdToken(true);
