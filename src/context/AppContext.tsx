@@ -862,6 +862,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return !!currentUser?.role && roles.includes(currentUser.role);
   };
 
+  // Historical name retained for compatibility with existing consumers.
+  // This operation never changes authorization role; it only loads the selected
+  // account and derives a valid UI mode from its existing capabilities.
   const switchUserRole = (userId: string) => {
     const found = users.find(u => u.id === userId);
     if (!found) return;
@@ -897,28 +900,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return false;
     }
 
-    if (
-      mode === 'CLIENT' &&
-      (currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN') &&
-      currentUser.activeMode === 'ADMIN'
-    ) {
-      console.warn(`[CONEXA SECURITY] Cambio de MODO ADMIN requiere una transición explícita autorizada id=${currentUser.id}`);
-    }
-
-    {
-      const updated = {
-        ...currentUser,
-        activeMode: mode
-      };
+    const updated = {
+      ...currentUser,
+      activeMode: mode
+    };
       setCurrentUser(updated);
       setUsers(uList => uList.map(u => u.id === currentUser.id ? updated : u));
 
-      if (isFirebaseConfigured && db) {
-        const userDocRef = doc(db, 'users', currentUser.id);
-        updateDoc(userDocRef, { activeMode: mode }).catch(err => {
-          console.warn('[CONEXA AUTH] Error saving activeMode to Firestore:', err);
-        });
-      }
+    if (isFirebaseConfigured && db) {
+      const userDocRef = doc(db, 'users', currentUser.id);
+      updateDoc(userDocRef, { activeMode: mode }).catch(err => {
+        console.warn('[CONEXA AUTH] Error saving activeMode to Firestore:', err);
+      });
     }
 
     return true;
