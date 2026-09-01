@@ -33,9 +33,66 @@ export function encryptOAuthToken(token: string): EncryptedOAuthToken {
   return { ciphertext: ciphertext.toString('base64'), iv: iv.toString('base64'), authTag: cipher.getAuthTag().subarray(0, TAG_BYTES).toString('base64') };
 }
 
-export function decryptOAuthToken(payload: EncryptedOAuthToken): string {
+export function decryptOAuthToken(payload: EncryptedOAuthToken | string): string {
+  if (typeof payload === 'string') {
+    const [ivB64, tagB64, dataB64] = payload.split('.');
+    if (!ivB64 || !tagB64 || !dataB64) throw new Error('OAUTH_TOKEN_PAYLOAD_INVALID');
+    const decipher = crypto.createDecipheriv(ALGORITHM, encryptionKey(), Buffer.from(ivB64, 'base64url'));
+    decipher.setAuthTag(Buffer.from(tagB64, 'base64url'));
+    return Buffer.concat([
+      decipher.update(Buffer.from(dataB64, 'base64url')),
+      decipher.final(),
+    ]).toString('utf8');
+  }
+
   if (!payload?.ciphertext || !payload?.iv || !payload?.authTag) throw new Error('OAUTH_TOKEN_PAYLOAD_INVALID');
   const decipher = crypto.createDecipheriv(ALGORITHM, encryptionKey(), Buffer.from(payload.iv, 'base64'));
   decipher.setAuthTag(Buffer.from(payload.authTag, 'base64'));
   return Buffer.concat([decipher.update(Buffer.from(payload.ciphertext, 'base64')), decipher.final()]).toString('utf8');
+}
+
+/**
+ * Normalizes the legacy Firestore connection shape into the unified payment
+ * contract. This is deliberately read-compatible so existing OAuth records
+ * remain usable while the application migrates to the unified schema.
+ */
+export function normalizeMercadoPagoOAuthConnection(data: any, fallbackMerchantId?: string): MercadoPagoOAuthConnection | null {
+  if (!data) return null;
+
+  const merchantId = String(data.merchantId || data.userId || fallbackMerchantId || '').trim();
+  if (!merchantId) return null;
+
+  const access = data.encryptedAccessToken || data.accessTokenEnc;
+  if (!access) return null;
+
+  const encryptedAccessToken: EncryptedOAuthToken = typeof access === 'string'
+    ? { ciphertext: access, iv: '', authTag: '' }
+    : access;
+
+  // Legacy accessTokenEnc is handled by decryptOAuthToken(string). Keep the
+  // normalized object only for the unified schema; callers that receive the
+  // legacy value should retain the original string when decrypting.
+  if (typeof access === 'string') {
+    return {
+      merchantId,
+      provider: 'MERCADO_PAGO',
+      encryptedAccessToken: encryptedAccessToken,
+      encryptedRefreshToken: undefined,
+      expiresAt: data.expiresAt || undefined,
+      externalUserId: data.externalUserId || data.mpUserId || undefined,
+      connectedAt: data.connectedAt || data.tokenCreatedAt || new Date().toISOString(),
+      revokedAt: data.revokedAt || (data.connected === false ? new Date(0).toISOString() : undefined),
+    };
+  }
+
+  return {
+    merchantId,
+    provider: 'MERCADO_PAGO',
+    encryptedAccessToken,
+    encryptedRefreshToken: data.encryptedRefreshToken,
+    expiresAt: data.expiresAt,
+    externalUserId: data.externalUserId || data.mpUserId,
+    connectedAt: data.connectedAt || data.tokenCreatedAt || new Date().toISOString(),
+    revokedAt: data.revokedAt,
+  };
 }
