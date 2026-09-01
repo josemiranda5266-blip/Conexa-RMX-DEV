@@ -27,3 +27,16 @@ La colección `/verifications/{verifId}` tiene actualmente `create, update, dele
 - Auditoría registrada.
 - Corrección de reglas de verificación pendiente de aplicación porque requiere reemplazar el archivo completo de reglas sin perder las restricciones ya endurecidas.
 - No se ejecutaron tests.
+
+## Corrección aplicada
+
+Se implementó el endpoint autenticado `POST /api/verifications/submit`.
+
+- Verifica Firebase ID token.
+- Valida tipo y metadatos del documento.
+- Exige perfil profesional existente para solicitudes profesionales.
+- Crea la solicitud con estado `PENDING`.
+- Actualiza el estado derivado del perfil mediante Firebase Admin dentro de una transacción.
+- El cliente ya no depende de modificar flags de verificación protegidos directamente.
+
+Commit: `2ae62140c26a76af32c4cd75eac9ce33950db4ce`.
