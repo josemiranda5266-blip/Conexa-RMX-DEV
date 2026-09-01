@@ -3,6 +3,8 @@ import crypto from 'crypto';
 export type { EncryptedOAuthToken, MercadoPagoOAuthConnection } from './mercadoPagoOAuthTokenStore.js';
 export { encryptOAuthToken, decryptOAuthToken } from './mercadoPagoOAuthTokenStore.js';
 
+const MAX_WEBHOOK_SIGNATURE_AGE_SECONDS = 10 * 60;
+
 /** Validate Mercado Pago's x-signature manifest for a payment notification. */
 export function verifyMercadoPagoWebhookSignature(
   signatureHeader: string | undefined,
@@ -22,6 +24,11 @@ export function verifyMercadoPagoWebhookSignature(
   const timestamp = parts.ts;
   const receivedSignature = parts.v1;
   if (!timestamp || !receivedSignature || !/^[0-9a-f]+$/i.test(receivedSignature)) return false;
+
+  const timestampSeconds = Number(timestamp);
+  if (!Number.isSafeInteger(timestampSeconds)) return false;
+  const ageSeconds = Math.abs(Math.floor(Date.now() / 1000) - timestampSeconds);
+  if (ageSeconds > MAX_WEBHOOK_SIGNATURE_AGE_SECONDS) return false;
 
   const manifest = `id:${dataId};request-id:${requestIdHeader};ts:${timestamp};`;
   const expectedBuffer = crypto.createHmac('sha256', secret).update(manifest).digest();
