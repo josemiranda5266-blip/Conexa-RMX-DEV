@@ -27,6 +27,7 @@ service cloud.firestore {
           'identityVerificationStatus',
           'isProfessionalVerified',
           'professionalVerificationStatus',
+          'isProfessional',
           'hasProfessionalProfile',
           'rating',
           'reviewCount',
