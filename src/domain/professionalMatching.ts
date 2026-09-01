@@ -40,9 +40,15 @@ const clamp = (value: number, min = 0, max = 100): number =>
   Math.min(max, Math.max(min, value));
 
 export function isProfessionalCapable(user: UserProfile): boolean {
+  if (user.isBlocked === true) return false;
+
+  // A professional capability belongs to the account profile, not to the
+  // currently selected UI mode. activeMode may be CLIENT while the same user
+  // remains a valid professional candidate for matching.
   return user.hasProfessionalProfile === true ||
     user.isProfessional === true ||
-    user.role === 'PROFESSIONAL';
+    user.role === 'PROFESSIONAL' ||
+    user.activeMode === 'PROFESSIONAL';
 }
 
 // Backward-compatible alias for existing consumers.
