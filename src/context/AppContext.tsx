@@ -1094,12 +1094,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const createConversation = async (targetUserId: string): Promise<string> => {
     if (!currentUser || targetUserId === currentUser.id) return '';
-    const targetUser = users.find(user => user.id === targetUserId);
-
     if (isFirebaseConfigured) {
       return getOrCreateConversation(currentUser.id, targetUserId);
     }
 
+    const targetUser = users.find(user => user.id === targetUserId);
     if (!targetUser) throw new Error('No se puede crear una conversación con un usuario inexistente.');
 
     if (!isFirebaseConfigured) {
