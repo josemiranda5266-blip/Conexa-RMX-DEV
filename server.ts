@@ -1142,7 +1142,7 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
           professionName: String(opportunity.professionName || opportunity.subcategory || "").slice(0, 120),
           urgency: ["NORMAL", "ALTA", "URGENTE"].includes(opportunity.urgency) ? opportunity.urgency : "NORMAL",
           approxLocation: String(opportunity.approxLocation || [opportunity.city, opportunity.neighborhood].filter(Boolean).join(" - ") || opportunity.province || "").slice(0, 240),
-          ...(Number.isFinite(Number(opportunity.estimatedBudgetArs)) && Number(opportunity.estimatedBudgetArs) > 0 ? { estimatedBudgetArs: Number(opportunity.estimatedBudgetArs) } : {}),
+          ...(Number.isFinite(Number(opportunity.estimatedBudgetArs)) && Number(opportunity.estimatedBudgetArs) > 0 ? { estimatedBudgetArs: Numer(opportunity.estimatedBudgetArs) } : {}),
           status: "REQUEST_CREATED",
           quotesCount: 0,
           sourceType: "RADAR",
