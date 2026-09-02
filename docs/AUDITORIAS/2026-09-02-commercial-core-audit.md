@@ -1,10 +1,10 @@
-# Auditoría comercial — 2026-09-02
+# Auditoría núcleo comercial CONEXA — 2026-09-02
 
-## Rama auditada
+## Repositorio operativo
 
 - Repositorio: `josemiranda5266-blip/Conexa-RMX-DEV`
-- Rama: `integration/conexa-unified`
-- Punto de revisión: rama vigente al 2026-09-02
+- Rama de trabajo: `integration/conexa-unified`
+- Criterio: este repositorio/rama contiene las correcciones definitivas del núcleo unificado.
 
 ## Flujo revisado
 
@@ -12,23 +12,27 @@
 
 ## Controles confirmados
 
-- La identidad del cliente y profesional se deriva del Firebase ID token y de documentos Firestore autoritativos.
-- La creación de la transacción calcula importe, comisión y neto en backend; el navegador no define la comisión.
-- La contratación valida propietario de la solicitud, estado contractual, presupuesto pendiente, capacidad profesional y conexión de Mercado Pago.
-- El inicio del trabajo exige transacción `PAID`, presupuesto `ACCEPTED` y coincidencia del profesional autenticado.
-- La finalización exige `IN_PROGRESS`/`SERVICE_IN_PROGRESS` y vuelve a comprobar las relaciones entre solicitud, presupuesto y transacción dentro de una transacción Firestore.
-- La reseña es idempotente por `serviceRequestId + clientId` y cierra el trabajo junto con el estado `SETTLED`.
-- El webhook de Mercado Pago no confía en el redirect del navegador y recupera el pago servidor-a-servidor usando el token del profesional conectado.
-- Los estados de autorización y verificación no se delegan a escrituras directas del navegador: las mutaciones administrativas pasan por backend y las reglas Firestore bloquean las escrituras de autoridad desde el cliente.
+- Autenticación backend basada en Firebase ID token.
+- Firestore Rules con denegación por defecto y escrituras comerciales privilegiadas exclusivamente por backend/Admin SDK.
+- Creación de transacción con valores financieros calculados en servidor.
+- ID determinista de transacción: `txn-{quoteId}`.
+- Confirmación de pago basada en estado consultado al proveedor, no en el redirect del navegador.
+- Reconciliación idempotente de Mercado Pago.
+- Auditoría administrativa mediante `admin_audit_logs`.
+- Flujo de job protegido por estados comerciales y relación cliente/profesional.
 
-## Correcciones realizadas en esta fase
+## Correcciones ya realizadas
 
-- Se eliminaron los workflows temporales de parcheo automático de RADAR y AppContext. Esos workflows habían introducido mutaciones repetidas en `server.ts` y ya no forman parte del repositorio operativo.
-- Se restauró el bloque de conversión RADAR a una versión consistente: candidatos, urgencia, presupuesto y mapa de códigos HTTP utilizan nombres válidos y coherentes.
-- Se mantuvo la conversión RADAR dentro de una transacción Firestore, con validación del propietario, estado convertible, consentimiento, reutilización idempotente de una solicitud ya vinculada y filtrado de candidatos válidos/no bloqueados.
-- `src/server/payments/mercadoPagoReconciliation.ts` quedó alineado con el modelo autoritativo de `paymentStatus`: una aprobación persiste `paymentStatus=approved`, `status=PAID`, metadatos del pago y estado de settlement, manteniendo idempotencia.
+- Correcciones de conversión RADAR y normalización de candidatos.
+- `QuoteModal` espera respuesta autoritativa del backend y bloquea doble envío.
+- Descubrimiento profesional compatible con `isProfessional`, `hasProfessionalProfile` y rol profesional.
+- Listener de usuario actual separado del directorio global.
+- Cambio de modo/rol limitado al usuario autenticado.
+- Listener de mensajes ordenado por `createdAt`.
+- Creación de conversaciones desacoplada del directorio global.
+- Reconciliación de Mercado Pago persiste `paymentStatus=approved`, `status=PAID`, identificador de pago, timestamps y settlement.
 
-## Nuevos descubrimientos — OAuth y webhook
+## Descubrimientos — OAuth y webhook
 
 ### 1. OAuth real todavía vive en `server.ts`
 
@@ -44,7 +48,7 @@ Existe una capa modular (`src/server/payments/mercadoPagoOAuthPersistence.ts`) c
 
 ### 2. Hay dos implementaciones del webhook
 
-Existe un handler modular en `src/server/payments/mercadoPagoWebhook.ts` y un handler inline dentro de `server.ts`. El modular ya delega en `reconcileMercadoPagoPayment` y utiliza la validación de firma modular.
+Existe un handler modular en `src/server/payments/mercadoPagoWebhook.ts` y un handler inline dentro de `server.ts`. El modular delega en `reconcileMercadoPagoPayment` y utiliza la validación de firma modular.
 
 `src/server/payments/registerMercadoPagoWebhookRoute.ts` encapsula el registro de la ruta, pero el servidor principal todavía conserva su implementación inline.
 
@@ -52,26 +56,49 @@ Existe un handler modular en `src/server/payments/mercadoPagoWebhook.ts` y un ha
 
 ### 3. Relación transacción → solicitud todavía requiere formalización
 
-La creación de transacciones usa un ID determinista `txn-{quoteId}`, pero `/api/jobs/start` y `/api/jobs/complete` recuperan una transacción mediante `where(serviceRequestId == requestId).limit(1)`.
+La creación de transacciones usa un ID determinista `txn-{quoteId}`. La aceptación del quote ocurre dentro de `/api/transactions/create`: el backend valida que el quote esté `PENDING`, crea/reutiliza la transacción determinista, cambia el quote a `ACCEPTED` y cambia la solicitud a `PROFESSIONAL_SELECTED`, asignando el profesional del quote.
 
-**Riesgo:** `limit(1)` no expresa la unicidad comercial. La ruta debería quedar vinculada inequívocamente al quote aceptado/transacción determinista, y el dominio debe impedir más de una transacción comercial activa por solicitud.
+No existe actualmente un campo `acceptedQuoteId` persistido en `service_requests`.
+
+Además, `/api/jobs/start` y `/api/jobs/complete` recuperan una transacción mediante `where(serviceRequestId == requestId).limit(1)`.
+
+**Riesgo:** `limit(1)` no expresa la unicidad comercial. Aunque el ID determinista por quote reduce el riesgo de duplicación por quote, la lectura por solicitud no hace explícita la relación comercial aceptada. El contrato correcto debe ser inequívoco: `accepted quote → txn-{quoteId} → serviceRequestId`.
+
+**Decisión técnica actual:** no introducir todavía un parche peligroso sobre `server.ts`. Primero se debe consolidar una estrategia segura de lookup/autoridad que pueda aplicarse al archivo completo sin reemplazos parciales. La alternativa preferida es derivar la transacción desde el quote aceptado y su ID determinista, evitando depender de `limit(1)`.
+
+## Hallazgo adicional del bloque de aceptación
+
+La ruta `/api/transactions/create` es actualmente la autoridad de aceptación contractual: el cliente no modifica directamente `quotes` ni `transactions` desde Firestore Rules; el backend realiza en una transacción Firestore el cambio de quote a `ACCEPTED`, request a `PROFESSIONAL_SELECTED`, asignación del profesional y creación/reutilización de `txn-{quoteId}`.
+
+Esto significa que no hay una segunda ruta independiente de aceptación que deba sincronizarse en este punto del flujo. El siguiente endurecimiento debe conservar esa única autoridad y hacer explícita la referencia al quote aceptado.
 
 ## Riesgos todavía bajo revisión
 
-1. La búsqueda de transacciones por `serviceRequestId` con `limit(1)` en operaciones de inicio/completado depende de que el modelo garantice una única transacción comercial activa por solicitud. El modelo actual reutiliza el documento determinista `txn-{quoteId}`, pero conviene formalizar esa unicidad como invariantes del dominio.
-2. El webhook debe mantener una única relación inequívoca entre `external_reference`, `transaction.id`, `quoteId` y `serviceRequestId`.
-3. Un pago `REFUNDED` o `CANCELLED` debe impedir cualquier continuación del servicio; el backend actual protege el inicio mediante estado `PAID`, pero el comportamiento ante eventos tardíos del proveedor debe conservarse idempotente.
+1. OAuth state debe consumirse una sola vez en el callback efectivo.
+2. Debe quedar un único webhook efectivo, preferentemente el handler modular ya preparado.
+3. Eventos financieros tardíos (`refund`, `cancel`, `chargeback`) deben conservar el estado del proveedor (`paymentStatus`) sin degradar indebidamente el estado comercial ya avanzado (`SERVICE_IN_PROGRESS`, `SERVICE_COMPLETED`, `SETTLED`).
 4. La sincronización de reseñas en frontend distingue actualmente las reseñas authored-by-client; debe verificarse que las pantallas de perfil profesional no dependan de una colección global de reseñas para mostrar las recibidas.
 5. `users` sigue siendo una colección de directorio global para usuarios autenticados. Antes de producción a escala conviene separar explícitamente perfil público y datos de sesión/privados para reducir superficie de lectura.
 
 ## Registro operativo / punto exacto de continuación
 
+### Estado actual
+
+- Repositorio y rama verificados antes de esta auditoría.
+- No se ejecutaron tests ni build.
+- No se crearon workflows temporales.
+- No se realizó un reemplazo parcial de `server.ts`.
+- Se confirmó que la aceptación comercial está centralizada en `/api/transactions/create`.
+- Se confirmó que `acceptedQuoteId` no existe actualmente.
+- Se confirmó que job start/complete todavía usan `where(serviceRequestId).limit(1)`.
+
 ### Próxima tarea prioritaria
 
-1. Auditar y corregir el callback OAuth efectivo de `server.ts` para consumir `state` una sola vez.
-2. Auditar el montaje del webhook y dejar una única autoridad efectiva, preferentemente la capa modular ya preparada.
-3. Auditar las rutas de aceptación de quote y establecer la relación determinista `acceptedQuoteId → txn-{quoteId} → serviceRequestId`.
-4. Después revisar eventos financieros tardíos (`refund`, `cancel`, `chargeback`) para separar estado del proveedor (`paymentStatus`) de estado comercial (`Transaction.status`).
+1. Consolidar lookup determinista `accepted quote → txn-{quoteId}` para job start/complete sin arriesgar la integridad de `server.ts`.
+2. Auditar y corregir el callback OAuth efectivo para consumo one-time del state.
+3. Auditar el montaje del webhook y dejar una única autoridad efectiva.
+4. Revisar eventos financieros tardíos y separar estado del proveedor de estado comercial.
+5. Continuar con AppContext/reviews y exposición del directorio de usuarios.
 
 ### Restricciones operativas
 
@@ -83,4 +110,4 @@ La creación de transacciones usa un ID determinista `txn-{quoteId}`, pero `/api
 
 ## Criterio de salida
 
-No se ejecutan builds ni tests en esta etapa, por instrucción operativa. La verificación final se realizará cuando termine la fase de correcciones estructurales.
+No se ejecutan builds ni tests en esta etapa por instrucción operativa. La verificación final se realizará cuando termine la fase de correcciones estructurales.
