@@ -113,24 +113,19 @@ function normalizeConversation(id: string, data: Record<string, unknown>): Store
     privacyByUser,
     createdAt: data.createdAt instanceof Timestamp ? data.createdAt : null,
     updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt : null,
-    lastMessagePreview: typeof data.lastMessagePreview === 'string'
-      ? data.lastMessagePreview
-      : '',
+    lastMessagePreview: typeof data.lastMessagePreview === 'string' ? data.lastMessagePreview : '',
     lastMessageId: typeof data.lastMessageId === 'string' ? data.lastMessageId : undefined,
     lastMessageAt: data.lastMessageAt instanceof Timestamp ? data.lastMessageAt : null,
     unreadCountByUser: Object.fromEntries(participantIds.map((userId) => [
       userId,
       typeof (data.unreadCountByUser as Record<string, unknown> | undefined)?.[userId] === 'number'
-        ? (data.unreadCountByUser as Record<string, number>)[userId]
+        ? Math.max(0, (data.unreadCountByUser as Record<string, number>)[userId])
         : 0,
     ])),
   };
 }
 
-export async function getOrCreateConversation(
-  currentUserId: string,
-  targetUserId: string,
-): Promise<string> {
+export async function getOrCreateConversation(currentUserId: string, targetUserId: string): Promise<string> {
   if (!currentUserId || !targetUserId || currentUserId === targetUserId) {
     throw new Error('A conversation requires two distinct users.');
   }
@@ -142,14 +137,14 @@ export async function getOrCreateConversation(
 
   await runTransaction(firestore, async (transaction) => {
     const existing = await transaction.get(conversationRef);
-
     if (existing.exists()) {
-      const existingParticipantIds = existing.data().participantIds;
+      const existingData = existing.data();
+      const existingParticipantIds = existingData.participantIds;
       if (!Array.isArray(existingParticipantIds)
         || existingParticipantIds.length !== 2
         || existingParticipantIds.some((value) => typeof value !== 'string')
         || createParticipantKey(existingParticipantIds) !== participantKey
-        || existing.data().participantKey !== participantKey) {
+        || existingData.participantKey !== participantKey) {
         throw new Error('Conversation participant integrity check failed.');
       }
       return;
@@ -177,13 +172,8 @@ export function subscribeToUserConversations(
   onError?: (error: Error) => void,
 ): Unsubscribe {
   const firestore = requireDb();
-
   return onSnapshot(
-    query(
-      collection(firestore, 'conversations'),
-      where('participantIds', 'array-contains', userId),
-      orderBy('updatedAt', 'desc'),
-    ),
+    query(collection(firestore, 'conversations'), where('participantIds', 'array-contains', userId), orderBy('updatedAt', 'desc')),
     (snapshot) => {
       try {
         onData(snapshot.docs.map((item) => normalizeConversation(item.id, item.data())));
@@ -201,27 +191,31 @@ export function subscribeToMessages(
   onError?: (error: Error) => void,
 ): Unsubscribe {
   const firestore = requireDb();
-
   return onSnapshot(
-    query(
-      collection(firestore, 'conversations', conversationId, 'messages'),
-      orderBy('createdAt', 'asc'),
-    ),
+    query(collection(firestore, 'conversations', conversationId, 'messages'), orderBy('createdAt', 'asc')),
     (snapshot) => {
-      onData(snapshot.docs.map((item) => {
-        const data = item.data();
-        return {
-          id: item.id,
-          conversationId,
-          senderId: String(data.senderId ?? ''),
-          senderName: String(data.senderName ?? ''),
-          createdAt: data.createdAt instanceof Timestamp ? data.createdAt : null,
-          type: data.type,
-          content: String(data.content ?? ''),
-          attachmentUrl: typeof data.attachmentUrl === 'string' ? data.attachmentUrl : undefined,
-          quoteData: data.quoteData,
-        } as StoredMessage;
-      }));
+      try {
+        onData(snapshot.docs.map((item) => {
+          const data = item.data();
+          const type = data.type;
+          if (!['TEXT', 'IMAGE', 'VOICE', 'SHARED_PHONE', 'SHARED_ADDRESS', 'QUOTE_PROPOSAL'].includes(type)) {
+            throw new Error(`Message ${item.id} has an invalid type.`);
+          }
+          return {
+            id: item.id,
+            conversationId,
+            senderId: String(data.senderId ?? ''),
+            senderName: String(data.senderName ?? ''),
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt : null,
+            type: type as StoredMessage['type'],
+            content: String(data.content ?? ''),
+            attachmentUrl: typeof data.attachmentUrl === 'string' ? data.attachmentUrl : undefined,
+            quoteData: data.quoteData,
+          };
+        }));
+      } catch (error) {
+        onError?.(error instanceof Error ? error : new Error('Invalid message data.'));
+      }
     },
     (error) => onError?.(error),
   );
@@ -236,13 +230,20 @@ export async function sendConversationMessage(input: {
   attachmentUrl?: string;
   quoteData?: unknown;
 }): Promise<void> {
+  if (!input.senderId || !input.conversationId || !input.content || input.content.length > 4000) {
+    throw new Error('Invalid message input.');
+  }
+  if (input.type === 'SHARED_PHONE' && input.content !== 'Teléfono compartido') {
+    throw new Error('Shared phone messages must use a semantic payload.');
+  }
+  if (input.type === 'SHARED_ADDRESS' && input.content !== 'Dirección compartida') {
+    throw new Error('Shared address messages must use a semantic payload.');
+  }
+
   const firestore = requireDb();
   const conversationRef = doc(firestore, 'conversations', input.conversationId);
   const conversationSnapshot = await getDoc(conversationRef);
-
-  if (!conversationSnapshot.exists()) {
-    throw new Error('Conversation not found.');
-  }
+  if (!conversationSnapshot.exists()) throw new Error('Conversation not found.');
 
   const conversation = normalizeConversation(input.conversationId, conversationSnapshot.data());
   if (!isConversationParticipant(conversation.participantIds, input.senderId)) {
@@ -250,13 +251,10 @@ export async function sendConversationMessage(input: {
   }
 
   const recipientId = conversation.participantIds.find((userId) => userId !== input.senderId);
-  if (!recipientId) {
-    throw new Error('Conversation recipient could not be resolved.');
-  }
+  if (!recipientId) throw new Error('Conversation recipient could not be resolved.');
 
   const messageRef = doc(collection(conversationRef, 'messages'));
   const batch = writeBatch(firestore);
-
   batch.set(messageRef, {
     conversationId: input.conversationId,
     senderId: input.senderId,
@@ -267,7 +265,6 @@ export async function sendConversationMessage(input: {
     ...(input.quoteData !== undefined ? { quoteData: input.quoteData } : {}),
     createdAt: serverTimestamp(),
   });
-
   batch.update(conversationRef, {
     lastMessagePreview: getSafeMessagePreview(input.type, input.content),
     lastMessageId: messageRef.id,
@@ -276,30 +273,20 @@ export async function sendConversationMessage(input: {
     [`unreadCountByUser.${input.senderId}`]: 0,
     [`unreadCountByUser.${recipientId}`]: increment(1),
   });
-
   await batch.commit();
 }
 
-export async function markConversationAsRead(input: {
-  conversationId: string;
-  userId: string;
-}): Promise<void> {
+export async function markConversationAsRead(input: { conversationId: string; userId: string }): Promise<void> {
   const firestore = requireDb();
   const conversationRef = doc(firestore, 'conversations', input.conversationId);
   const snapshot = await getDoc(conversationRef);
-
-  if (!snapshot.exists()) {
-    throw new Error('Conversation not found.');
-  }
+  if (!snapshot.exists()) throw new Error('Conversation not found.');
 
   const conversation = normalizeConversation(input.conversationId, snapshot.data());
   if (!isConversationParticipant(conversation.participantIds, input.userId)) {
     throw new Error('User is not a conversation participant.');
   }
-
-  await updateDoc(conversationRef, {
-    [`unreadCountByUser.${input.userId}`]: 0,
-  });
+  await updateDoc(conversationRef, { [`unreadCountByUser.${input.userId}`]: 0 });
 }
 
 export async function updateConversationPrivacy(input: {
@@ -311,10 +298,7 @@ export async function updateConversationPrivacy(input: {
   const firestore = requireDb();
   const conversationRef = doc(firestore, 'conversations', input.conversationId);
   const snapshot = await getDoc(conversationRef);
-
-  if (!snapshot.exists()) {
-    throw new Error('Conversation not found.');
-  }
+  if (!snapshot.exists()) throw new Error('Conversation not found.');
 
   const conversation = normalizeConversation(input.conversationId, snapshot.data());
   if (!isConversationParticipant(conversation.participantIds, input.userId)) {
@@ -322,26 +306,12 @@ export async function updateConversationPrivacy(input: {
   }
 
   const updates: Record<string, unknown> = {};
-
-  if (typeof input.phoneShared === 'boolean') {
-    updates[`privacyByUser.${input.userId}.phoneShared`] = input.phoneShared;
-  }
-
-  if (typeof input.addressShared === 'boolean') {
-    updates[`privacyByUser.${input.userId}.addressShared`] = input.addressShared;
-  }
-
-  if (Object.keys(updates).length === 0) {
-    return;
-  }
-
-  await updateDoc(conversationRef, updates);
+  if (typeof input.phoneShared === 'boolean') updates[`privacyByUser.${input.userId}.phoneShared`] = input.phoneShared;
+  if (typeof input.addressShared === 'boolean') updates[`privacyByUser.${input.userId}.addressShared`] = input.addressShared;
+  if (Object.keys(updates).length > 0) await updateDoc(conversationRef, updates);
 }
 
-export function getOtherConversationParticipant(
-  conversation: StoredConversation,
-  currentUserId: string,
-): string | null {
+export function getOtherConversationParticipant(conversation: StoredConversation, currentUserId: string): string | null {
   return getOtherParticipantId(conversation.participantIds, currentUserId);
 }
 
@@ -353,26 +323,12 @@ export async function getSharedConversationContact(input: {
   const token = await input.getIdToken();
   const response = await fetch(
     `/api/conversations/${encodeURIComponent(input.conversationId)}/shared-contact/${input.type}`,
-    {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/json',
-      },
-      cache: 'no-store',
-    },
+    { method: 'GET', headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, cache: 'no-store' },
   );
 
-  if (response.status === 403 || response.status === 404) {
-    return null;
-  }
-
-  if (!response.ok) {
-    throw new Error('Unable to retrieve shared contact information.');
-  }
+  if (response.status === 403 || response.status === 404) return null;
+  if (!response.ok) throw new Error('Unable to retrieve shared contact information.');
 
   const payload = await response.json() as { value?: unknown };
-  return typeof payload.value === 'string' && payload.value.trim()
-    ? payload.value.trim()
-    : null;
+  return typeof payload.value === 'string' && payload.value.trim() ? payload.value.trim() : null;
 }
