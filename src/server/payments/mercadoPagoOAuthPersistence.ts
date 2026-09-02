@@ -14,7 +14,12 @@ export function getPaymentDb(getAdminApp: FirebaseAdminProvider) {
 
 export async function reserveOAuthState(getAdminApp: FirebaseAdminProvider, merchantId: string, nonce: string, expiresAt: string) {
   const db = getPaymentDb(getAdminApp);
-  await db.collection(STATES).doc(nonce).set({ merchantId, expiresAt, createdAt: new Date().toISOString() });
+  const ref = db.collection(STATES).doc(nonce);
+  await db.runTransaction(async (tx) => {
+    const existing = await tx.get(ref);
+    if (existing.exists) throw new Error('OAUTH_STATE_NONCE_ALREADY_RESERVED');
+    tx.create(ref, { merchantId, expiresAt, createdAt: new Date().toISOString() });
+  });
 }
 
 export async function consumeOAuthState(getAdminApp: FirebaseAdminProvider, merchantId: string, nonce: string) {
