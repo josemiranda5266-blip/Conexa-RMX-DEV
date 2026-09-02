@@ -493,6 +493,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Set up real-time sub subscriptions
 
+    const currentUserQuery = () => firebaseAuth.currentUser
+      ? onSnapshot(doc(firestoreDb, 'users', firebaseAuth.currentUser.uid), userDoc => {
+          if (!userDoc.exists()) return;
+          const data = userDoc.data() as UserProfile;
+          const updatedCurrentUser = { ...data, id: data.id || userDoc.id };
+          setCurrentUser(previousUser => previousUser ? { ...previousUser, ...updatedCurrentUser, id: firebaseAuth.currentUser!.uid } : updatedCurrentUser);
+        }, error => console.warn('[Firestore] Error sincronizando usuario autenticado:', error))
+      : () => {};
+
+    let unsubCurrentUser = currentUserQuery();
+    const unsubAuthCurrentUser = firebaseAuth.onAuthStateChanged(() => {
+      unsubCurrentUser();
+      unsubCurrentUser = currentUserQuery();
+    });
+
     const unsubUsers = onSnapshot(collection(firestoreDb, 'users'), (snapshot) => {
       const uList: UserProfile[] = [];
 
@@ -854,6 +869,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return () => {
       unsubUsers();
+      unsubCurrentUser();
+      unsubAuthCurrentUser();
       unsubReviews();
       unsubOwnRequests();
       unsubAssignedRequests();
