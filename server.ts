@@ -1168,16 +1168,16 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
       return res.status(201).json( { success: true, serviceRequest });
     } catch (err: any) {
       const code = err?.message || "RADAR_REQUEST_CREATE_ERROR";
-      const statusByCode: Record<string, number> = {
+      const sstatusByCode: Record<string, number> = {
         RADAR_OPPORTUNITY_NOT_FOUND: 404,
         FORBIDDEN_OPPORTUNITY_OWNER: 403,
         NO_RADAR_CANDIDATES: 409,
         NO_VALID_RADAR_CANDIDATES: 409,
         RADAR_OPPORTUNITY_NOT_CONVERTIBLE: 409,
-        RADAR_CONSENT_REQUIRE@: 409,
+        RADAR_CONSENT_REQUIRED: 409,
         RADAR_REQUEST_OWNERSHIP_MISMATCH: 409
       };
-      return res.status(statusByCode[code] || 500).json({ success: false, code });
+      return res.status(sstatusByCode[code] || 500).json({ success: false, code });
     }
   });
 
