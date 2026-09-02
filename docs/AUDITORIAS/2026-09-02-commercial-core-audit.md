@@ -31,6 +31,7 @@
 - Listener de mensajes ordenado por `createdAt`.
 - Creación de conversaciones desacoplada del directorio global.
 - Reconciliación de Mercado Pago persiste `paymentStatus=approved`, `status=PAID`, identificador de pago, timestamps y settlement.
+- Reserva del OAuth nonce endurecida: `reserveOAuthState` ahora usa transacción + `tx.create`, evitando sobrescribir una reserva existente para el mismo nonce.
 
 ## Descubrimientos — OAuth y webhook
 
@@ -45,6 +46,12 @@ El flujo efectivo es:
 Existe una capa modular (`src/server/payments/mercadoPagoOAuthPersistence.ts`) con persistencia/consumo one-time del OAuth state, pero todavía no está integrada al callback efectivo de `server.ts`.
 
 **Riesgo:** un `state` firmado y todavía válido puede reutilizarse más de una vez. Debe integrarse el consumo one-time antes de aceptar el authorization code.
+
+### 1.1 Corrección defensiva aplicada a la capa modular
+
+Se corrigió `reserveOAuthState` para que la reserva del nonce sea create-only mediante una transacción Firestore. Si el nonce ya existe, la operación falla con `OAUTH_STATE_NONCE_ALREADY_RESERVED` en lugar de sobrescribir el registro.
+
+**Importante:** esta mejora no resuelve por sí sola el problema principal del callback efectivo, porque `server.ts` todavía utiliza su propio `createOAuthState/verifyOAuthState` y no llama a `consumeOAuthState`.
 
 ### 2. Hay dos implementaciones del webhook
 
@@ -91,11 +98,12 @@ Esto significa que no hay una segunda ruta independiente de aceptación que deba
 - Se confirmó que la aceptación comercial está centralizada en `/api/transactions/create`.
 - Se confirmó que `acceptedQuoteId` no existe actualmente.
 - Se confirmó que job start/complete todavía usan `where(serviceRequestId).limit(1)`.
+- Se endureció la reserva modular del OAuth nonce con creación transaccional no sobrescribible.
 
 ### Próxima tarea prioritaria
 
 1. Consolidar lookup determinista `accepted quote → txn-{quoteId}` para job start/complete sin arriesgar la integridad de `server.ts`.
-2. Auditar y corregir el callback OAuth efectivo para consumo one-time del state.
+2. Integrar el consumo one-time del OAuth state en el callback efectivo.
 3. Auditar el montaje del webhook y dejar una única autoridad efectiva.
 4. Revisar eventos financieros tardíos y separar estado del proveedor de estado comercial.
 5. Continuar con AppContext/reviews y exposición del directorio de usuarios.
