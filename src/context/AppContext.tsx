@@ -545,15 +545,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    const unsubReviews = onSnapshot(collection(firestoreDb, 'reviews'), (snapshot) => {
-      const list: Review[] = [];
+    let unsubOwnReviews = () => {};
 
-      snapshot.forEach(doc => {
-        list.push(doc.data() as Review);
-      });
+    const syncOwnReviews = (uid: string | null) => {
+      unsubOwnReviews();
+      if (!uid) {
+        setReviews([]);
+        return;
+      }
 
-      setReviews(list);
-    });
+      unsubOwnReviews = onSnapshot(
+        query(collection(firestoreDb, 'reviews'), where('clientId', '==', uid)),
+        snapshot => {
+          const list = snapshot.docs.map(reviewDoc => {
+            const data = reviewDoc.data() as Review;
+            return { ...data, id: data.id || reviewDoc.id };
+          });
+          setReviews(list);
+        },
+        error => console.warn('[Firestore] Error sincronizando reseñas propias:', error)
+      );
+    };
+
+    syncOwnReviews(firebaseAuth.currentUser?.uid || null);
+    const unsubAuthReviews = firebaseAuth.onAuthStateChanged(user => syncOwnReviews(user?.uid || null));
 
     let unsubOwnRequests = () => {};
     let unsubAssignedRequests = () => {};
@@ -874,7 +889,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubUsers();
       unsubCurrentUser();
       unsubAuthCurrentUser();
-      unsubReviews();
+      unsubOwnReviews();
+      unsubAuthReviews();
       unsubOwnRequests();
       unsubAssignedRequests();
       unsubOpenRequests();
