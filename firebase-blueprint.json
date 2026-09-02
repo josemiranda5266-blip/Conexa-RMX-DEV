@@ -2,7 +2,7 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "User profile with separated public identity and confidential phone/address information.",
+      "description": "Public user profile with confidential contact and verification data separated from the public document.",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
@@ -12,27 +12,54 @@
         "role": { "type": "string", "enum": ["USER", "PROFESSIONAL", "MODERATOR", "ADMIN", "SUPER_ADMIN"] },
         "joinedDate": { "type": "string" },
         "isIdentityVerified": { "type": "boolean" },
+        "identityVerificationStatus": { "type": "string", "enum": ["NONE", "PENDING", "VERIFIED", "REJECTED"] },
+        "activeMode": { "type": "string", "enum": ["CLIENT", "PROFESSIONAL", "ADMIN"] },
+        "hasClientProfile": { "type": "boolean" },
+        "hasProfessionalProfile": { "type": "boolean" },
+        "professionId": { "type": "string" },
+        "professionName": { "type": "string" },
+        "specialties": { "type": "array", "items": { "type": "string" } },
+        "isProfessionalVerified": { "type": "boolean" },
+        "professionalVerificationStatus": { "type": "string", "enum": ["NONE", "PENDING", "VERIFIED", "REJECTED"] },
         "rating": { "type": "number" },
         "reviewCount": { "type": "integer" },
         "jobsCompleted": { "type": "integer" },
-        "trustScore": { "type": "integer" }
+        "trustScore": { "type": "integer" },
+        "isBlocked": { "type": "boolean" }
       },
       "required": ["id", "name", "email", "role"]
     },
     "PrivateUserInfo": {
       "title": "PrivateUserInfo",
-      "description": "Confidential phone number, exact address, and official identity documents.",
+      "description": "Confidential phone number and exact address. Identity and professional verification documents are submitted through the verification workflow and must not be published in the public profile.",
       "type": "object",
       "properties": {
         "phonePrivate": { "type": "string", "maxLength": 30 },
         "exactAddressPrivate": { "type": "string", "maxLength": 200 },
-        "identityDocUrl": { "type": "string" },
-        "verificationDocUrl": { "type": "string" }
+        "updatedAt": { "type": "string" },
+        "migratedAt": { "type": "string" }
       }
+    },
+    "VerificationRequest": {
+      "title": "VerificationRequest",
+      "description": "User-submitted identity or professional verification request reviewed by administrators.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userRole": { "type": "string" },
+        "type": { "type": "string", "enum": ["IDENTITY", "PROFESSIONAL"] },
+        "documentName": { "type": "string" },
+        "documentUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "VERIFIED", "REJECTED"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "type", "documentName", "documentUrl", "status", "createdAt"]
     },
     "ServiceRequest": {
       "title": "ServiceRequest",
-      "description": "Published job request by client without exact public location.",
+      "description": "Published service request without exact private address.",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
@@ -62,18 +89,35 @@
       },
       "required": ["id", "requestId", "professionalId", "priceArs", "status"]
     },
-    "Message": {
-      "title": "Message",
-      "description": "Private encrypted chat message between client and professional.",
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Private two-party conversation with per-user privacy and unread state.",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
+        "participantIds": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "string" } },
+        "participantKey": { "type": "string" },
+        "privacyByUser": { "type": "object" },
+        "unreadCountByUser": { "type": "object" },
+        "lastMessageId": { "type": "string" },
+        "lastMessagePreview": { "type": "string" },
+        "lastMessageAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["participantIds", "participantKey", "privacyByUser", "unreadCountByUser"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Private chat message stored under its conversation.",
+      "type": "object",
+      "properties": {
         "conversationId": { "type": "string" },
         "senderId": { "type": "string" },
-        "content": { "type": "string", "maxLength": 1000 },
-        "type": { "type": "string", "enum": ["TEXT", "IMAGE", "VOICE", "SYSTEM", "SHARED_PHONE", "SHARED_ADDRESS", "QUOTE_PROPOSAL"] }
+        "senderName": { "type": "string" },
+        "content": { "type": "string", "maxLength": 4000 },
+        "type": { "type": "string", "enum": ["TEXT", "IMAGE", "VOICE", "SHARED_PHONE", "SHARED_ADDRESS", "QUOTE_PROPOSAL"] },
+        "createdAt": { "type": "string" }
       },
-      "required": ["id", "conversationId", "senderId", "content", "type"]
+      "required": ["conversationId", "senderId", "senderName", "content", "type", "createdAt"]
     },
     "UserReport": {
       "title": "UserReport",
@@ -91,7 +135,7 @@
     },
     "RadarOpportunity": {
       "title": "RadarOpportunity",
-      "description": "Public or authorized demand opportunity detected and classified by CONEXA RADAR.",
+      "description": "Demand opportunity detected and classified by CONEXA RADAR.",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
@@ -110,33 +154,14 @@
     }
   },
   "firestore": {
-    "/users/{userId}": {
-      "schema": { "$ref": "#/entities/User" },
-      "description": "Public user profile."
-    },
-    "/users/{userId}/private/info": {
-      "schema": { "$ref": "#/entities/PrivateUserInfo" },
-      "description": "Confidential user PII accessible ONLY by the owner or system admin."
-    },
-    "/service_requests/{requestId}": {
-      "schema": { "$ref": "#/entities/ServiceRequest" },
-      "description": "Public service requests."
-    },
-    "/quotes/{quoteId}": {
-      "schema": { "$ref": "#/entities/Quote" },
-      "description": "Service quote proposals."
-    },
-    "/messages/{messageId}": {
-      "schema": { "$ref": "#/entities/Message" },
-      "description": "Chat messages."
-    },
-    "/reports/{reportId}": {
-      "schema": { "$ref": "#/entities/UserReport" },
-      "description": "Moderation reports."
-    },
-    "/radar_opportunities/{opportunityId}": {
-      "schema": { "$ref": "#/entities/RadarOpportunity" },
-      "description": "Demand opportunities managed by CONEXA RADAR."
-    }
+    "/users/{userId}": { "schema": { "$ref": "#/entities/User" }, "description": "Public user profile." },
+    "/users/{userId}/private/info": { "schema": { "$ref": "#/entities/PrivateUserInfo" }, "description": "Confidential contact data accessible only by the owner or admin." },
+    "/service_requests/{requestId}": { "schema": { "$ref": "#/entities/ServiceRequest" }, "description": "Service requests." },
+    "/quotes/{quoteId}": { "schema": { "$ref": "#/entities/Quote" }, "description": "Service quote proposals." },
+    "/conversations/{conversationId}": { "schema": { "$ref": "#/entities/Conversation" }, "description": "Two-party conversations." },
+    "/conversations/{conversationId}/messages/{messageId}": { "schema": { "$ref": "#/entities/Message" }, "description": "Messages belonging to a conversation." },
+    "/reports/{reportId}": { "schema": { "$ref": "#/entities/UserReport" }, "description": "Moderation reports." },
+    "/verifications/{verificationId}": { "schema": { "$ref": "#/entities/VerificationRequest" }, "description": "Verification workflow records." },
+    "/radar_opportunities/{opportunityId}": { "schema": { "$ref": "#/entities/RadarOpportunity" }, "description": "Demand opportunities managed by CONEXA RADAR." }
   }
 }
