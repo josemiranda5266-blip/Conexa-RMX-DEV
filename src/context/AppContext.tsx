@@ -522,27 +522,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setUsers(uList);
 
-      const authenticatedUid = firebaseAuth.currentUser?.uid;
-
-      if (authenticatedUid) {
-        const updatedCurrentUser = uList.find(
-          user => user.id === authenticatedUid
-        );
-
-        if (updatedCurrentUser) {
-          setCurrentUser(previousUser => {
-            if (!previousUser) {
-              return updatedCurrentUser;
-            }
-
-            return {
-              ...previousUser,
-              ...updatedCurrentUser,
-              id: authenticatedUid
-            };
-          });
-        }
-      }
     });
 
     let unsubOwnReviews = () => {};
