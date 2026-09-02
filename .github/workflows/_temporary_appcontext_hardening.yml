@@ -1,0 +1,56 @@
+name: temporary AppContext hardening
+on:
+  push:
+    branches:
+      - integration/conexa-unified
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Harden AppContext boundaries
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/context/AppContext.tsx')
+          s = p.read_text(encoding='utf-8')
+          old = "documentUrl: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&q=80&w=400',"
+          assert old in s
+          s = s.replace(old, "documentPath: '',", 1)
+          old = """  const updateApprovalMode = async (mode: ApprovalMode): Promise<void> => {\n    if (!['AUTOMÁTICO', 'ASISTIDO', 'MANUAL'].includes(mode)) {\n      throw new Error('Modo de aprobación inválido.');\n    }\n\n    if (isFirebaseConfigured && db) {"""
+          new = """  const updateApprovalMode = async (mode: ApprovalMode): Promise<void> => {\n    ensureAdminOperation();\n    if (!['AUTOMÁTICO', 'ASISTIDO', 'MANUAL'].includes(mode)) {\n      throw new Error('Modo de aprobación inválido.');\n    }\n\n    if (isFirebaseConfigured && db) {"""
+          assert old in s
+          s = s.replace(old, new, 1)
+          old = """  useEffect(() => {\n    if (!isFirebaseConfigured || !db) return;\n\n    const unsubRadarOpportunities = onSnapshot(\n      collection(db, 'radar_opportunities'),"""
+          new = """  useEffect(() => {\n    if (!isFirebaseConfigured || !db || !currentUser || !['ADMIN', 'SUPER_ADMIN'].includes(currentUser.role)) return;\n\n    const unsubRadarOpportunities = onSnapshot(\n      collection(db, 'radar_opportunities'),"""
+          assert old in s
+          s = s.replace(old, new, 1)
+          s = s.replace("  }, []);\n\n  useEffect(() => {\n    if (isFirebaseConfigured) return;\n    localStorage.setItem('conexa_radar_opportunities'", "  }, [currentUser?.id, currentUser?.role]);\n\n  useEffect(() => {\n    if (isFirebaseConfigured) return;\n    localStorage.setItem('conexa_radar_opportunities'", 1)
+          old = """  const addRadarOpportunity = (opp: RadarOpportunity) => {\n    // Matching is deterministic in every environment. Simulation may provide"""
+          new = """  const addRadarOpportunity = (opp: RadarOpportunity) => {\n    if (isFirebaseConfigured && !isAdmin()) {\n      throw new Error('Solo un administrador puede registrar oportunidades RADAR en producción.');\n    }\n    if (isFirebaseConfigured && opp.environment === 'simulation') {\n      throw new Error('Las oportunidades de simulación no pueden persistirse en producción.');\n    }\n\n    // Matching is deterministic in every environment. Simulation may provide"""
+          assert old in s
+          s = s.replace(old, new, 1)
+          old = """  const updateRadarOpportunity = (id: string, updates: Partial<RadarOpportunity>) => {\n    setRadarOpportunities(prev => prev.map(o => {"""
+          new = """  const updateRadarOpportunity = (id: string, updates: Partial<RadarOpportunity>) => {\n    if (isFirebaseConfigured && !isAdmin()) {\n      throw new Error('Solo un administrador puede modificar oportunidades RADAR en producción.');\n    }\n    if (isFirebaseConfigured && updates.environment === 'simulation') {\n      throw new Error('Las oportunidades de simulación no pueden persistirse en producción.');\n    }\n\n    setRadarOpportunities(prev => prev.map(o => {"""
+          assert old in s
+          s = s.replace(old, new, 1)
+          old = """  const deleteRadarOpportunity = (id: string) => {\n    setRadarOpportunities(prev => prev.filter(o => o.id !== id));"""
+          new = """  const deleteRadarOpportunity = (id: string) => {\n    if (isFirebaseConfigured && !isAdmin()) {\n      throw new Error('Solo un administrador puede cerrar oportunidades RADAR en producción.');\n    }\n    setRadarOpportunities(prev => prev.filter(o => o.id !== id));"""
+          assert old in s
+          s = s.replace(old, new, 1)
+          old = """  const convertRadarOpportunity = (opportunityId: string, userId?: string) => {\n    const opportunity = radarOpportunities.find(o => o.id === opportunityId);"""
+          new = """  const convertRadarOpportunity = (opportunityId: string, userId?: string) => {\n    if (isFirebaseConfigured && !isAdmin()) {\n      throw new Error('Solo un administrador puede registrar una conversión RADAR en producción.');\n    }\n    const opportunity = radarOpportunities.find(o => o.id === opportunityId);"""
+          assert old in s
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/context/AppContext.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m "security: harden AppContext Radar boundaries"
+          git push origin integration/conexa-unified
