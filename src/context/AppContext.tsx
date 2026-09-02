@@ -197,7 +197,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       userRole: 'PROFESSIONAL',
       type: 'PROFESSIONAL',
       documentName: 'Registro_Municipal_Plomeria_SdE.pdf',
-      documentUrl: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&q=80&w=400',
+      documentPath: '',
       status: 'PENDING',
       createdAt: 'Hace 1 día'
     }
@@ -1728,6 +1728,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>('ASISTIDO');
 
   const updateApprovalMode = async (mode: ApprovalMode): Promise<void> => {
+    ensureAdminOperation();
     if (!['AUTOMÁTICO', 'ASISTIDO', 'MANUAL'].includes(mode)) {
       throw new Error('Modo de aprobación inválido.');
     }
@@ -1747,7 +1748,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   useEffect(() => {
-    if (!isFirebaseConfigured || !db) return;
+    if (!isFirebaseConfigured || !db || !currentUser || !['ADMIN', 'SUPER_ADMIN'].includes(currentUser.role)) return;
 
     const unsubRadarOpportunities = onSnapshot(
       collection(db, 'radar_opportunities'),
@@ -1782,7 +1783,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubRadarOpportunities();
       unsubRadarConfig();
     };
-  }, []);
+  }, [currentUser?.id, currentUser?.role]);
 
   useEffect(() => {
     if (isFirebaseConfigured) return;
@@ -1848,6 +1849,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [radarOpportunities]);
 
   const addRadarOpportunity = (opp: RadarOpportunity) => {
+    if (isFirebaseConfigured && !isAdmin()) {
+      throw new Error('Solo un administrador puede registrar oportunidades RADAR en producción.');
+    }
+    if (isFirebaseConfigured && opp.environment === 'simulation') {
+      throw new Error('Las oportunidades de simulación no pueden persistirse en producción.');
+    }
+
     // Matching is deterministic in every environment. Simulation may provide
     // fixture matches for visual scenarios, but production data is never trusted
     // from the incoming payload.
@@ -1891,6 +1899,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   ): boolean => currentStatus === nextStatus || allowedRadarTransitions[currentStatus].includes(nextStatus);
 
   const updateRadarOpportunity = (id: string, updates: Partial<RadarOpportunity>) => {
+    if (isFirebaseConfigured && !isAdmin()) {
+      throw new Error('Solo un administrador puede modificar oportunidades RADAR en producción.');
+    }
+    if (isFirebaseConfigured && updates.environment === 'simulation') {
+      throw new Error('Las oportunidades de simulación no pueden persistirse en producción.');
+    }
+
     setRadarOpportunities(prev => prev.map(o => {
       if (o.id !== id) return o;
 
@@ -1937,6 +1952,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteRadarOpportunity = (id: string) => {
+    if (isFirebaseConfigured && !isAdmin()) {
+      throw new Error('Solo un administrador puede cerrar oportunidades RADAR en producción.');
+    }
     setRadarOpportunities(prev => prev.filter(o => o.id !== id));
 
     if (isFirebaseConfigured && db) {
@@ -2026,6 +2044,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const convertRadarOpportunity = (opportunityId: string, userId?: string) => {
+    if (isFirebaseConfigured && !isAdmin()) {
+      throw new Error('Solo un administrador puede registrar una conversión RADAR en producción.');
+    }
     const opportunity = radarOpportunities.find(o => o.id === opportunityId);
 
     if (!opportunity) {
