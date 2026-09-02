@@ -263,7 +263,8 @@ export interface VerificationRequest {
   userRole: Role;
   type: 'IDENTITY' | 'PROFESSIONAL';
   documentName: string;
-  documentUrl: string;
+  /** Storage object path only; never expose a public download URL. */
+  documentPath: string;
   status: VerificationStatus;
   createdAt: string;
 }
