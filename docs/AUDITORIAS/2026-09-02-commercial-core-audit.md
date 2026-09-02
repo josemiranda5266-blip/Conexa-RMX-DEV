@@ -19,17 +19,21 @@
 - La finalización exige `IN_PROGRESS`/`SERVICE_IN_PROGRESS` y vuelve a comprobar las relaciones entre solicitud, presupuesto y transacción dentro de una transacción Firestore.
 - La reseña es idempotente por `serviceRequestId + clientId` y cierra el trabajo junto con el estado `SETTLED`.
 - El webhook de Mercado Pago no confía en el redirect del navegador y recupera el pago servidor-a-servidor usando el token del profesional conectado.
+- Los estados de autorización y verificación no se delegan a escrituras directas del navegador: las mutaciones administrativas pasan por backend y las reglas Firestore bloquean las escrituras de autoridad desde el cliente.
 
-## Hallazgos corregidos por automatización del repositorio
+## Correcciones realizadas en esta fase
 
-El endpoint de conversión RADAR contenía una mutación tipográfica en la normalización de `estimatedBudgetArs` (`Numer(...)`). El workflow `radar-fix4.yml` está diseñado para corregir automáticamente ese caso en cada push de un actor no bot. La corrección debe quedar aplicada por el commit automático posterior a esta auditoría.
+- Se eliminaron los workflows temporales de parcheo automático de RADAR y AppContext. Esos workflows habían introducido mutaciones repetidas en `server.ts` y ya no forman parte del repositorio operativo.
+- Se restauró el bloque de conversión RADAR a una versión consistente: candidatos, urgencia, presupuesto y mapa de códigos HTTP utilizan nombres válidos y coherentes.
+- Se mantuvo la conversión RADAR dentro de una transacción Firestore, con validación del propietario, estado convertible, consentimiento, reutilización idempotente de una solicitud ya vinculada y filtrado de candidatos válidos/no bloqueados.
 
 ## Riesgos todavía bajo revisión
 
-1. La búsqueda de transacciones por `serviceRequestId` con `limit(1)` en operaciones de inicio/completado depende de que el modelo garantice una única transacción comercial activa por solicitud.
+1. La búsqueda de transacciones por `serviceRequestId` con `limit(1)` en operaciones de inicio/completado depende de que el modelo garantice una única transacción comercial activa por solicitud. El modelo actual reutiliza el documento determinista `txn-{quoteId}`, pero conviene formalizar esa unicidad como invariantes del dominio.
 2. El webhook debe mantener una única relación inequívoca entre `external_reference`, `transaction.id`, `quoteId` y `serviceRequestId`.
-3. Estados de reembolso/chargeback deben impedir cualquier continuación del servicio si el pago ya fue revertido.
-4. La sincronización de reseñas en frontend debe distinguir reseñas authored-by-client de reseñas recibidas por el profesional, evitando listeners globales innecesarios.
+3. Un pago `REFUNDED` o `CANCELLED` debe impedir cualquier continuación del servicio; el backend actual protege el inicio mediante estado `PAID`, pero el comportamiento ante eventos tardíos del proveedor debe conservarse idempotente.
+4. La sincronización de reseñas en frontend distingue actualmente las reseñas authored-by-client; debe verificarse que las pantallas de perfil profesional no dependan de una colección global de reseñas para mostrar las recibidas.
+5. `users` sigue siendo una colección de directorio global para usuarios autenticados. Antes de producción a escala conviene separar explícitamente perfil público y datos de sesión/privados para reducir superficie de lectura.
 
 ## Criterio de salida
 
