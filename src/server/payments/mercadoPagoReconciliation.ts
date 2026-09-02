@@ -77,14 +77,27 @@ export async function reconcileMercadoPagoPayment(
       return { status: 'IGNORED', reason: 'TRANSACTION_MERCHANT_CHANGED' };
     }
 
-    if (String(current.status || '').toUpperCase() === 'PAID') {
+    const currentStatus = String(current.status || '').toUpperCase();
+    const currentPaymentStatus = String(current.paymentStatus || '').toLowerCase();
+
+    if (currentPaymentStatus === 'approved' || currentStatus === 'PAID') {
       if (current.mercadoPagoPaymentId && String(current.mercadoPagoPaymentId) !== String(paymentId)) {
         return { status: 'IGNORED', reason: 'PAID_WITH_DIFFERENT_PAYMENT' };
+      }
+      if (currentPaymentStatus !== 'approved' || currentStatus !== 'PAID') {
+        const now = new Date().toISOString();
+        tx.update(transactionRef, {
+          status: 'PAID',
+          paymentStatus: 'approved',
+          mercadoPagoPaymentId: String(paymentId),
+          paymentUpdatedAt: now,
+          paidAt: current.paidAt || now,
+        });
       }
       return { status: 'ALREADY_PAID', transactionId };
     }
 
-    if (String(current.status || '').toUpperCase() !== 'PAYMENT_PENDING') {
+    if (!['PAYMENT_PENDING', 'CREATED'].includes(currentStatus)) {
       return { status: 'IGNORED', reason: 'TRANSACTION_NOT_PAYMENT_PENDING' };
     }
 
@@ -95,8 +108,10 @@ export async function reconcileMercadoPagoPayment(
     const now = new Date().toISOString();
     tx.update(transactionRef, {
       status: 'PAID',
+      paymentStatus: 'approved',
+      settlementStatus: current.settlementStatus || 'PENDING',
       mercadoPagoPaymentId: String(paymentId),
-      paidAt: now,
+      paidAt: current.paidAt || now,
       paymentUpdatedAt: now,
     });
 
