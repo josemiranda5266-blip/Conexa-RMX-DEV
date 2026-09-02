@@ -1,0 +1,31 @@
+name: Radar one-shot source normalization
+on:
+  push:
+    branches:
+      - integration/conexa-unified
+permissions:
+  contents: write
+jobs:
+  normalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Normalize known Radar source mutations
+        run: |
+          set -e
+          sed -i \
+            -e 's/candiateIds/candidateIds/g' \
+            -e 's/UNERGENT/URGENTE/g' \
+            -e 's/Numer(opportunity\.estimatedBudgetArs)/Number(opportunity.estimatedBudgetArs)/g' \
+            -e 's/RADAR_CONSENT_REQUIRE@/RADAR_CONSENT_REQUIRED/g' \
+            -e 's/sstatusByCode/statusByCode/g' \
+            -e 's/tatusByCode/statusByCode/g' \
+            server.ts
+      - name: Commit normalized source
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          git diff --cached --quiet || git commit -m 'fix(server): normalize Radar source mutations'
+          git push
