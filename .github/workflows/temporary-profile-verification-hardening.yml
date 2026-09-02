@@ -1,0 +1,32 @@
+name: Apply canonical profile verification hardening
+
+on:
+  push:
+    branches: [integration/conexa-unified]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply patch
+        run: python3 scripts/apply_profile_verification_hardening.py
+      - name: Remove migration helpers
+        run: |
+          rm scripts/apply_profile_verification_hardening.py
+          rm .github/workflows/temporary-profile-verification-hardening.yml
+      - name: Commit canonical changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts src/components/BecomeProfessionalModal.tsx src/context/AppContext.tsx
+          git add -u scripts/apply_profile_verification_hardening.py .github/workflows/temporary-profile-verification-hardening.yml
+          git commit -m 'security: harden professional profile and verification storage boundary'
+          git push origin HEAD:integration/conexa-unified
