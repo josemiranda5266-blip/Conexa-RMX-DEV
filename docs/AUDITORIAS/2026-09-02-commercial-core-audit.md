@@ -30,7 +30,8 @@
 - Cambio de modo/rol limitado al usuario autenticado.
 - Listener de mensajes ordenado por `createdAt`.
 - Creación de conversaciones desacoplada del directorio global.
-- Reconciliación de Mercado Pago persiste `paymentStatus=approved`, `status=PAID`, identificador de pago, timestamps y settlement.
+- Reconciliación de Mercado Pago persiste `paymentStatus`, identificador de pago y timestamps; los eventos aprobados avanzan a `PAID` únicamente desde estados pendientes/creados.
+- Reconciliación de Mercado Pago endurecida para que estados financieros tardíos (`refunded`, `charged_back`, `cancelled`, `rejected`, `pending`, etc.) preserven la verdad del proveedor sin degradar automáticamente un estado comercial ya avanzado.
 - Reserva del OAuth nonce endurecida: `reserveOAuthState` ahora usa transacción + `tx.create`, evitando sobrescribir una reserva existente para el mismo nonce.
 
 ## Descubrimientos — OAuth y webhook
@@ -61,6 +62,19 @@ Existe un handler modular en `src/server/payments/mercadoPagoWebhook.ts` y un ha
 
 **Riesgo:** duplicidad de autoridad y divergencia futura entre handlers. Debe quedar una única implementación efectiva.
 
+### 2.1 Estado financiero tardío ya corregido en el reconciliador modular
+
+El reconciliador modular ahora separa explícitamente dos conceptos:
+
+- `paymentStatus`: verdad financiera devuelta por Mercado Pago.
+- `status`: estado comercial/operativo de CONEXA.
+
+Un `approved` posterior al avance del servicio ya no retrocede el flujo comercial; un `refunded`/`chargeback` registra el evento financiero sin convertir automáticamente una operación ya avanzada en `CANCELLED`. La cancelación sólo cambia el estado comercial cuando la transacción todavía está en `PAYMENT_PENDING` o `CREATED`.
+
+Corrección registrada en commit: `21f481d5a391e558ddccc3eddfbf02516fa9d89d` (`fix(payments): preserve provider status after commercial progression`).
+
+**Pendiente:** mientras exista el webhook inline de `server.ts`, la garantía debe considerarse incompleta a nivel de ruta efectiva. El siguiente objetivo es dejar un único handler operativo.
+
 ### 3. Relación transacción → solicitud todavía requiere formalización
 
 La creación de transacciones usa un ID determinista `txn-{quoteId}`. La aceptación del quote ocurre dentro de `/api/transactions/create`: el backend valida que el quote esté `PENDING`, crea/reutiliza la transacción determinista, cambia el quote a `ACCEPTED` y cambia la solicitud a `PROFESSIONAL_SELECTED`, asignando el profesional del quote.
@@ -83,7 +97,7 @@ Esto significa que no hay una segunda ruta independiente de aceptación que deba
 
 1. OAuth state debe consumirse una sola vez en el callback efectivo.
 2. Debe quedar un único webhook efectivo, preferentemente el handler modular ya preparado.
-3. Eventos financieros tardíos (`refund`, `cancel`, `chargeback`) deben conservar el estado del proveedor (`paymentStatus`) sin degradar indebidamente el estado comercial ya avanzado (`SERVICE_IN_PROGRESS`, `SERVICE_COMPLETED`, `SETTLED`).
+3. La relación `accepted quote → transaction` debe ser determinista en jobs y reviews.
 4. La sincronización de reseñas en frontend distingue actualmente las reseñas authored-by-client; debe verificarse que las pantallas de perfil profesional no dependan de una colección global de reseñas para mostrar las recibidas.
 5. `users` sigue siendo una colección de directorio global para usuarios autenticados. Antes de producción a escala conviene separar explícitamente perfil público y datos de sesión/privados para reducir superficie de lectura.
 
@@ -91,7 +105,7 @@ Esto significa que no hay una segunda ruta independiente de aceptación que deba
 
 ### Estado actual
 
-- Repositorio y rama verificados antes de esta auditoría.
+- Repositorio y rama verificados antes de esta continuación.
 - No se ejecutaron tests ni build.
 - No se crearon workflows temporales.
 - No se realizó un reemplazo parcial de `server.ts`.
@@ -99,14 +113,14 @@ Esto significa que no hay una segunda ruta independiente de aceptación que deba
 - Se confirmó que `acceptedQuoteId` no existe actualmente.
 - Se confirmó que job start/complete todavía usan `where(serviceRequestId).limit(1)`.
 - Se endureció la reserva modular del OAuth nonce con creación transaccional no sobrescribible.
+- Se endureció el reconciliador modular para conservar el estado financiero del proveedor sin degradar automáticamente el estado comercial avanzado.
 
 ### Próxima tarea prioritaria
 
 1. Consolidar lookup determinista `accepted quote → txn-{quoteId}` para job start/complete sin arriesgar la integridad de `server.ts`.
 2. Integrar el consumo one-time del OAuth state en el callback efectivo.
 3. Auditar el montaje del webhook y dejar una única autoridad efectiva.
-4. Revisar eventos financieros tardíos y separar estado del proveedor de estado comercial.
-5. Continuar con AppContext/reviews y exposición del directorio de usuarios.
+4. Continuar con AppContext/reviews y exposición del directorio de usuarios.
 
 ### Restricciones operativas
 
