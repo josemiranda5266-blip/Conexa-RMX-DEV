@@ -1177,7 +1177,7 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
         RADAR_CONSENT_REQUIRED: 409,
         RADAR_REQUEST_OWNERSHIP_MISMATCH: 409
       };
-      return res.status(statusByCode[code] || 500).json({ success: false, code });
+      return res.status(sstatusByCode[code] || 500).json({ success: false, code });
     }
   });
 
