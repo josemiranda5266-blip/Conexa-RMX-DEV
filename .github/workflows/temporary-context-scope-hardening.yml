@@ -1,0 +1,32 @@
+name: Apply context listener scope hardening
+
+on:
+  push:
+    branches: [integration/conexa-unified]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply patch
+        run: python3 scripts/harden_context_scopes.py
+      - name: Remove migration helpers
+        run: |
+          rm scripts/harden_context_scopes.py
+          rm .github/workflows/temporary-context-scope-hardening.yml
+      - name: Commit canonical changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/context/AppContext.tsx
+          git add -u scripts/harden_context_scopes.py .github/workflows/temporary-context-scope-hardening.yml
+          git commit -m 'security: scope moderation listeners to authorized users'
+          git push origin HEAD:integration/conexa-unified
