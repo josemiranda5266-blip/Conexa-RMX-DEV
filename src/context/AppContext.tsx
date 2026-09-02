@@ -755,16 +755,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    const unsubReports = onSnapshot(collection(firestoreDb, 'reports'), (snapshot) => {
-      const list: UserReport[] = [];
-      snapshot.forEach(doc => list.push(doc.data() as UserReport));
-      setReports(list);
-    });
+    let unsubReports = () => {};
+    let unsubVerifications = () => {};
 
-    const unsubVerifications = onSnapshot(collection(firestoreDb, 'verifications'), (snapshot) => {
-      const list: VerificationRequest[] = [];
-      snapshot.forEach(doc => list.push(doc.data() as VerificationRequest));
-      setVerifications(list);
+    const syncModerationData = async (user: any | null) => {
+      unsubReports();
+      unsubVerifications();
+      unsubReports = () => {};
+      unsubVerifications = () => {};
+      setReports([]);
+      setVerifications([]);
+
+      if (!user) return;
+
+      try {
+        const tokenResult = await user.getIdTokenResult();
+        const isAdminClaim = tokenResult.claims.role === 'ADMIN' || tokenResult.claims.role === 'SUPER_ADMIN';
+
+        if (isAdminClaim) {
+          unsubReports = onSnapshot(
+            collection(firestoreDb, 'reports'),
+            snapshot => setReports(snapshot.docs.map(reportDoc => reportDoc.data() as UserReport)),
+            error => console.warn('[Firestore] Error sincronizando reportes administrativos:', error)
+          );
+          unsubVerifications = onSnapshot(
+            collection(firestoreDb, 'verifications'),
+            snapshot => setVerifications(snapshot.docs.map(verificationDoc => verificationDoc.data() as VerificationRequest)),
+            error => console.warn('[Firestore] Error sincronizando verificaciones administrativas:', error)
+          );
+        } else {
+          unsubVerifications = onSnapshot(
+            query(collection(firestoreDb, 'verifications'), where('userId', '==', user.uid)),
+            snapshot => setVerifications(snapshot.docs.map(verificationDoc => verificationDoc.data() as VerificationRequest)),
+            error => console.warn('[Firestore] Error sincronizando verificaciones propias:', error)
+          );
+        }
+      } catch (error) {
+        console.warn('[Firestore] No se pudo determinar el alcance administrativo de la sesión:', error);
+      }
+    };
+
+    void syncModerationData(firebaseAuth.currentUser);
+    const unsubAuthModeration = firebaseAuth.onAuthStateChanged(user => {
+      void syncModerationData(user);
     });
 
     let unsubClientTransactions = () => {};
@@ -835,6 +868,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubAuthConversations();
       unsubReports();
       unsubVerifications();
+      unsubAuthModeration();
       unsubClientTransactions();
       unsubProfessionalTransactions();
       unsubAuthTransactions();
