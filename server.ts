@@ -960,7 +960,7 @@ Responde en JSON con:
           updatedAt: now
         };
 
-        tx.set(requestRef, request);
+        tx.create(requestRef, request);
         return request;
       });
 
@@ -1111,7 +1111,19 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
         if (!opportunitySnap.exists) throw new Error("RADAR_OPPORTUNITY_NOT_FOUND");
 
         const opportunity = opportunitySnap.data() || {};
-        if (opportunity.clientId !== auth.userId) throw new Error("FORBIDDEN_OPPORTUNITY_OWNER");
+        const opportunityOwnerId = String(opportunity.clientUserId || opportunity.clientId || "").trim();
+        if (opportunityOwnerId !== auth.userId) throw new Error("FORBIDDEN_OPPORTUNITY_OWNER");
+        if (![REGISTERED, MATCHED, SERVICE_REQUESTED].includes(String(opportunity.status || ))) throw new Error("RADAR_OPPORTUNITY_NOT_CONVERTIBLE");
+        if (opportunity.consentStatus === PENDING_CONSENT) throw new Error("RADAR_CONSENT_REQUIRED");
+        if (opportunity.serviceRequestId) {
+          const existingRequestRef = firestore.collection(service_requests).doc(String(opportunity.serviceRequestId));
+          const existingRequestSnap = await tx.get(existingRequestRef);
+          if (existingRequestSnap.exists) {
+            const existingRequest = existingRequestSnap.data() || {};
+            if (existingRequest.clientId !== auth.userId || existingRequest.radarOpportunityId !== opportunityId) throw new Error("RADAR_REQUEST_OWNERSHIP_MISMATCH");
+            return { ...existingRequest, id: existingRequest.id || existingRequestSnap.id };
+          }
+        }
 
         const matched = Array.isArray(opportunity.matchedProfessionals)
           ? opportunity.matchedProfessionals
@@ -1124,6 +1136,12 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
         ));
 
         if (candidateIds.length === 0) throw new Error("NO_RADAR_CANDIDATES");
+        const candidateSnapshots = await Promise.all(candidateIds.map((candidateId: string) => tx.get(firestore.collection(users).doc(candidateId))));
+        const validCandidateIds = candidateIds.filter((candidateId: string, index: number) => {
+          const data = candidateSnapshots[index].data() || {};
+          return candidateSnapshots[index].exists && data.isBlocked !== true && (data.role === PROFESSIONAL || data.isProfessional === true || data.hasProfessionalProfile === true);
+        });
+        if (validCandidateIds.length === 0) throw new Error("NO_VALID_RADAR_CANDIDATES");
 
         const request = {
           id: requestRef.id,
@@ -1140,7 +1158,7 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
           sourceType: "RADAR",
           discoveryMode: "TARGETED",
           radarOpportunityId: opportunityId,
-          biddingProfessionalIds: candidateIds,
+          biddingProfessionalIds: validCandidateIds,
           createdAt: now,
           updatedAt: now
         };
@@ -1165,7 +1183,11 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
       const statusByCode: Record<string, number> = {
         RADAR_OPPORTUNITY_NOT_FOUND: 404,
         FORBIDDEN_OPPORTUNITY_OWNER: 403,
-        NO_RADAR_CANDIDATES: 409
+        NO_RADAR_CANDIDATES: 409,
+        NO_VALID_RADAR_CANDIDATES: 409,
+        RADAR_OPPORTUNITY_NOT_CONVERTIBLE: 409,
+        RADAR_CONSENT_REQUIRED: 409,
+        RADAR_REQUEST_OWNERSHIP_MISMATCH: 409
       };
       return res.status(statusByCode[code] || 500).json({ success: false, code });
     }
