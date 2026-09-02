@@ -1,4 +1,4 @@
-export const APP_ROLES = ['USER', 'PROFESSIONAL', 'ADMIN', 'SUPER_ADMIN'] as const;
+export const APP_ROLES = ['USER', 'PROFESSIONAL', 'MODERATOR', 'ADMIN', 'SUPER_ADMIN'] as const;
 export type AppRole = typeof APP_ROLES[number];
 
 export interface VerifiedIdentity {
@@ -8,7 +8,9 @@ export interface VerifiedIdentity {
 }
 
 export function normalizeRole(value: unknown): AppRole {
-  if (value === 'PROFESSIONAL' || value === 'ADMIN' || value === 'SUPER_ADMIN') return value;
+  if (value === 'PROFESSIONAL' || value === 'MODERATOR' || value === 'ADMIN' || value === 'SUPER_ADMIN') {
+    return value;
+  }
   return 'USER';
 }
 
