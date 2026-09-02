@@ -939,12 +939,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // This operation never changes authorization role; it only loads the selected
   // account and derives a valid UI mode from its existing capabilities.
   const switchUserRole = (userId: string) => {
-    const found = users.find(u => u.id === userId);
-    if (!found) return;
+    if (!currentUser || userId !== currentUser.id) {
+      console.warn('[CONEXA AUTH] No se permite cambiar el modo de otra cuenta desde el cliente.');
+      return;
+    }
 
     const updatedUser = {
-      ...found,
-      activeMode: getDefaultProfessionalMode(found)
+      ...currentUser,
+      activeMode: getDefaultProfessionalMode(currentUser)
     };
 
     setCurrentUser(updatedUser);
