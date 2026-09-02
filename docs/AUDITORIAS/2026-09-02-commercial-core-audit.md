@@ -33,6 +33,7 @@
 - Reconciliación de Mercado Pago persiste `paymentStatus`, identificador de pago y timestamps; los eventos aprobados avanzan a `PAID` únicamente desde estados pendientes/creados.
 - Reconciliación de Mercado Pago endurecida para que estados financieros tardíos (`refunded`, `charged_back`, `cancelled`, `rejected`, `pending`, etc.) preserven la verdad del proveedor sin degradar automáticamente un estado comercial ya avanzado.
 - Reserva del OAuth nonce endurecida: `reserveOAuthState` ahora usa transacción + `tx.create`, evitando sobrescribir una reserva existente para el mismo nonce.
+- Handler modular de webhook endurecido para derivar el `merchantId` desde el `professionalId` de la transacción referenciada por `transactionId`, en lugar de confiar en un `merchantId` aportado por el emisor de la notificación.
 
 ## Descubrimientos — OAuth y webhook
 
@@ -58,9 +59,9 @@ Se corrigió `reserveOAuthState` para que la reserva del nonce sea create-only m
 
 Existe un handler modular en `src/server/payments/mercadoPagoWebhook.ts` y un handler inline dentro de `server.ts`. El modular delega en `reconcileMercadoPagoPayment` y utiliza la validación de firma modular.
 
-`src/server/payments/registerMercadoPagoWebhookRoute.ts` encapsula el registro de la ruta, pero el servidor principal todavía conserva su implementación inline.
+`src/server/payments/registerMercadoPagoWebhookRoute.ts` encapsula el registro de la ruta. Además, el checkout actual construye `notification_url` con `transactionId`, por lo que el handler modular fue ajustado para resolver el comercio desde la transacción propietaria y no desde un `merchantId` controlable por la notificación.
 
-**Riesgo:** duplicidad de autoridad y divergencia futura entre handlers. Debe quedar una única implementación efectiva.
+**Riesgo actual:** el servidor principal todavía conserva su implementación inline, por lo que el handler modular no es aún la única autoridad efectiva.
 
 ### 2.1 Estado financiero tardío ya corregido en el reconciliador modular
 
@@ -72,8 +73,6 @@ El reconciliador modular ahora separa explícitamente dos conceptos:
 Un `approved` posterior al avance del servicio ya no retrocede el flujo comercial; un `refunded`/`chargeback` registra el evento financiero sin convertir automáticamente una operación ya avanzada en `CANCELLED`. La cancelación sólo cambia el estado comercial cuando la transacción todavía está en `PAYMENT_PENDING` o `CREATED`.
 
 Corrección registrada en commit: `21f481d5a391e558ddccc3eddfbf02516fa9d89d` (`fix(payments): preserve provider status after commercial progression`).
-
-**Pendiente:** mientras exista el webhook inline de `server.ts`, la garantía debe considerarse incompleta a nivel de ruta efectiva. El siguiente objetivo es dejar un único handler operativo.
 
 ### 3. Relación transacción → solicitud todavía requiere formalización
 
@@ -114,12 +113,13 @@ Esto significa que no hay una segunda ruta independiente de aceptación que deba
 - Se confirmó que job start/complete todavía usan `where(serviceRequestId).limit(1)`.
 - Se endureció la reserva modular del OAuth nonce con creación transaccional no sobrescribible.
 - Se endureció el reconciliador modular para conservar el estado financiero del proveedor sin degradar automáticamente el estado comercial avanzado.
+- Se endureció el handler modular de webhook para derivar el comercio desde la transacción referenciada.
 
 ### Próxima tarea prioritaria
 
 1. Consolidar lookup determinista `accepted quote → txn-{quoteId}` para job start/complete sin arriesgar la integridad de `server.ts`.
 2. Integrar el consumo one-time del OAuth state en el callback efectivo.
-3. Auditar el montaje del webhook y dejar una única autoridad efectiva.
+3. Consolidar el webhook modular como única autoridad efectiva.
 4. Continuar con AppContext/reviews y exposición del directorio de usuarios.
 
 ### Restricciones operativas
