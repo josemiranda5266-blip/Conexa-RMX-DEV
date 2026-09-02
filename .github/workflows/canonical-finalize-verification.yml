@@ -21,29 +21,31 @@ jobs:
         with:
           fetch-depth: 0
           ref: integration/conexa-unified
+      - name: Sync latest canonical head
+        run: |
+          git fetch origin integration/conexa-unified
+          git reset --hard origin/integration/conexa-unified
       - name: Apply final verification UI patch
         run: python3 scripts/finalize_verification_ui_wiring.py
-      - name: Remove temporary migration files
+      - name: Remove migration helpers and obsolete temporary workflows
         run: |
-          rm scripts/finalize_verification_ui_wiring.py
-          rm .github/workflows/finalize-verification-ui-wiring.yml
-          rm .github/workflows/canonical-finalize-verification.yml
+          rm -f scripts/finalize_verification_ui_wiring.py
+          rm -f .github/workflows/finalize-verification-ui-wiring.yml
+          rm -f .github/workflows/canonical-finalize-verification.yml
           rm -f .github/workflows/temporary-admin-verification-view.yml
           rm -f .github/workflows/temporary-verification-upload-wiring.yml
           rm -f .github/workflows/temporary-admin-verification-document-route.yml
           rm -f .github/workflows/temporary-context-scope-hardening.yml
           rm -f .github/workflows/temporary-account-deletion-hardening.yml
           rm -f .github/workflows/temporary-verification-type-alignment.yml
+          rm -f .github/workflows/temporary-profile-verification-hardening.yml
           rm -f scripts/wire_admin_verification_view.py
           rm -f scripts/wire_professional_verification_upload.py
           rm -f scripts/add_verification_admin_document_route.py
           rm -f scripts/harden_context_scopes.py
           rm -f scripts/harden_account_deletion.py
           rm -f scripts/align_verification_type.py
-          git fetch origin integration/conexa-unified
-          git reset --hard origin/integration/conexa-unified
-          python3 scripts/finalize_verification_ui_wiring.py
-          rm scripts/finalize_verification_ui_wiring.py
+          rm -f scripts/apply_profile_verification_hardening.py
       - name: Commit on latest canonical head
         run: |
           git config user.name 'github-actions[bot]'
