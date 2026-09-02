@@ -62,7 +62,7 @@ const MainAppContent: React.FC = () => {
 
   // Filter professionals list
   const filteredProfessionals = users.filter(u => {
-    if (!u.isProfessional) return false;
+    if (!(u.isProfessional || u.hasProfessionalProfile || u.role === 'PROFESSIONAL')) return false;
     if (u.isBlocked) return false;
 
     // Search query match
