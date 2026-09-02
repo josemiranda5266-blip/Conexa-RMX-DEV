@@ -25,10 +25,14 @@ La auditoría cubrió estructura, contrato de datos, autorización, autenticaci�
 
 `firebase-blueprint.json` describía mensajes como colección top-level y declaraba un chat "encrypted" sin una implementación de cifrado de extremo a extremo demostrada en el contrato. Se alineó el blueprint con la estructura real `/conversations/{conversationId}/messages/{messageId}` y con el modelo de privacidad efectivo.
 
+### 5. Matching: modo de UI no equivale a capacidad profesional
+
+`activeMode: PROFESSIONAL` no debe convertir por sí solo a una cuenta en profesional elegible. La normalización ahora exige `hasProfessionalProfile`, `isProfessional` o el rol profesional legado. Esto evita que una preferencia de interfaz sea utilizada como autorización de dominio.
+
 ## Hallazgos que quedan para la siguiente fase
 
 - `UserProfile` mantiene varias banderas de capacidad profesional (`role`, `activeMode`, `isProfessional`, `hasProfessionalProfile`) que deben terminar convergiendo en una autoridad de dominio única.
-- El matching ya normaliza candidatos, pero la política exacta entre "perfil profesional existente" y "perfil profesional verificado" debe quedar expresada en una única regla reutilizada por UI, matching y operaciones sensibles.
+- La política exacta entre "perfil profesional existente" y "perfil profesional verificado" debe quedar expresada en una única regla reutilizada por UI, matching y operaciones sensibles.
 - `AppContext` continúa concentrando demasiadas responsabilidades y debe dividirse por dominio sin romper persistencia.
 - El flujo de verificación debe auditarse contra Firebase Storage y la política real de acceso/expiración de los documentos, ya que Firestore sólo protege el registro de verificación.
 - Debe revisarse la coexistencia de `mercado_pago_connections` y `mercadopago_connections` para establecer una única colección canónica y retirar la legacy sólo después de confirmar referencias y datos.
