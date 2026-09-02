@@ -4,9 +4,12 @@ import { fetchMercadoPagoPaymentWithConnection } from './mercadoPagoPayment.js';
 
 const TRANSACTION_COLLECTION = 'transactions';
 
+type ReconciledProviderStatus = 'pending' | 'approved' | 'authorized' | 'in_process' | 'in_mediation' | 'rejected' | 'cancelled' | 'refunded' | 'charged_back' | 'chargedback' | 'unknown';
+
 export type PaymentReconciliationResult =
   | { status: 'PAID'; transactionId: string }
   | { status: 'ALREADY_PAID'; transactionId: string }
+  | { status: 'UPDATED'; transactionId: string; paymentStatus: ReconciledProviderStatus }
   | { status: 'IGNORED'; reason: string };
 
 function normalizeAmount(value: unknown): number {
@@ -15,8 +18,10 @@ function normalizeAmount(value: unknown): number {
   return Math.round(amount * 100) / 100;
 }
 
-function paymentIsApproved(payment: any): boolean {
-  return String(payment?.status || '').toLowerCase() === 'approved';
+function providerStatus(payment: any): ReconciledProviderStatus {
+  const status = String(payment?.status || '').trim().toLowerCase();
+  const allowed: ReconciledProviderStatus[] = ['pending', 'approved', 'authorized', 'in_process', 'in_mediation', 'rejected', 'cancelled', 'refunded', 'charged_back', 'chargedback'];
+  return allowed.includes(status as ReconciledProviderStatus) ? status as ReconciledProviderStatus : 'unknown';
 }
 
 function paymentReference(payment: any): string | null {
@@ -36,8 +41,7 @@ export async function reconcileMercadoPagoPayment(
   if (!paymentId?.trim()) return { status: 'IGNORED', reason: 'PAYMENT_ID_REQUIRED' };
 
   const payment = await fetchMercadoPagoPaymentWithConnection(connection, paymentId);
-  if (!paymentIsApproved(payment)) return { status: 'IGNORED', reason: 'PAYMENT_NOT_APPROVED' };
-
+  const paymentStatus = providerStatus(payment);
   const transactionId = paymentReference(payment);
   if (!transactionId) return { status: 'IGNORED', reason: 'EXTERNAL_REFERENCE_MISSING' };
 
@@ -72,49 +76,61 @@ export async function reconcileMercadoPagoPayment(
     const fresh = await tx.get(transactionRef);
     if (!fresh.exists) return { status: 'IGNORED', reason: 'TRANSACTION_NOT_FOUND' };
     const current = fresh.data() || {};
+    const currentStatus = String(current.status || '').toUpperCase();
+    const now = new Date().toISOString();
 
     if (!current.professionalId || String(current.professionalId) !== String(connection.merchantId)) {
       return { status: 'IGNORED', reason: 'TRANSACTION_MERCHANT_CHANGED' };
     }
 
-    const currentStatus = String(current.status || '').toUpperCase();
-    const currentPaymentStatus = String(current.paymentStatus || '').toLowerCase();
-
-    if (currentPaymentStatus === 'approved' || currentStatus === 'PAID') {
-      if (current.mercadoPagoPaymentId && String(current.mercadoPagoPaymentId) !== String(paymentId)) {
-        return { status: 'IGNORED', reason: 'PAID_WITH_DIFFERENT_PAYMENT' };
-      }
-      if (currentPaymentStatus !== 'approved' || currentStatus !== 'PAID') {
-        const now = new Date().toISOString();
-        tx.update(transactionRef, {
-          status: 'PAID',
-          paymentStatus: 'approved',
-          mercadoPagoPaymentId: String(paymentId),
-          paymentUpdatedAt: now,
-          paidAt: current.paidAt || now,
-        });
-      }
-      return { status: 'ALREADY_PAID', transactionId };
+    if (current.mercadoPagoPaymentId && String(current.mercadoPagoPaymentId) !== String(paymentId)) {
+      return { status: 'IGNORED', reason: 'PAYMENT_ID_CHANGED' };
     }
 
-    if (!['PAYMENT_PENDING', 'CREATED'].includes(currentStatus)) {
-      return { status: 'IGNORED', reason: 'TRANSACTION_NOT_PAYMENT_PENDING' };
-    }
-
-    if (normalizeAmount(current.amountArs) !== paymentAmount) {
-      return { status: 'IGNORED', reason: 'PAYMENT_AMOUNT_CHANGED' };
-    }
-
-    const now = new Date().toISOString();
-    tx.update(transactionRef, {
-      status: 'PAID',
-      paymentStatus: 'approved',
-      settlementStatus: current.settlementStatus || 'PENDING',
+    const update: Record<string, unknown> = {
+      paymentStatus,
       mercadoPagoPaymentId: String(paymentId),
-      paidAt: current.paidAt || now,
       paymentUpdatedAt: now,
-    });
+    };
 
-    return { status: 'PAID', transactionId };
+    if (paymentStatus === 'approved') {
+      if (['PAYMENT_PENDING', 'CREATED'].includes(currentStatus)) {
+        update.status = 'PAID';
+        update.settlementStatus = current.settlementStatus || 'PENDING';
+        update.paidAt = current.paidAt || now;
+        tx.update(transactionRef, update);
+        return { status: 'PAID', transactionId };
+      }
+
+      if (currentStatus === 'PAID' || String(current.paymentStatus || '').toLowerCase() === 'approved') {
+        if (currentStatus !== 'PAID') update.status = 'PAID';
+        if (!current.paidAt) update.paidAt = now;
+        tx.update(transactionRef, update);
+        return { status: 'ALREADY_PAID', transactionId };
+      }
+
+      // An approved provider event arriving after service progression must not
+      // roll the commercial state backward. Persist provider truth only.
+      tx.update(transactionRef, update);
+      return { status: 'UPDATED', transactionId, paymentStatus };
+    }
+
+    if (paymentStatus === 'refunded' || paymentStatus === 'charged_back' || paymentStatus === 'chargedback') {
+      if (paymentStatus === 'refunded') update.refundedAt = current.refundedAt || now;
+      else update.chargebackAt = current.chargebackAt || now;
+      tx.update(transactionRef, update);
+      return { status: 'UPDATED', transactionId, paymentStatus };
+    }
+
+    if (paymentStatus === 'cancelled' && ['PAYMENT_PENDING', 'CREATED'].includes(currentStatus)) {
+      update.status = 'CANCELLED';
+      update.cancelledAt = current.cancelledAt || now;
+    }
+
+    // Rejected, pending, authorized, in_process, in_mediation and late
+    // cancellation events update provider truth without degrading an already
+    // progressed commercial transaction.
+    tx.update(transactionRef, update);
+    return { status: 'UPDATED', transactionId, paymentStatus };
   });
 }
