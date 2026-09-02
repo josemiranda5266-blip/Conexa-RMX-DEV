@@ -1,0 +1,179 @@
+name: Radar Match hardening
+
+on:
+  push:
+    branches:
+      - integration/conexa-unified
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Harden Radar conversion endpoint
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('server.ts')
+          s = p.read_text(encoding='utf-8')
+          old = '''      const opportunityRef = firestore.collection("radar_opportunities").doc(opportunityId);
+      const requestRef = firestore.collection("service_requests").doc();
+      const now = new Date().toISOString();
+
+      const serviceRequest = await firestore.runTransaction(async (tx: any) => {
+        const opportunitySnap = await tx.get(opportunityRef);
+        if (!opportunitySnap.exists) throw new Error("RADAR_OPPORTUNITY_NOT_FOUND");
+
+        const opportunity = opportunitySnap.data() || {};
+        if (opportunity.clientId !== auth.userId) throw new Error("FORBIDDEN_OPPORTUNITY_OWNER");
+
+        const matched = Array.isArray(opportunity.matchedProfessionals)
+          ? opportunity.matchedProfessionals
+          : [];
+
+        const candidateIds = Array.from(new Set(
+          matched
+            .map((candidate: any) => String(candidate?.professionalId || "").trim())
+            .filter(Boolean)
+        ));
+
+        if (candidateIds.length === 0) throw new Error("NO_RADAR_CANDIDATES");
+
+        const request = {
+          id: requestRef.id,
+          clientId: auth.userId,
+          title: String(opportunity.title || "Solicitud de servicio"),
+          description: String(opportunity.description || ""),
+          category: opportunity.category || null,
+          professionName: opportunity.professionName || null,
+          urgency: opportunity.urgency || "NORMAL",
+          approxLocation: opportunity.approxLocation || null,
+          estimatedBudgetArs: Number(opportunity.estimatedBudgetArs || 0),
+          status: "REQUEST_CREATED",
+          quotesCount: 0,
+          sourceType: "RADAR",
+          discoveryMode: "TARGETED",
+          radarOpportunityId: opportunityId,
+          biddingProfessionalIds: candidateIds,
+          createdAt: now,
+          updatedAt: now
+        };
+
+        tx.set(requestRef, request);
+
+        tx.update(opportunityRef, {
+          clientUserId: auth.userId,
+          linkedAt: now,
+          status: "SERVICE_REQUESTED",
+          conversionStatus: "PENDING",
+          lastUpdated: now,
+          serviceRequestId: requestRef.id
+        });
+
+        return request;
+      });'''
+          new = '''      const opportunityRef = firestore.collection("radar_opportunities").doc(opportunityId);
+      const requestRef = firestore.collection("service_requests").doc();
+      const now = new Date().toISOString();
+
+      const serviceRequest = await firestore.runTransaction(async (tx: any) => {
+        const opportunitySnap = await tx.get(opportunityRef);
+        if (!opportunitySnap.exists) throw new Error("RADAR_OPPORTUNITY_NOT_FOUND");
+
+        const opportunity = opportunitySnap.data() || {};
+        const opportunityOwnerId = String(opportunity.clientUserId || opportunity.clientId || "").trim();
+        if (opportunityOwnerId !== auth.userId) throw new Error("FORBIDDEN_OPPORTUNITY_OWNER");
+        if (!['REGISTERED', 'MATCHED', 'SERVICE_REQUESTED'].includes(String(opportunity.status || ''))) {
+          throw new Error("RADAR_OPPORTUNITY_NOT_CONVERTIBLE");
+        }
+        if (opportunity.consentStatus === 'PENDING_CONSENT') throw new Error("RADAR_CONSENT_REQUIRED");
+
+        if (opportunity.serviceRequestId) {
+          const existingRequestRef = firestore.collection('service_requests').doc(String(opportunity.serviceRequestId));
+          const existingRequestSnap = await tx.get(existingRequestRef);
+          if (existingRequestSnap.exists) {
+            const existingRequest = existingRequestSnap.data() || {};
+            if (existingRequest.clientId !== auth.userId || existingRequest.radarOpportunityId !== opportunityId) {
+              throw new Error("RADAR_REQUEST_OWNERSHIP_MISMATCH");
+            }
+            return { ...existingRequest, id: existingRequest.id || existingRequestSnap.id };
+          }
+        }
+
+        const matched = Array.isArray(opportunity.matchedProfessionals)
+          ? opportunity.matchedProfessionals
+          : [];
+        const candidateIds = Array.from(new Set(
+          matched
+            .map((candidate: any) => String(candidate?.professionalId || "").trim())
+            .filter(Boolean)
+        ));
+        if (candidateIds.length === 0) throw new Error("NO_RADAR_CANDIDATES");
+
+        const candidateSnapshots = await Promise.all(
+          candidateIds.map((candidateId: string) =>
+            tx.get(firestore.collection('users').doc(candidateId))
+          )
+        );
+        const validCandidateIds = candidateIds.filter((candidateId: string, index: number) => {
+          const data = candidateSnapshots[index].data() || {};
+          return candidateSnapshots[index].exists &&
+            data.isBlocked !== true &&
+            (data.role === 'PROFESSIONAL' || data.isProfessional === true || data.hasProfessionalProfile === true);
+        });
+        if (validCandidateIds.length === 0) throw new Error("NO_VALID_RADAR_CANDIDATES");
+
+        const request = {
+          id: requestRef.id,
+          clientId: auth.userId,
+          title: String(opportunity.title || `${String(opportunity.category || 'Servicio')} - ${String(opportunity.subcategory || '')}`.trim()).slice(0, 160),
+          description: String(opportunity.description || '').slice(0, 5000),
+          category: String(opportunity.category || '').slice(0, 120),
+          professionName: String(opportunity.professionName || opportunity.subcategory || '').slice(0, 120),
+          urgency: ['NORMAL', 'ALTA', 'URGENTE'].includes(opportunity.urgency) ? opportunity.urgency : 'NORMAL',
+          approxLocation: String(opportunity.approxLocation || [opportunity.city, opportunity.neighborhood].filter(Boolean).join(' - ') || opportunity.province || '').slice(0, 240),
+          ...(Number.isFinite(Number(opportunity.estimatedBudgetArs)) && Number(opportunity.estimatedBudgetArs) > 0 ? { estimatedBudgetArs: Number(opportunity.estimatedBudgetArs) } : {}),
+          status: "REQUEST_CREATED",
+          quotesCount: 0,
+          sourceType: "RADAR",
+          discoveryMode: "TARGETED",
+          radarOpportunityId: opportunityId,
+          biddingProfessionalIds: validCandidateIds,
+          createdAt: now,
+          updatedAt: now
+        };
+
+        tx.create(requestRef, request);
+        tx.update(opportunityRef, {
+          clientUserId: auth.userId,
+          linkedAt: now,
+          status: "SERVICE_REQUESTED",
+          conversionStatus: "PENDING",
+          lastUpdated: now,
+          serviceRequestId: requestRef.id
+        });
+        return request;
+      });'''
+          if old not in s:
+              raise SystemExit('target Radar endpoint block not found')
+          s = s.replace(old, new, 1)
+          s = s.replace('''        NO_RADAR_CANDIDATES: 409
+      };''', '''        NO_RADAR_CANDIDATES: 409,
+        NO_VALID_RADAR_CANDIDATES: 409,
+        RADAR_OPPORTUNITY_NOT_CONVERTIBLE: 409,
+        RADAR_CONSENT_REQUIRED: 409,
+        RADAR_REQUEST_OWNERSHIP_MISMATCH: 409
+      };''', 1)
+          p.write_text(s, encoding='utf-8')
+      - name: Commit Radar hardening
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.ts
+          git diff --cached --quiet && exit 0
+          git commit -m "security: harden Radar opportunity conversion"
+          git push
