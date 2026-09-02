@@ -3,6 +3,7 @@ import { X, Wrench, ShieldCheck, CheckCircle2, Sparkles, MapPin, Clock, Award, P
 import { useApp } from '../context/AppContext';
 import { INITIAL_PROFESSIONS } from '../data/mockData';
 import { auth } from '../lib/firebase';
+import { uploadVerificationDocument } from '../services/verificationStorage';
 
 import { isProfessionalCapable } from '../domain/professionalMatching';
 interface BecomeProfessionalModalProps {
@@ -16,7 +17,7 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
   onClose,
   onSuccess
 }) => {
-  const { currentUser, setCurrentUser, trackEvent } = useApp();
+  const { currentUser, setCurrentUser, trackEvent, submitVerification } = useApp();
 
   const [professionName, setProfessionName] = useState(currentUser.professionName || 'Electricista Matriculado');
   const [businessName, setBusinessName] = useState(currentUser.businessName || '');
@@ -26,6 +27,7 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
   const [workHours, setWorkHours] = useState(currentUser.workHours || 'Lunes a Sábado de 08:00 a 19:00');
   const [matriculaOrDegree, setMatriculaOrDegree] = useState(currentUser.matriculaOrDegree || '');
   const [hourlyRateArs, setHourlyRateArs] = useState<number>(currentUser.hourlyRateArs || 15000);
+  const [verificationFile, setVerificationFile] = useState<File | null>(null);
 
   if (!isOpen) return null;
 
@@ -90,6 +92,16 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
       }
 
       setCurrentUser(data.user as typeof updatedUser);
+
+      if (verificationFile) {
+        try {
+          const uploaded = await uploadVerificationDocument(verificationFile, 'PROFESSIONAL');
+          await submitVerification('PROFESSIONAL', uploaded.name, uploaded.path);
+        } catch (verificationError) {
+          console.error('[CONEXA VERIFICATION] Error enviando documento profesional:', verificationError);
+          return;
+        }
+      }
     } catch (err) {
       console.error('[CONEXA PROFILE] Error guardando perfil profesional:', err);
       return;
@@ -248,6 +260,12 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
               value={matriculaOrDegree}
               onChange={(e) => setMatriculaOrDegree(e.target.value)}
               placeholder="Ej: Matrícula COPIT N° 4412 / Registro Municipal de Oficios"
+              className="w-full p-2.5 bg-white border border-emerald-300/80 rounded-xl font-medium text-slate-900 focus:outline-none"
+            />
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,application/pdf"
+              onChange={(e) => setVerificationFile(e.target.files?.[0] || null)}
               className="w-full p-2.5 bg-white border border-emerald-300/80 rounded-xl font-medium text-slate-900 focus:outline-none"
             />
             <p className="text-[11px] text-emerald-800">

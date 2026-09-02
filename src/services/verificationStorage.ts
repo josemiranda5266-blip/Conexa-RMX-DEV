@@ -1,4 +1,4 @@
-import { ref, uploadBytes } from 'firebase/storage';
+import { deleteObject, ref, uploadBytes } from 'firebase/storage';
 import { auth, storage } from '../lib/firebase';
 
 const MAX_VERIFICATION_FILE_SIZE = 10 * 1024 * 1024;
@@ -51,4 +51,16 @@ export async function uploadVerificationDocument(
     contentType: file.type,
     size: file.size,
   };
+}
+
+
+export async function deleteVerificationDocument(path: string): Promise<void> {
+  const user = auth?.currentUser;
+  if (!user) throw new Error('VERIFICATION_AUTH_REQUIRED');
+  if (!storage) throw new Error('VERIFICATION_STORAGE_NOT_CONFIGURED');
+  const expectedPrefix = `verification-documents/${user.uid}/`;
+  if (!path.startsWith(expectedPrefix) || path.includes('..') || path.includes('//')) {
+    throw new Error('VERIFICATION_PATH_NOT_OWNED');
+  }
+  await deleteObject(ref(storage, path));
 }

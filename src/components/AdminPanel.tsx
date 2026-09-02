@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { auth } from '../lib/firebase';
 import { 
   Users, ShieldAlert, Award, Briefcase, FileText, 
   CheckCircle2, XCircle, AlertTriangle, ShieldCheck, Database, BarChart3, Settings,
@@ -57,6 +58,21 @@ export const AdminPanel: React.FC<{ onOpenLandingPreview?: () => void }> = ({ on
   const quotesCount = quotes.length;
   const jobsCompletedCount = requests.filter(r => r.status === 'COMPLETED' || r.status === 'REVIEW_PENDING' || r.status === 'CLOSED').length || 6;
   const reviewsCount = reviews.length;
+
+  const handleOpenVerificationDocument = async (verificationId: string) => {
+    if (!auth?.currentUser) return;
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const response = await fetch(`/api/admin/verifications/${encodeURIComponent(verificationId)}/document-url`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success || !data.url) throw new Error(data.error || data.code || 'No se pudo abrir el documento.');
+      window.open(data.url, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      console.error('[CONEXA ADMIN] Error abriendo documento de verificación:', error);
+    }
+  };
 
   const handleRunAudit = () => {
     const results = runSecurityAndPrivacyAudit(users);
