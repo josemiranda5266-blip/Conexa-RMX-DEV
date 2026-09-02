@@ -107,7 +107,7 @@ interface AppContextType {
   startJob: (jobId: string) => Promise<void>;
   completeJob: (jobId: string) => Promise<void>;
   addReview: (review: Omit<Review, 'id' | 'createdAt' | 'isVerifiedJob'>) => Promise<void>;
-  submitVerification: (type: 'IDENTITY' | 'PROFESSIONAL', documentName: string, docUrl: string) => Promise<void>;
+  submitVerification: (type: 'IDENTITY' | 'PROFESSIONAL', documentName: string, documentPath: string) => Promise<void>;
   approveVerification: (verificationId: string) => Promise<void>;
   reportUser: (reportedUserId: string, reason: UserReport['reason'], description: string) => void;
   blockUser: (userIdToBlock: string) => void;
@@ -1373,7 +1373,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ));
   };
 
-  const submitVerification = async (type: 'IDENTITY' | 'PROFESSIONAL', documentName: string, docUrl: string) => {
+  const submitVerification = async (type: 'IDENTITY' | 'PROFESSIONAL', documentName: string, documentPath: string) => {
     if (!currentUser) {
       throw new Error('Debés iniciar sesión para enviar una verificación.');
     }
@@ -1381,7 +1381,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const response = await fetch('/api/verifications/create', {
       method: 'POST',
       headers: await getAuthenticatedRequestHeaders(),
-      body: JSON.stringify({ type, documentName, documentUrl: docUrl })
+      body: JSON.stringify({ type, documentName, documentPath })
     });
 
     const data = await response.json();
@@ -1396,7 +1396,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       userRole: currentUser.role,
       type,
       documentName,
-      documentUrl: docUrl,
+      documentPath,
       status: 'PENDING',
       createdAt: data.createdAt || new Date().toISOString()
     }) as VerificationRequest;

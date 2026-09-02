@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import { X, Wrench, ShieldCheck, CheckCircle2, Sparkles, MapPin, Clock, Award, Plus, Trash2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { INITIAL_PROFESSIONS } from '../data/mockData';
-import { auth, db } from '../lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { auth } from '../lib/firebase';
 
 import { isProfessionalCapable } from '../domain/professionalMatching';
 interface BecomeProfessionalModalProps {
@@ -61,20 +60,40 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
       availabilityStatus: 'DISPONIBLE' as const
     };
 
-    if (auth?.currentUser && db) {
-      const userDocRef = doc(db, 'users', auth.currentUser.uid);
-      try {
-        await setDoc(userDocRef, updatedUser, { merge: true });
-        console.log('[CONEXA PROFILE] Perfil profesional guardado en Firestore para UID:', auth.currentUser.uid);
-      } catch (err) {
-        console.error('[CONEXA PROFILE] Error guardando en Firestore:', err);
-        // Do not switch local state into professional mode when the
-        // authoritative profile write failed.
-        return;
-      }
+    if (!auth?.currentUser) {
+      console.error('[CONEXA PROFILE] No hay sesión Firebase activa.');
+      return;
     }
 
-    setCurrentUser(updatedUser);
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const response = await fetch('/api/professional-profile/save', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          professionName,
+          businessName,
+          specialties: updatedSpecialties,
+          description,
+          workZoneRadiusKm: Number(workZoneRadiusKm),
+          workHours,
+          matriculaOrDegree,
+          hourlyRateArs: Number(hourlyRateArs)
+        })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success || !data.user) {
+        throw new Error(data.error || data.code || 'No se pudo guardar el perfil profesional.');
+      }
+
+      setCurrentUser(data.user as typeof updatedUser);
+    } catch (err) {
+      console.error('[CONEXA PROFILE] Error guardando perfil profesional:', err);
+      return;
+    }
     trackEvent('became_professional', { userId: targetUid, professionName });
 
     if (onSuccess) onSuccess();
