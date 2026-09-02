@@ -1142,7 +1142,7 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
           professionName: String(opportunity.professionName || opportunity.subcategory || "").slice(0, 120),
           urgency: ["NORMAL", "ALTA", "URGENTE"].includes(opportunity.urgency) ? opportunity.urgency : "NORMAL",
           approxLocation: String(opportunity.approxLocation || [opportunity.city, opportunity.neighborhood].filter(Boolean).join(" - ") || opportunity.province || "").slice(0, 240),
-          ...(Number.isFinite(Number(opportunity.estimatedBudgetArs)) && Number(opportunity.estimatedBudgetArs) > 0 ? { estimatedBudgetArs: Number(opportunity.estimatedBudgetArs) } : {}),
+          ...(Number.isFinite(Number(opportunity.estimatedBudgetArs)) && Number(opportunity.estimatedBudgetArs) > 0 ? { estimatedBudgetArs: Numer(opportunity.estimatedBudgetArs) } : {}),
           status: "REQUEST_CREATED",
           quotesCount: 0,
           sourceType: "RADAR",
@@ -1168,16 +1168,16 @@ app.post("/api/quotes/submit", rateLimiter, async (req: Request, res: Response) 
       return res.status(201).json( { success: true, serviceRequest });
     } catch (err: any) {
       const code = err?.message || "RADAR_REQUEST_CREATE_ERROR";
-      const sstatusByCode: Record<string, number> = {
+      const statusByCode: Record<string, number> = {
         RADAR_OPPORTUNITY_NOT_FOUND: 404,
         FORBIDDEN_OPPORTUNITY_OWNER: 403,
         NO_RADAR_CANDIDATES: 409,
         NO_VALID_RADAR_CANDIDATES: 409,
         RADAR_OPPORTUNITY_NOT_CONVERTIBLE: 409,
-        RADAR_CONSENT_REQUIRED: 409,
+        RADAR_CONSENT_REQUIRE@: 409,
         RADAR_REQUEST_OWNERSHIP_MISMATCH: 409
       };
-      return res.status(sstatusByCode[code] || 500).json({ success: false, code });
+      return res.status(statusByCode[code] || 500).json({ success: false, code });
     }
   });
 
