@@ -35,7 +35,7 @@ export interface ServiceRequest { id: string; clientId: string; clientName: stri
 export interface Quote { id: string; requestId: string; clientId?: string; professionalId: string; professionalName: string; professionalAvatar: string; professionalRating: number; professionalVerified: boolean; priceArs: number; description: string; materialsIncluded: string; estimatedTime: string; availableStartDate: string; warrantyInfo: string; termsAndConditions: string; status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'MODIFICATION_REQUESTED'; createdAt: string; isDemoData?: boolean; }
 
 export type TransactionStatus = 'CREATED' | 'PAYMENT_PENDING' | 'PAID' | 'SERVICE_IN_PROGRESS' | 'SERVICE_COMPLETED' | 'REVIEW_COMPLETED' | 'SETTLED' | 'REFUNDED' | 'CANCELLED' | 'CHARGEBACK';
-export type PaymentStatus = 'pending' | 'approved' | 'authorized' | 'in_process' | 'in_mediation' | 'rejected' | 'cancelled' | 'refunded' | 'charged_back' | 'chargedback';
+export type PaymentStatus = 'pending' | 'retry_pending' | 'approved' | 'authorized' | 'in_process' | 'in_mediation' | 'rejected' | 'cancelled' | 'refunded' | 'charged_back' | 'chargedback';
 export type SettlementStatus = 'PENDING' | 'SETTLED' | 'NOT_APPLICABLE';
 export interface Transaction {
   id: string; serviceRequestId: string; quoteId: string; clientId: string; professionalId: string; amountArs: number; currency: 'ARS';
