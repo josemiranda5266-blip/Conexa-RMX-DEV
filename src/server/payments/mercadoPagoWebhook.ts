@@ -5,6 +5,7 @@ import { reconcileMercadoPagoPayment } from './mercadoPagoReconciliation.js';
 import { MercadoPagoOAuthConnection, normalizeMercadoPagoOAuthConnection } from './mercadoPagoOAuthTokenStore.js';
 
 const CONNECTION_COLLECTION = 'mercado_pago_connections';
+const TRANSACTION_COLLECTION = 'transactions';
 
 function notificationDataId(req: Request): string | undefined {
   const body = req.body as any;
@@ -30,13 +31,30 @@ async function connectionForMerchant(merchantId: string): Promise<MercadoPagoOAu
   return normalizeMercadoPagoOAuthConnection(snapshot.data(), merchantId);
 }
 
+async function merchantIdForTransaction(transactionId: string): Promise<string | null> {
+  if (!transactionId?.trim()) return null;
+  const snapshot = await getAdminDb().collection(TRANSACTION_COLLECTION).doc(transactionId).get();
+  if (!snapshot.exists) return null;
+  const professionalId = snapshot.data()?.professionalId;
+  return professionalId == null ? null : String(professionalId).trim() || null;
+}
+
 export async function handleMercadoPagoWebhook(req: Request, res: Response): Promise<Response> {
   try {
-    const merchantId = typeof req.query.merchantId === 'string' ? req.query.merchantId.trim() : '';
-    if (!merchantId) return res.status(400).json({ success: false, code: 'MERCHANT_ID_REQUIRED' });
-
     const dataId = notificationDataId(req);
     if (!dataId) return res.status(400).json({ success: false, code: 'PAYMENT_ID_REQUIRED' });
+
+    // Checkout Pro currently sends transactionId in notification_url. Resolve the
+    // merchant from the server-owned transaction instead of trusting a merchantId
+    // query parameter supplied by the notification sender.
+    const hintedTransactionId = typeof req.query.transactionId === 'string'
+      ? req.query.transactionId.trim()
+      : '';
+    const merchantId = hintedTransactionId
+      ? await merchantIdForTransaction(hintedTransactionId)
+      : null;
+
+    if (!merchantId) return res.status(400).json({ success: false, code: 'TRANSACTION_REFERENCE_REQUIRED' });
 
     if (!verifyMercadoPagoWebhookSignature(signature(req), requestId(req), dataId)) {
       return res.status(401).json({ success: false, code: 'WEBHOOK_SIGNATURE_INVALID' });
