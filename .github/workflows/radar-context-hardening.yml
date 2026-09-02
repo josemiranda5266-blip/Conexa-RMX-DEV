@@ -1,0 +1,38 @@
+name: Radar context hardening
+on:
+  push:
+    branches:
+      - integration/conexa-unified
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply Radar context hardening
+        run: |
+          echo 'ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnA9UGF0aCgic3JjL2NvbnRleHQvQXBwQ29udGV4dC50c3giKQpzPXAucmVhZF90ZXh0KGVuY29kaW5nPSJ1dGYtOCIpCnM9cy5yZXBsYWNlKCIgICAgICBkb2N1bWVudFVybDogJ2h0dHBzOi8vaW1hZ2VzLnVuc3BsYXNoLmNvbS9waG90by0xNTg5ODI5NTQ1ODU2LWQxMGQ1NTdjZjk1Zj9hdXRvPWZvcm1hdCZmaXQ9Y3JvcCZxPTgwJnc9NDAwJywiLCIgICAgICBkb2N1bWVudFBhdGg6ICcnLCIsMSkKcz1zLnJlcGxhY2UoIiAgdXNlRWZmZWN0KCgpID0+IHtcbiAgICBpZiAoIWlzRmlyZWJhc2VDb25maWd1cmVkIHx8ICFkYikgcmV0dXJuO1xuXG4gICAgY29uc3QgdW5zdWJSYWRhck9wcG9ydHVuaXRpZXMgPSBvblNuYXBzaG90KCIsIiAgdXNlRWZmZWN0KCgpID0+IHtcbiAgICBpZiAoIWlzRmlyZWJhc2VDb25maWd1cmVkIHx8ICFkYiB8fCAhY3VycmVudFVzZXIgfHwgIVsnQURNSU4nLCAnU1VQRVJfQURNSU4nXS5pbmNsdWRlcyhjdXJyZW50VXNlci5yb2xlKSkgcmV0dXJuO1xuXG4gICAgY29uc3QgdW5zdWJSYWRhck9wcG9ydHVuaXRpZXMgPSBvblNuYXBzaG90KCIsMSkKcC5yZXBsYWNlKCIgIH0sIFtdO1xuXG4gIHVzZUVmZmVjdCgoKSA9PiB7XG4gICAgaWYgKGlzRmlyZWJhc2VDb25maWd1cmVkKSByZXR1cm47XG4gICAgbG9jYWxTdG9yYWdlLnNldEl0ZW0oJ2NvbmV4YV9yYWRhcl9vcHBvcnR1bml0aWVzJywgSlNPTi5zdHJpbmdpZnkocmFkYXJPcHBvcnR1bml0aWVzKSk7IiwiICB9LCBbY3VycmVudFVzZXI/LmlkLCBjdXJyZW50VXNlcj8ucm9sZV0pO1xuXG4gIHVzZUVmZmVjdCgoKSA9PiB7XG4gICAgaWYgKGlzRmlyZWJhc2VDb25maWd1cmVkKSByZXR1cm47XG4gICAgbG9jYWxTdG9yYWdlLnNldEl0ZW0oJ2NvbmV4YV9yYWRhcl9vcHBvcnR1bml0aWVzJywgSlNPTi5zdHJpbmdpZnkocmFkYXJPcHBvcnR1bml0aWVzKSk7IiwxKQpva2Q9IiAgY29uc3QgYWRkUmFkYXJPcHBvcnR1bml0eSA9IChvcHA6IFJhZGFyT3Bwb3J0dW5pdHkpID0+IHtcbiAgICAvLyBNYXRjaGluZyBpcyBkZXRlcm1pbmlzdGljIGluIGV2ZXJ5IGVudmlyb25tZW50LiBTaW11bGF0aW9uIG1heSBwcm92aWRlIgo=' | tr -d ' ' | base64 -d >/dev/null
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/context/AppContext.tsx')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace("      documentUrl: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&q=80&w=400',", "      documentPath: '',", 1)
+          old="""  useEffect(() => {\n    if (!isFirebaseConfigured || !db) return;\n\n    const unsubRadarOpportunities = onSnapshot("""
+          new="""  useEffect(() => {\n    if (!isFirebaseConfigured || !db || !currentUser || !['ADMIN', 'SUPER_ADMIN'].includes(currentUser.role)) return;\n\n    const unsubRadarOpportunities = onSnapshot("""
+          assert old in s
+          s=s.replace(old,new,1)
+          s=s.replace("  }, []);\n\n  useEffect(() => {\n    if (isFirebaseConfigured) return;\n    localStorage.setItem('conexa_radar_opportunities', JSON.stringify(radarOpportunities));", "  }, [currentUser?.id, currentUser?.role]);\n\n  useEffect(() => {\n    if (isFirebaseConfigured) return;\n    localStorage.setItem('conexa_radar_opportunities', JSON.stringify(radarOpportunities));",1)
+          s=s.replace("  const addRadarOpportunity = (opp: RadarOpportunity) => {\n    // Matching is deterministic in every environment. Simulation may provide", "  const addRadarOpportunity = (opp: RadarOpportunity) => {\n    if (isFirebaseConfigured && !isAdmin()) return;\n    if (isFirebaseConfigured && opp.environment === 'simulation') return;\n    // Matching is deterministic in every environment. Simulation may provide",1)
+          s=s.replace("  const updateRadarOpportunity = (id: string, updates: Partial<RadarOpportunity>) => {\n    setRadarOpportunities(prev => prev.map(o => {", "  const updateRadarOpportunity = (id: string, updates: Partial<RadarOpportunity>) => {\n    if (isFirebaseConfigured && !isAdmin()) return;\n    if (isFirebaseConfigured && updates.environment === 'simulation') return;\n    setRadarOpportunities(prev => prev.map(o => {",1)
+          s=s.replace("  const deleteRadarOpportunity = (id: string) => {\n    setRadarOpportunities(prev => prev.filter(o => o.id !== id));", "  const deleteRadarOpportunity = (id: string) => {\n    if (isFirebaseConfigured && !isAdmin()) return;\n    setRadarOpportunities(prev => prev.filter(o => o.id !== id));",1)
+          s=s.replace("  const convertRadarOpportunity = (opportunityId: string, userId?: string) => {\n    const opportunity =", "  const convertRadarOpportunity = (opportunityId: string, userId?: string) => {\n    if (isFirebaseConfigured && !isAdmin()) return;\n    const opportunity =",1)
+          s=s.replace("  const updateApprovalMode = async (mode: ApprovalMode): Promise<void> => {\n    if (!['AUTOMÁTICO', 'ASISTIDO', 'MANUAL'].includes(mode)) {", "  const updateApprovalMode = async (mode: ApprovalMode): Promise<void> => {\n    if (isFirebaseConfigured && !isAdmin()) throw new Error('No tenés permisos para cambiar el modo de aprobación RADAR.');\n    if (!['AUTOMÁTICO', 'ASISTIDO', 'MANUAL'].includes(mode)) {",1)
+          p.write_text(s,encoding='utf-8')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/context/AppContext.tsx
+          git diff --cached --quiet || git commit -m 'security: isolate Radar admin and simulation boundaries'
+          git push
