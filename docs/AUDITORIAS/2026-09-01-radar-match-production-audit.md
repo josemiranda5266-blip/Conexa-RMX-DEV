@@ -56,3 +56,7 @@ Debe completarse la separación de efectos comerciales de cualquier fixture/simu
 ## Nota
 
 No se ejecutaron tests, build ni runtime como validación del producto. Las correcciones fueron realizadas mediante auditoría estática y cambios controlados en la rama canónica.
+
+## Limpieza de herramientas temporales
+
+Los workflows auxiliares utilizados exclusivamente para aplicar correcciones puntuales deben eliminarse del árbol canónico antes de continuar con la siguiente fase.
