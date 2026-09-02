@@ -1,15 +1,11 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if false;
-    }
+    match /{document=**} { allow read, write: if false; }
 
     function isSignedIn() { return request.auth != null; }
     function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
-    function isAdmin() {
-      return isSignedIn() && (request.auth.token.role == 'ADMIN' || request.auth.token.role == 'SUPER_ADMIN');
-    }
+    function isAdmin() { return isSignedIn() && (request.auth.token.role == 'ADMIN' || request.auth.token.role == 'SUPER_ADMIN'); }
 
     match /users/{userId} {
       function hasNoPrivateProfileFields() {
@@ -19,22 +15,16 @@ service cloud.firestore {
       function hasNoClientManagedTrustFieldsOnCreate() {
         return (!request.resource.data.keys().hasAny(['isIdentityVerified']) || request.resource.data.isIdentityVerified == false)
           && (!request.resource.data.keys().hasAny(['isProfessionalVerified']) || request.resource.data.isProfessionalVerified == false)
-          && (!request.resource.data.keys().hasAny(['hasProfessionalProfile']) || request.resource.data.hasProfessionalProfile == false);
+          && (!request.resource.data.keys().hasAny(['hasProfessionalProfile']) || request.resource.data.hasProfessionalProfile == false)
+          && (!request.resource.data.keys().hasAny(['isProfessional']) || request.resource.data.isProfessional == false);
       }
       function hasNoClientManagedAuthoritativeFieldsOnUpdate() {
         return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'isIdentityVerified',
-          'identityVerificationStatus',
-          'isProfessionalVerified',
-          'professionalVerificationStatus',
-          'rating',
-          'reviewCount',
-          'jobsCompleted',
-          'trustScore',
-          'isBlocked',
-          'isFeatured',
-          'isProSubscriber',
-          'isDemoData'
+          'isIdentityVerified', 'identityVerificationStatus',
+          'isProfessionalVerified', 'professionalVerificationStatus',
+          'hasProfessionalProfile', 'isProfessional',
+          'rating', 'reviewCount', 'jobsCompleted', 'trustScore',
+          'isBlocked', 'isFeatured', 'isProSubscriber', 'isDemoData'
         ]);
       }
       allow read: if isSignedIn();
@@ -51,13 +41,8 @@ service cloud.firestore {
       allow delete: if isAdmin();
       match /private/info {
         allow read: if isOwner(userId) || isAdmin();
-        allow create: if (isOwner(userId)
-          && request.resource.data.keys().hasOnly(['phonePrivate', 'exactAddressPrivate', 'updatedAt', 'migratedAt']))
-          || isAdmin();
-        allow update: if (isOwner(userId)
-          && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['phonePrivate', 'exactAddressPrivate', 'updatedAt', 'migratedAt']))
-          || isAdmin();
+        allow create: if (isOwner(userId) && request.resource.data.keys().hasOnly(['phonePrivate','exactAddressPrivate','updatedAt','migratedAt'])) || isAdmin();
+        allow update: if (isOwner(userId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['phonePrivate','exactAddressPrivate','updatedAt','migratedAt'])) || isAdmin();
         allow delete: if isOwner(userId) || isAdmin();
       }
     }
@@ -65,44 +50,22 @@ service cloud.firestore {
     match /service_requests/{requestId} {
       function isOpenDiscoveryRequest() { return resource.data.discoveryMode == 'OPEN'; }
       function isTargetedProfessional() { return resource.data.biddingProfessionalIds is list && request.auth.uid in resource.data.biddingProfessionalIds; }
-      function clientEditableKeys() {
-        return ['title','category','professionName','description','approxLocation','preferredDate','preferredTimeSlot','estimatedBudgetArs','urgency','images','updatedAt'];
-      }
+      function clientEditableKeys() { return ['title','category','professionName','description','approxLocation','preferredDate','preferredTimeSlot','estimatedBudgetArs','urgency','images','updatedAt']; }
       allow read: if isSignedIn() && (resource.data.clientId == request.auth.uid || (resource.data.assignedProfessionalId != null && resource.data.assignedProfessionalId == request.auth.uid) || isTargetedProfessional() || isOpenDiscoveryRequest() || isAdmin());
       allow create: if false;
-      allow update: if isAdmin() || (isSignedIn()
-        && resource.data.clientId == request.auth.uid
-        && request.resource.data.clientId == resource.data.clientId
-        && request.resource.data.discoveryMode == resource.data.discoveryMode
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(clientEditableKeys())
-        && resource.data.status == 'REQUEST_CREATED');
+      allow update: if isAdmin() || (isSignedIn() && resource.data.clientId == request.auth.uid && request.resource.data.clientId == resource.data.clientId && request.resource.data.discoveryMode == resource.data.discoveryMode && request.resource.data.diff(resource.data).affectedKeys().hasOnly(clientEditableKeys()) && resource.data.status == 'REQUEST_CREATED');
       allow delete: if false;
     }
 
     match /quotes/{quoteId} {
-      allow read: if isSignedIn() && (
-        resource.data.professionalId == request.auth.uid
-        || isAdmin()
-        || (
-          resource.data.requestId is string
-          && exists(/databases/$(database)/documents/service_requests/$(resource.data.requestId))
-          && get(/databases/$(database)/documents/service_requests/$(resource.data.requestId)).data.clientId == request.auth.uid
-        )
-      );
+      allow read: if isSignedIn() && (resource.data.professionalId == request.auth.uid || isAdmin() || (resource.data.requestId is string && exists(/databases/$(database)/documents/service_requests/$(resource.data.requestId)) && get(/databases/$(database)/documents/service_requests/$(resource.data.requestId)).data.clientId == request.auth.uid));
       allow create: if false;
       allow update: if isAdmin() || (isSignedIn() && resource.data.professionalId == request.auth.uid && resource.data.status == 'PENDING' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['description','materialsIncluded','estimatedTime','availableStartDate','warrantyInfo','termsAndConditions']));
       allow delete: if isAdmin();
     }
 
-    // Mercado Pago credentials are backend-only secrets. No browser may read
-    // or mutate either the canonical or legacy connection collection.
-    match /mercado_pago_connections/{merchantId} {
-      allow read, create, update, delete: if false;
-    }
-
-    match /mercadopago_connections/{userId} {
-      allow read, create, update, delete: if false;
-    }
+    match /mercado_pago_connections/{merchantId} { allow read, create, update, delete: if false; }
+    match /mercadopago_connections/{userId} { allow read, create, update, delete: if false; }
 
     match /transactions/{transactionId} {
       allow read: if isSignedIn() && (resource.data.clientId == request.auth.uid || resource.data.professionalId == request.auth.uid || isAdmin());
@@ -117,27 +80,13 @@ service cloud.firestore {
           && request.resource.data.participantIds[0].size() > 0 && request.resource.data.participantIds[1].size() > 0
           && request.resource.data.participantIds[0] != request.resource.data.participantIds[1]
           && request.auth.uid in request.resource.data.participantIds
-          && request.resource.data.participantKey == (request.resource.data.participantIds[0] < request.resource.data.participantIds[1]
-            ? request.resource.data.participantIds[0] + '_' + request.resource.data.participantIds[1]
-            : request.resource.data.participantIds[1] + '_' + request.resource.data.participantIds[0])
+          && request.resource.data.participantKey == (request.resource.data.participantIds[0] < request.resource.data.participantIds[1] ? request.resource.data.participantIds[0] + '_' + request.resource.data.participantIds[1] : request.resource.data.participantIds[1] + '_' + request.resource.data.participantIds[0])
           && request.resource.data.unreadCountByUser.keys().hasOnly(request.resource.data.participantIds)
           && request.resource.data.privacyByUser.keys().hasOnly(request.resource.data.participantIds);
       }
       function participantOtherThan(userId) { return resource.data.participantIds[0] == userId ? resource.data.participantIds[1] : resource.data.participantIds[0]; }
-      function updatesOnlyOwnReadState() {
-        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['unreadCountByUser','updatedAt'])
-          && request.resource.data.unreadCountByUser.diff(resource.data.unreadCountByUser).affectedKeys().hasOnly([request.auth.uid])
-          && request.resource.data.unreadCountByUser[request.auth.uid] == 0;
-      }
-      function updatesOnlyOwnPrivacy() {
-        let ownPrivacy = request.resource.data.privacyByUser[request.auth.uid];
-        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['privacyByUser','updatedAt'])
-          && request.resource.data.privacyByUser.keys().hasOnly(resource.data.participantIds)
-          && request.resource.data.privacyByUser.diff(resource.data.privacyByUser).affectedKeys().hasOnly([request.auth.uid])
-          && ownPrivacy.keys().hasOnly(['phoneShared','addressShared'])
-          && ownPrivacy.phoneShared is bool
-          && ownPrivacy.addressShared is bool;
-      }
+      function updatesOnlyOwnReadState() { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['unreadCountByUser','updatedAt']) && request.resource.data.unreadCountByUser.diff(resource.data.unreadCountByUser).affectedKeys().hasOnly([request.auth.uid]) && request.resource.data.unreadCountByUser[request.auth.uid] == 0; }
+      function updatesOnlyOwnPrivacy() { let ownPrivacy = request.resource.data.privacyByUser[request.auth.uid]; return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['privacyByUser','updatedAt']) && request.resource.data.privacyByUser.keys().hasOnly(resource.data.participantIds) && request.resource.data.privacyByUser.diff(resource.data.privacyByUser).affectedKeys().hasOnly([request.auth.uid]) && ownPrivacy.keys().hasOnly(['phoneShared','addressShared']) && ownPrivacy.phoneShared is bool && ownPrivacy.addressShared is bool; }
       function updatesConversationFromValidMessage() {
         let otherUserId = participantOtherThan(request.auth.uid);
         let message = getAfter(/databases/$(database)/documents/conversations/$(conversationId)/messages/$(request.resource.data.lastMessageId));
@@ -146,12 +95,7 @@ service cloud.firestore {
           && request.resource.data.unreadCountByUser[request.auth.uid] == 0
           && request.resource.data.unreadCountByUser[otherUserId] == resource.data.unreadCountByUser[otherUserId] + 1
           && message.data.senderId == request.auth.uid && message.data.conversationId == conversationId
-          && request.resource.data.lastMessagePreview == (
-            message.data.type == 'SHARED_PHONE' ? 'Teléfono compartido' :
-            message.data.type == 'SHARED_ADDRESS' ? 'Dirección compartida' :
-            message.data.type == 'QUOTE_PROPOSAL' ? 'Propuesta enviada' :
-            message.data.content
-          );
+          && request.resource.data.lastMessagePreview == (message.data.type == 'SHARED_PHONE' ? 'Teléfono compartido' : message.data.type == 'SHARED_ADDRESS' ? 'Dirección compartida' : message.data.type == 'QUOTE_PROPOSAL' ? 'Propuesta enviada' : message.data.content);
       }
       allow read: if isConversationParticipant() || isAdmin();
       allow create: if createsValidConversation();
@@ -170,21 +114,12 @@ service cloud.firestore {
 
     match /reports/{reportId} { allow create: if isSignedIn() && request.resource.data.reporterId == request.auth.uid; allow read, update, delete: if isAdmin(); }
     match /reviews/{reviewId} { allow read: if isSignedIn(); allow create: if false; allow update, delete: if isAdmin(); }
-
-    // Verification records are authoritative backend-managed state. The browser
-    // submits verification requests through /api/verifications/create, where the
-    // Firebase ID token, profile capability, duplicate-pending check and document
-    // metadata are validated together. Direct client writes would bypass that
-    // boundary, so Firestore intentionally denies them.
     match /verifications/{verifId} {
       allow create: if false;
       allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
-      allow update: if isAdmin()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
-        && request.resource.data.status in ['VERIFIED', 'REJECTED'];
+      allow update: if isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && request.resource.data.status in ['VERIFIED','REJECTED'];
       allow delete: if isAdmin();
     }
-
     match /radar_opportunities/{opportunityId} { allow read, create, update, delete: if isAdmin(); }
     match /admin_audit_logs/{logId} { allow read: if isAdmin(); allow create, update, delete: if false; }
     match /beta_config/{configId} { allow read: if isSignedIn(); allow write: if isAdmin(); }
