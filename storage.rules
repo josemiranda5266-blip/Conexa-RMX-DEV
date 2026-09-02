@@ -1,0 +1,26 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Verification documents are private evidence. The client may create a
+    // document in its own namespace, but cannot overwrite or delete it.
+    // Backend/Admin SDK access bypasses Storage Rules for administrative review.
+    match /verification-documents/{userId}/{uploadId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && uploadId.size() >= 16
+        && uploadId.size() <= 128
+        && request.resource.size > 0
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)|application/pdf');
+      allow update, delete: if false;
+    }
+
+    // No other client-side Storage access is authorized until a concrete
+    // product flow has been reviewed and given an explicit rule boundary.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
