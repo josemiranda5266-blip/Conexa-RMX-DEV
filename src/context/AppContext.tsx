@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, updateDoc, collection, getDoc, onSnapshot, query, where, deleteField } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, collection, getDoc, onSnapshot, query, where, orderBy, deleteField } from 'firebase/firestore';
 import { auth, db, isFirebaseConfigured } from '../lib/firebase';
 import { 
   UserProfile, Category, Profession, ServiceRequest, Quote, 
@@ -700,7 +700,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (messageUnsubscribers[conversationId]) return;
 
         messageUnsubscribers[conversationId] = onSnapshot(
-          collection(firestoreDb, 'conversations', conversationId, 'messages'),
+          query(
+            collection(firestoreDb, 'conversations', conversationId, 'messages'),
+            orderBy('createdAt', 'asc')
+          ),
           snapshot => {
             const list: Message[] = [];
 
