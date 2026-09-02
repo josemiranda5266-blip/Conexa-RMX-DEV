@@ -15,6 +15,8 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
   onClose
 }) => {
   const { currentUser, submitQuote } = useApp();
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [priceArs, setPriceArs] = useState<number>(45000);
   const [description, setDescription] = useState('');
@@ -26,27 +28,33 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
 
   if (!isOpen || !request) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!priceArs || !description.trim()) return;
-
-    submitQuote({
-      requestId: request.id,
-      professionalId: currentUser.id,
-      professionalName: currentUser.name,
-      professionalAvatar: currentUser.avatar,
-      professionalRating: currentUser.rating,
-      professionalVerified: !!currentUser.isProfessionalVerified,
-      priceArs: Number(priceArs),
-      description: description.trim(),
-      materialsIncluded,
-      estimatedTime,
-      availableStartDate,
-      warrantyInfo,
-      termsAndConditions
-    });
-
-    onClose();
+    if (!currentUser || !priceArs || !description.trim() || isSubmitting) return;
+    setSubmitError(null);
+    setIsSubmitting(true);
+    try {
+      await submitQuote({
+        requestId: request.id,
+        professionalId: currentUser.id,
+        professionalName: currentUser.name,
+        professionalAvatar: currentUser.avatar,
+        professionalRating: currentUser.rating,
+        professionalVerified: !!currentUser.isProfessionalVerified,
+        priceArs: Number(priceArs),
+        description: description.trim(),
+        materialsIncluded,
+        estimatedTime,
+        availableStartDate,
+        warrantyInfo,
+        termsAndConditions
+      });
+      onClose();
+    } catch (error: any) {
+      setSubmitError(error?.message || 'No se pudo enviar el presupuesto.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -72,6 +80,7 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3 pt-1">
+          {submitError && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700" role="alert">{submitError}</div>}
           <div>
             <label className="font-bold text-slate-800 block mb-1">Precio Total Estimado ($ ARS) *</label>
             <div className="relative">
@@ -153,9 +162,10 @@ export const QuoteModal: React.FC<QuoteModalProps> = ({
             </button>
             <button
               type="submit"
-              className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md shadow-blue-600/20 transition-all"
+              disabled={isSubmitting}
+              className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white rounded-xl font-bold shadow-md shadow-blue-600/20 transition-all"
             >
-              Enviar Presupuesto
+              {isSubmitting ? 'Enviando...' : 'Enviar Presupuesto'}
             </button>
           </div>
         </form>
