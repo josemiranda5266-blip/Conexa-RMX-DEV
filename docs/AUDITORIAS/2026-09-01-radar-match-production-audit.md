@@ -5,61 +5,54 @@ Rama canónica: `integration/conexa-unified`
 
 ## Estado
 
-RADAR MATCH tiene una base funcional sólida, pero todavía no debe considerarse listo para producción comercial.
+La capa RADAR MATCH y su conversión comercial quedaron endurecidas a nivel de código. El bloque queda pendiente únicamente de la etapa posterior de verificación funcional/runtime, que se ejecutará al finalizar todas las correcciones globales.
 
-## Hallazgos
+## Hallazgos y resolución
 
-### 1. Modelo unificado de profesionales — RESUELTO
-`src/domain/professionalMatching.ts` ya no depende exclusivamente de `role === PROFESSIONAL`. La capacidad profesional se deriva de `hasProfessionalProfile`, `isProfessional` o el rol profesional heredado, excluyendo usuarios bloqueados.
+### Modelo unificado de profesionales — RESUELTO
+La capacidad profesional no depende exclusivamente de `role === PROFESSIONAL`; contempla `hasProfessionalProfile`, `isProfessional` y el rol profesional heredado, excluyendo usuarios bloqueados.
 
-### 2. Normalización de ubicación y perfil — RESUELTO
-El candidato profesional normaliza ciudad, provincia, zona aproximada, reputación, confianza, disponibilidad y estados de verificación desde `UserProfile`.
+### Normalización — RESUELTO
+El candidato profesional normaliza ubicación, reputación, confianza, disponibilidad y verificación desde el modelo unificado.
 
-### 3. Verificación en el resultado — RESUELTO
-`MatchedProfessional.isVerified` representa la verificación profesional (`isProfessionalVerified`), sin mezclarla con la identidad.
+### Verificación — RESUELTO
+La verificación profesional se mantiene separada de la identidad.
 
-### 4. Disponibilidad — PARCIAL
-El motor excluye `OCUPADO` por defecto y penaliza ese estado si se permite incluirlo. Todavía no existe una política persistente de capacidad/agenda que garantice disponibilidad real para una oportunidad concreta.
+### Disponibilidad — PARCIAL
+Se evita seleccionar profesionales bloqueados y el motor considera disponibilidad, pero la agenda/capacidad real todavía no es una garantía persistente por oportunidad.
 
-### 5. Conversión RADAR → ServiceRequest — BLOQUEO DE PRODUCCIÓN
-El endpoint `/api/radar/opportunities/:opportunityId/create-request` exige actualmente `opportunity.clientId`, mientras el modelo canónico usa `clientUserId`. Esto puede impedir la conversión de oportunidades correctamente vinculadas.
+### Conversión RADAR → ServiceRequest — RESUELTO A NIVEL DE CÓDIGO
+El backend acepta `clientUserId` como campo canónico y mantiene `clientId` como compatibilidad legado. La transición se limita a estados convertibles y permanece dentro de una transacción Firestore.
 
-Además, el endpoint crea una nueva `service_requests/{id}` en cada llamada. La protección existente en `AppContext` solo evita duplicados en el estado local; no constituye idempotencia persistente contra doble click, reintentos HTTP o concurrencia entre dispositivos.
+### Idempotencia — RESUELTO A NIVEL DE CÓDIGO
+Si la oportunidad ya posee `serviceRequestId` y la solicitud vinculada pertenece al mismo cliente y oportunidad, el endpoint devuelve esa solicitud en lugar de crear otra.
 
-### 6. Candidatos persistidos — RIESGO
-La conversión toma los `professionalId` almacenados en `matchedProfessionals` y no vuelve a comprobar que cada usuario siga existiendo, no esté bloqueado y conserve capacidad profesional. El backend debe validar los candidatos antes de publicar `biddingProfessionalIds`.
+### Candidatos persistidos — RESUELTO A NIVEL DE CÓDIGO
+Antes de crear la solicitud, el backend vuelve a cargar cada candidato y conserva únicamente usuarios existentes, no bloqueados y con capacidad profesional.
 
-### 7. Consentimiento — PARCIAL
-El cliente evita convertir oportunidades con `PENDING_CONSENT`, pero la autoridad debe permanecer en backend para impedir bypass directo del endpoint.
+### Consentimiento — RESUELTO A NIVEL DE CÓDIGO
+El endpoint rechaza oportunidades con `consentStatus === PENDING_CONSENT`, evitando que el cliente pueda saltarse la condición mediante llamada directa.
 
-### 8. Escritura de oportunidades — CONTROLADA
-Las reglas de Firestore restringen `radar_opportunities` a administración. Las mutaciones de RADAR desde `AppContext` deben considerarse operaciones administrativas y no un canal de escritura público.
+### Escritura de oportunidades — CONTROLADA
+Las reglas de Firestore mantienen `radar_opportunities` fuera de la escritura directa del cliente.
 
-### 9. Simulación vs producción — PARCIAL
-Existe `environment`/`is_test` y el motor permite fixtures de matches en `simulation`. Debe quedar garantizado antes de producción que los datos de simulación jamás generen solicitudes, transacciones, notificaciones comerciales o métricas reales.
-
-## Corrección requerida antes de cierre
-
-1. Resolver propietario mediante `clientUserId` como campo canónico, con compatibilidad controlada para `clientId` legado.
-2. Implementar idempotencia persistente por `radarOpportunityId`, preferentemente mediante `serviceRequestId` en la oportunidad y transacción Firestore.
-3. Si ya existe una solicitud vinculada, devolverla en lugar de crear otra.
-4. Validar nuevamente candidatos profesionales en backend antes de crear la solicitud dirigida.
-5. Rechazar conversión sin consentimiento válido.
-6. Mantener la transición de estado `REGISTERED/MATCHED → SERVICE_REQUESTED` como operación atómica.
-7. Separar definitivamente simulación de producción.
+### Simulación vs producción — PARCIAL
+Debe completarse la separación de efectos comerciales de cualquier fixture/simulación antes del cierre final de producción.
 
 ## Porcentaje de preparación para producción
 
-- Capacidad profesional unificada: **95%**
-- Normalización de candidatos: **95%**
-- Matching profesión: **90%**
-- Matching ubicación: **85%**
-- Disponibilidad: **75%**
-- Verificación/reputación: **90%**
-- Conversión RADAR → solicitud: **55%**
-- Idempotencia: **40%**
-- Seguridad backend: **75%**
-- Simulación/producción: **65%**
-- RADAR MATCH global: **70%**
+- Capacidad profesional unificada: **95%** ███████████████████░
+- Normalización de candidatos: **95%** ███████████████████░
+- Matching profesión: **90%** ██████████████████░░
+- Matching ubicación: **85%** █████████████████░░░
+- Disponibilidad: **75%** ███████████████░░░░░
+- Verificación/reputación: **90%** ██████████████████░░
+- Conversión RADAR → solicitud: **90%** ██████████████████░░
+- Idempotencia: **90%** ██████████████████░░
+- Seguridad backend: **90%** ██████████████████░░
+- Simulación/producción: **65%** █████████████░░░░░░░
+- **RADAR MATCH global: 87%** █████████████████░░░
 
-No se ejecutaron tests, build ni runtime en esta etapa, de acuerdo con la estrategia de auditoría vigente.
+## Nota
+
+No se ejecutaron tests, build ni runtime como validación del producto. Las correcciones fueron realizadas mediante auditoría estática y cambios controlados en la rama canónica.
