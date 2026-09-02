@@ -3,6 +3,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
+import { getStorage, FirebaseStorage } from 'firebase/storage';
 import firebaseAppletConfig from '../../firebase-applet-config.json';
 
 type FirebaseConfig = {
@@ -43,6 +44,7 @@ const getFirebaseConfig = (): FirebaseConfig | null => {
 let firebaseApp: ReturnType<typeof initializeApp> | null = null;
 let authInstance: Auth | null = null;
 let dbInstance: Firestore | null = null;
+let storageInstance: FirebaseStorage | null = null;
 
 try {
   const config = getFirebaseConfig();
@@ -55,6 +57,9 @@ try {
     } else {
       dbInstance = getFirestore(firebaseApp);
     }
+    if (config.storageBucket) {
+      storageInstance = getStorage(firebaseApp);
+    }
     console.log(`[CONEXA FIREBASE] Firebase inicializado correctamente para el proyecto: ${config.projectId}`);
   } else {
     console.warn('[CONEXA FIREBASE] No se encontró una configuración válida de Firebase. DEMO MODE — Firebase Authentication no configurado.');
@@ -66,4 +71,5 @@ try {
 export const app = firebaseApp;
 export const auth = authInstance;
 export const db = dbInstance;
+export const storage = storageInstance;
 export const isFirebaseConfigured = Boolean(authInstance && dbInstance);
