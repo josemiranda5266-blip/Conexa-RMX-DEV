@@ -19,7 +19,7 @@
 - Confirmación de pago basada en estado consultado al proveedor, no en el redirect del navegador.
 - Reconciliación idempotente de Mercado Pago.
 - Auditoría administrativa mediante `admin_audit_logs`.
-- Flujo de job protegido por estados comerciales y relación cliente/profesional.
+- Flujo de job protegido por estados comerciais y relación cliente/profesional.
 
 ## Correcciones ya realizadas
 
@@ -92,6 +92,14 @@ La ruta `/api/transactions/create` es actualmente la autoridad de aceptación co
 
 Esto significa que no hay una segunda ruta independiente de aceptación que deba sincronizarse en este punto del flujo. El siguiente endurecimiento debe conservar esa única autoridad y hacer explícita la referencia al quote aceptado.
 
+## Hallazgo adicional — eliminación de cuenta
+
+La ruta `/api/user/delete-account` verifica autenticación y limita la operación al propio usuario o a un administrador. Después elimina Firebase Auth, el perfil Firestore, el documento privado, anonimiza los mensajes del usuario y elimina documentos de verificación del Storage cuando puede hacerlo.
+
+**Riesgo de consistencia:** la eliminación de Firebase Auth ocurre antes de completar Firestore, mensajes y Storage. Si una etapa posterior falla, puede quedar una cuenta parcialmente eliminada: identidad de Auth inexistente pero datos residuales en Firestore/Storage. El endpoint además trata algunos fallos de Storage como advertencias y finalmente puede responder con éxito, por lo que la garantía de eliminación definitiva no es transaccional.
+
+**Corrección pendiente:** convertir el proceso en una operación idempotente y reanudable, con un estado de eliminación persistido antes de destruir la identidad, limpieza por etapas y un mecanismo seguro para completar/reintentar residuos. No se aplica todavía sobre `server.ts` para evitar un reemplazo parcial del archivo principal.
+
 ## Riesgos todavía bajo revisión
 
 1. OAuth state debe consumirse una sola vez en el callback efectivo.
@@ -99,6 +107,7 @@ Esto significa que no hay una segunda ruta independiente de aceptación que deba
 3. La relación `accepted quote → transaction` debe ser determinista en jobs y reviews.
 4. La sincronización de reseñas en frontend distingue actualmente las reseñas authored-by-client; debe verificarse que las pantallas de perfil profesional no dependan de una colección global de reseñas para mostrar las recibidas.
 5. `users` sigue siendo una colección de directorio global para usuarios autenticados. Antes de producción a escala conviene separar explícitamente perfil público y datos de sesión/privados para reducir superficie de lectura.
+6. Eliminación de cuenta debe ser idempotente/reanudable para evitar residuos de PII ante fallos parciales.
 
 ## Registro operativo / punto exacto de continuación
 
@@ -114,13 +123,15 @@ Esto significa que no hay una segunda ruta independiente de aceptación que deba
 - Se endureció la reserva modular del OAuth nonce con creación transaccional no sobrescribible.
 - Se endureció el reconciliador modular para conservar el estado financiero del proveedor sin degradar automáticamente el estado comercial avanzado.
 - Se endureció el handler modular de webhook para derivar el comercio desde la transacción referenciada.
+- Se registró el riesgo de consistencia de la eliminación de cuenta y se dejó pendiente una refactorización segura/idempotente.
 
 ### Próxima tarea prioritaria
 
 1. Consolidar lookup determinista `accepted quote → txn-{quoteId}` para job start/complete sin arriesgar la integridad de `server.ts`.
 2. Integrar el consumo one-time del OAuth state en el callback efectivo.
 3. Consolidar el webhook modular como única autoridad efectiva.
-4. Continuar con AppContext/reviews y exposición del directorio de usuarios.
+4. Diseñar y aplicar eliminación de cuenta idempotente/reanudable.
+5. Continuar con AppContext/reviews y exposición del directorio de usuarios.
 
 ### Restricciones operativas
 
