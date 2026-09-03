@@ -1,20 +1,21 @@
 import { createHash } from 'crypto';
 import { getAdminDb } from './firebaseAdmin.js';
 import type { Review, ServiceRequest } from '../types.js';
+import { buildPublicProfessionalProfileDocument } from './publicProfessionalProfileProjection.js';
+import { buildRadarCandidateProjection } from './radar/radarCandidateProjection.js';
 import {
   assertReviewEligible,
   buildReviewDocument,
   normalizeReviewWrite,
   type ReviewWriteInput,
 } from './reviewPolicy.js';
-import { buildPublicProfessionalProfileDocument } from './publicProfessionalProfileProjection.js';
-import { buildRadarCandidateProjection } from './radar/radarCandidateProjection.js';
 
 const REVIEWS_COLLECTION = 'reviews';
 const USERS_COLLECTION = 'users';
 const REQUESTS_COLLECTION = 'service_requests';
 const PUBLIC_PROFILES_COLLECTION = 'public_professional_profiles';
 const RADAR_CANDIDATES_COLLECTION = 'radar_candidates';
+const TRANSACTIONS_COLLECTION = 'transactions';
 
 export interface SaveReviewResult {
   review: Review;
@@ -107,6 +108,10 @@ export async function saveProfessionalReview(
     };
     const publicDocument = buildPublicProfessionalProfileDocument(updatedProfessional as any);
     const radarCandidate = buildRadarCandidateProjection(updatedProfessional as any);
+    const transactionQuery = await db.collection(TRANSACTIONS_COLLECTION)
+      .where('serviceRequestId', '==', request.id)
+      .limit(1)
+      .get();
 
     tx.create(reviewRef, review);
     tx.set(professionalRef, {
@@ -122,6 +127,24 @@ export async function saveProfessionalReview(
       tx.set(radarCandidateRef, radarCandidate, { merge: true });
     } else {
       tx.delete(radarCandidateRef);
+    }
+
+    // A completed review closes the commercial request. For payment-backed jobs,
+    // the transaction advances only from SERVICE_COMPLETED to REVIEW_COMPLETED;
+    // refunded/chargeback/settled states are never overwritten.
+    tx.update(requestRef, {
+      status: 'CLOSED',
+    });
+
+    if (!transactionQuery.empty) {
+      const transactionDoc = transactionQuery.docs[0];
+      const transactionData = transactionDoc.data() as { status?: string };
+      if (transactionData.status === 'SERVICE_COMPLETED') {
+        tx.update(transactionDoc.ref, {
+          status: 'REVIEW_COMPLETED',
+          reviewCompletedAt: review.createdAt,
+        });
+      }
     }
 
     return { review, created: true };
