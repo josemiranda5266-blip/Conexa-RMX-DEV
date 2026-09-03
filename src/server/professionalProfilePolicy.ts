@@ -43,6 +43,18 @@ function normalizeStringList(value: unknown, maxItems: number, maxItemLength: nu
     .slice(0, maxItems);
 }
 
+function normalizePortfolioImages(value: unknown): string[] {
+  return normalizeStringList(value, MAX_PORTFOLIO_IMAGES, 2048)
+    .filter((url) => {
+      try {
+        const parsed = new URL(url);
+        return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+      } catch {
+        return false;
+      }
+    });
+}
+
 export function normalizeProfessionalProfileWrite(
   input: ProfessionalProfileWriteInput,
   existingName: string,
@@ -54,7 +66,7 @@ export function normalizeProfessionalProfileWrite(
   const matriculaOrDegree = normalizeString(input.matriculaOrDegree, 200);
   const specialties = normalizeStringList(input.specialties, MAX_SPECIALTIES, 100);
   const servicesOffered = normalizeStringList(input.servicesOffered, MAX_SERVICES, 160);
-  const portfolioImages = normalizeStringList(input.portfolioImages, MAX_PORTFOLIO_IMAGES, 2048);
+  const portfolioImages = normalizePortfolioImages(input.portfolioImages);
   const workZoneRadiusKm = Number(input.workZoneRadiusKm);
   const hourlyRateArs = Number(input.hourlyRateArs);
   const professionId = normalizeString(input.professionId, 120) || undefined;
