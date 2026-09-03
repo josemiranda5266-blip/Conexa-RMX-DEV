@@ -1,38 +1,20 @@
-# Auditoría — agregados de reputación de Reviews
+# Reviews — hardening de agregados de reputación
 
 Fecha: 2026-09-03
-Rama definitiva: `integration/conexa-unified`
+Rama: `integration/conexa-unified`
 
-## Avance
+## Corrección aplicada
 
-`saveProfessionalReview()` actualiza de forma transaccional:
+Se corrigió `src/server/reviewService.ts`, eliminando declaraciones duplicadas introducidas durante la consolidación del flujo de reputación. El archivo tenía identificadores repetidos para colecciones y referencias Firestore, lo que impedía la compilación TypeScript.
 
-- `reviews/{reviewId}`;
-- `users/{professionalId}.rating`;
-- `users/{professionalId}.reviewCount`;
-- `public_professional_profiles/{professionalId}` solo si la proyección pública ya existe;
-- `radar_candidates/{professionalId}` cuando el candidato sigue siendo válido;
-- `service_requests/{serviceRequestId}` a `CLOSED`;
-- la transacción asociada desde `SERVICE_COMPLETED` a `REVIEW_COMPLETED`.
+## Estado funcional del servicio
 
-La identidad del profesional y la elegibilidad del servicio siguen derivándose del `ServiceRequest`; el cliente no puede establecer la reputación directamente.
+La creación autoritativa de una reseña mantiene en una misma transacción la creación idempotente, la actualización de `rating` y `reviewCount`, la sincronización de la proyección pública y RADAR, el cierre del estado de review y la transición financiera cuando corresponde.
 
-## Cálculo
+## Pendientes
 
-El nuevo promedio se calcula a partir del promedio y cantidad anteriores más la nueva valoración. El resultado se redondea a una décima para mantener una representación estable en el perfil.
+- cablear `reviewRoute` en el runtime principal;
+- sustituir el escritor legacy de `AppContext`;
+- verificar el contrato exacto de estados comerciales y financieros antes de considerar cerrado el dominio.
 
-## Idempotencia
-
-Si la Review determinística ya existe, la operación retorna el documento existente sin incrementar `reviewCount` ni volver a aplicar el promedio.
-
-## Corrección
-
-Una Review ya no crea como efecto secundario una proyección pública inexistente. Esto evita publicar un profesional que no tenía previamente su perfil público establecido.
-
-## Pendiente
-
-La sincronización runtime de la ruta HTTP en `server.ts` continúa pendiente por el tamaño/riesgo de edición del archivo. El boundary HTTP ya existe y el frontend todavía debe terminar la migración completa desde el escritor legacy del AppContext.
-
-También queda una futura rutina administrativa de reconciliación para datos históricos en los que `rating`/`reviewCount` pudieran no coincidir con Reviews verificadas.
-
-No se ejecutaron tests ni build.
+No se ejecutaron tests ni build en esta fase.
