@@ -1,4 +1,8 @@
-import crypto from 'crypto';
+import type { OpportunitySourceType } from '../../types.js';
+import {
+  buildLegacyRadarOpportunityId,
+  buildRadarOpportunityIdentity,
+} from './radarOpportunityIdentity.js';
 
 export interface RadarOpportunityPersistenceDb {
   collection(name: string): {
@@ -13,7 +17,12 @@ export interface RadarOpportunityPersistenceDocRef {
 }
 
 export interface PersistOpportunityDocumentInput {
-  externalReference: string;
+  sourceType: OpportunitySourceType | string;
+  externalReference?: string;
+  source?: string;
+  description?: string;
+  city?: string;
+  province?: string;
   document: Record<string, unknown>;
 }
 
@@ -21,10 +30,7 @@ export interface PersistOpportunityDocumentResult {
   id: string;
   created: boolean;
   document: Record<string, unknown>;
-}
-
-export function buildCanonicalRadarOpportunityId(externalReference: string): string {
-  return `RADAR-${crypto.createHash('sha256').update(externalReference).digest('hex').slice(0, 40)}`;
+  resolvedFrom?: string;
 }
 
 function isAlreadyExistsError(error: unknown): boolean {
@@ -38,32 +44,63 @@ function isAlreadyExistsError(error: unknown): boolean {
     (typeof candidate.message === 'string' && /already exists|already-exists|ALREADY_EXISTS/i.test(candidate.message));
 }
 
+function identityCandidates(input: PersistOpportunityDocumentInput): string[] {
+  const identity = buildRadarOpportunityIdentity(input);
+  const ids = [identity.canonicalId];
+
+  if (input.externalReference) {
+    ids.push(buildLegacyRadarOpportunityId(input.externalReference));
+  }
+
+  return [...new Set(ids)];
+}
+
 /**
  * Canonical Firestore boundary for RADAR opportunity creation.
- * Validation and business policy remain in the callers; this module owns only
- * deterministic identity plus create-or-read concurrency semantics.
+ * It owns deterministic identity and backward-compatible reads. Existing
+ * historical documents are never renamed or copied implicitly.
  */
 export async function persistOpportunityDocument(
   db: RadarOpportunityPersistenceDb,
   input: PersistOpportunityDocumentInput,
 ): Promise<PersistOpportunityDocumentResult> {
-  const id = buildCanonicalRadarOpportunityId(input.externalReference);
-  const ref = db.collection('radar_opportunities').doc(id);
-  const existing = await ref.get();
+  const candidates = identityCandidates(input);
+  const canonicalId = candidates[0];
 
-  if (existing.exists) {
-    return { id, created: false, document: { ...(existing.data() || {}), id } };
+  for (const id of candidates) {
+    const ref = db.collection('radar_opportunities').doc(id);
+    const existing = await ref.get();
+    if (existing.exists) {
+      return {
+        id,
+        created: false,
+        resolvedFrom: id === canonicalId ? undefined : id,
+        document: { ...(existing.data() || {}), id },
+      };
+    }
   }
 
-  const document = { ...input.document, id };
+  const document = { ...input.document, id: canonicalId };
+  const ref = db.collection('radar_opportunities').doc(canonicalId);
 
   try {
     await ref.create(document);
-    return { id, created: true, document };
+    return { id: canonicalId, created: true, document };
   } catch (error) {
     if (!isAlreadyExistsError(error)) throw error;
-    const concurrent = await ref.get();
-    if (!concurrent.exists) throw error;
-    return { id, created: false, document: { ...(concurrent.data() || {}), id } };
+
+    for (const id of candidates) {
+      const concurrent = await db.collection('radar_opportunities').doc(id).get();
+      if (concurrent.exists) {
+        return {
+          id,
+          created: false,
+          resolvedFrom: id === canonicalId ? undefined : id,
+          document: { ...(concurrent.data() || {}), id },
+        };
+      }
+    }
+
+    throw error;
   }
 }
