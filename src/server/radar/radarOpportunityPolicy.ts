@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import type {
   OpportunitySourceType,
   RadarOpportunity,
@@ -120,10 +121,5 @@ export function normalizeRadarOpportunityWrite(
 
 export function buildOpportunityId(sourceType: OpportunitySourceType, externalReference?: string): string {
   const seed = `${sourceType}:${externalReference || 'anonymous'}`;
-  let hash = 2166136261;
-  for (let index = 0; index < seed.length; index += 1) {
-    hash ^= seed.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `RAD-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+  return `RAD-${createHash('sha256').update(seed).digest('hex').slice(0, 24)}`;
 }
