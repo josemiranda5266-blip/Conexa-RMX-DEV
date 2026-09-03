@@ -26,18 +26,15 @@ function buildReviewId(clientId: string, professionalId: string, serviceRequestI
   return `REV-${createHash('sha256').update(seed).digest('hex').slice(0, 40)}`;
 }
 
-function isAlreadyExists(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const candidate = error as { code?: unknown; status?: unknown; message?: unknown };
-  return candidate.code === 6 || candidate.code === '6' || candidate.code === 'ALREADY_EXISTS' ||
-    candidate.status === 6 || candidate.status === 'ALREADY_EXISTS' ||
-    (typeof candidate.message === 'string' && /already exists|already-exists|ALREADY_EXISTS/i.test(candidate.message));
-}
-
 function calculateRating(existing: Record<string, unknown>, nextRating: number): { rating: number; reviewCount: number } {
-  const previousCount = Number.isFinite(existing.reviewCount) ? Number(existing.reviewCount) : 0;
-  const previousRating = Number.isFinite(existing.rating) ? Number(existing.rating) : 0;
-  const normalizedPreviousCount = Math.max(0, Math.trunc(previousCount));
+  const previousCountRaw = Number(existing.reviewCount);
+  const previousRatingRaw = Number(existing.rating);
+  const normalizedPreviousCount = Number.isFinite(previousCountRaw)
+    ? Math.max(0, Math.trunc(previousCountRaw))
+    : 0;
+  const previousRating = Number.isFinite(previousRatingRaw)
+    ? Math.max(0, Math.min(5, previousRatingRaw))
+    : 0;
   const reviewCount = normalizedPreviousCount + 1;
   const rating = reviewCount === 1
     ? nextRating
@@ -66,7 +63,7 @@ export async function saveProfessionalReview(
   const publicProfileRef = db.collection(PUBLIC_PROFILES_COLLECTION).doc(normalized.professionalId);
   const radarCandidateRef = db.collection(RADAR_CANDIDATES_COLLECTION).doc(normalized.professionalId);
 
-  const result = await db.runTransaction(async (tx: any) => {
+  return db.runTransaction(async (tx: any) => {
     const [requestSnap, clientSnap, professionalSnap, reviewSnap] = await Promise.all([
       tx.get(requestRef),
       tx.get(clientRef),
@@ -77,6 +74,9 @@ export async function saveProfessionalReview(
     if (!requestSnap.exists) throw new Error('SERVICE_REQUEST_NOT_FOUND');
     if (!clientSnap.exists) throw new Error('USER_NOT_FOUND');
     if (!professionalSnap.exists) throw new Error('PROFESSIONAL_NOT_FOUND');
+
+    // Firestore transactions retry automatically on concurrent writes. If a retry
+    // sees the deterministic review document, this becomes an idempotent no-op.
     if (reviewSnap.exists) {
       return { review: reviewSnap.data() as Review, created: false };
     }
@@ -84,6 +84,7 @@ export async function saveProfessionalReview(
     const request = requestSnap.data() as ServiceRequest;
     const client = clientSnap.data() as { id?: string; name?: string; avatar?: string; isBlocked?: boolean };
     const professional = professionalSnap.data() as Record<string, unknown>;
+
     if (client.isBlocked === true) throw new Error('USER_BLOCKED');
     if (professional.isBlocked === true) throw new Error('PROFESSIONAL_BLOCKED');
 
@@ -125,8 +126,6 @@ export async function saveProfessionalReview(
 
     return { review, created: true };
   });
-
-  return result;
 }
 
 export function reviewIdForService(
@@ -135,8 +134,4 @@ export function reviewIdForService(
   serviceRequestId: string,
 ): string {
   return buildReviewId(clientId, professionalId, serviceRequestId);
-}
-
-export function isReviewAlreadyExistsError(error: unknown): boolean {
-  return isAlreadyExists(error);
 }
