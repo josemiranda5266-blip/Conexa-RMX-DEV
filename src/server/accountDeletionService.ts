@@ -113,19 +113,41 @@ async function cleanupFirestore(db: AccountDeletionServiceDb, userId: string): P
   }
 
   // Anonymize client ownership on commercial records instead of deleting
-  // financial history. This keeps transaction/request/review auditability intact.
+  // financial history. Reviews also carry authorId, so that identity must be
+  // cleared explicitly rather than leaving a deleted UID as a live reference.
   for (const collectionName of ['service_requests', 'transactions', 'reviews']) {
     const snapshot = await db.collection(collectionName).where('clientId', '==', userId).get();
     for (let offset = 0; offset < snapshot.docs.length; offset += BATCH_SIZE) {
       const batch = db.batch();
       snapshot.docs.slice(offset, offset + BATCH_SIZE).forEach((doc: any) => {
-        batch.update(doc.ref, {
+        const update: Record<string, unknown> = {
           clientId: 'DELETED_USER',
           clientName: 'Usuario dado de baja',
-        });
+        };
+        if (collectionName === 'reviews') {
+          update.authorId = 'DELETED_USER';
+          update.clientAvatar = '';
+        }
+        batch.update(doc.ref, update);
       });
       await batch.commit();
     }
+  }
+
+  // Some historical reviews may have authorId populated independently from
+  // clientId. Clean those records too so no deleted UID survives in review data.
+  const authoredReviews = await db.collection('reviews').where('authorId', '==', userId).get();
+  for (let offset = 0; offset < authoredReviews.docs.length; offset += BATCH_SIZE) {
+    const batch = db.batch();
+    authoredReviews.docs.slice(offset, offset + BATCH_SIZE).forEach((doc: any) => {
+      batch.update(doc.ref, {
+        authorId: 'DELETED_USER',
+        clientId: 'DELETED_USER',
+        clientName: 'Usuario dado de baja',
+        clientAvatar: '',
+      });
+    });
+    await batch.commit();
   }
 
   // Remove professional identity from mutable service-request assignment data.
