@@ -68,11 +68,12 @@ export async function saveProfessionalReview(
     .limit(1);
 
   return db.runTransaction(async (tx: any) => {
-    const [requestSnap, clientSnap, professionalSnap, reviewSnap, transactionSnap] = await Promise.all([
+    const [requestSnap, clientSnap, professionalSnap, reviewSnap, publicProfileSnap, transactionSnap] = await Promise.all([
       tx.get(requestRef),
       tx.get(clientRef),
       tx.get(professionalRef),
       tx.get(reviewRef),
+      tx.get(publicProfileRef),
       tx.get(transactionsQuery),
     ]);
 
@@ -118,10 +119,15 @@ export async function saveProfessionalReview(
       rating: aggregate.rating,
       reviewCount: aggregate.reviewCount,
     }, { merge: true });
-    tx.set(publicProfileRef, {
-      ...publicDocument,
-      updatedAt: new Date().toISOString(),
-    }, { merge: true });
+
+    // Do not create a public profile as a side effect of reviewing a professional
+    // who has no public projection yet. If it exists, keep its public contract in sync.
+    if (publicProfileSnap.exists) {
+      tx.set(publicProfileRef, {
+        ...publicDocument,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+    }
 
     if (radarCandidate) {
       tx.set(radarCandidateRef, radarCandidate, { merge: true });
