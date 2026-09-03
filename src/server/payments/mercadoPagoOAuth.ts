@@ -1,9 +1,12 @@
 import crypto from 'crypto';
 import { getAdminDb } from '../firebaseAdmin.js';
+import type { FirebaseAdminProvider } from '../auth.js';
 import { decryptOAuthToken, encryptOAuthToken, MercadoPagoOAuthConnection } from './mercadoPagoOAuthTokenStore.js';
+import { reserveOAuthState } from './mercadoPagoOAuthPersistence.js';
 
 const CONNECTION_COLLECTION = 'mercado_pago_connections';
 const REFRESH_SKEW_MS = 5 * 60 * 1000;
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 function requireOAuthConfig() {
   const appId = process.env.MP_APP_ID?.trim();
@@ -34,7 +37,7 @@ export function verifyOAuthState(state: string, merchantId: string): { valid: bo
   try {
     const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
     if (parsed.merchantId !== merchantId || !parsed.nonce || !Number.isFinite(parsed.iat)) return { valid: false };
-    if (Date.now() - parsed.iat < 0 || Date.now() - parsed.iat > 10 * 60 * 1000) return { valid: false };
+    if (Date.now() - parsed.iat < 0 || Date.now() - parsed.iat > OAUTH_STATE_TTL_MS) return { valid: false };
     return { valid: true, nonce: String(parsed.nonce) };
   } catch { return { valid: false }; }
 }
@@ -42,6 +45,26 @@ export function verifyOAuthState(state: string, merchantId: string): { valid: bo
 export function buildMercadoPagoAuthorizationUrl(merchantId: string): string {
   const { appId, appUrl } = requireOAuthConfig();
   const state = createOAuthState(merchantId);
+  const redirectUri = `${appUrl.replace(/\/$/, '')}/api/mercadopago/oauth/callback`;
+  const params = new URLSearchParams({ client_id: appId, response_type: 'code', platform_id: 'mp', scope: 'offline_access write read', state, redirect_uri: redirectUri });
+  return `https://auth.mercadopago.com/authorization?${params.toString()}`;
+}
+
+/**
+ * Production OAuth start path: creates a signed state and reserves its nonce
+ * transactionally so the callback can consume it exactly once.
+ */
+export async function buildMercadoPagoAuthorizationUrlAndReserve(
+  getAdminApp: FirebaseAdminProvider,
+  merchantId: string
+): Promise<string> {
+  const { appId, appUrl } = requireOAuthConfig();
+  const normalizedMerchantId = String(merchantId || '').trim();
+  if (!normalizedMerchantId) throw new Error('MERCADO_PAGO_MERCHANT_REQUIRED');
+  const nonce = crypto.randomUUID();
+  const state = createOAuthState(normalizedMerchantId, nonce);
+  const expiresAt = new Date(Date.now() + OAUTH_STATE_TTL_MS).toISOString();
+  await reserveOAuthState(getAdminApp, normalizedMerchantId, nonce, expiresAt);
   const redirectUri = `${appUrl.replace(/\/$/, '')}/api/mercadopago/oauth/callback`;
   const params = new URLSearchParams({ client_id: appId, response_type: 'code', platform_id: 'mp', scope: 'offline_access write read', state, redirect_uri: redirectUri });
   return `https://auth.mercadopago.com/authorization?${params.toString()}`;
@@ -81,11 +104,11 @@ export async function refreshMercadoPagoOAuthConnection(connection: MercadoPagoO
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ client_id: appId, client_secret: clientSecret, grant_type: 'refresh_token', refresh_token: refreshToken }),
   });
-  if (!response.ok) throw new Error(`MP_OAUTH_REFRESH_${response.status}`);
+  if (!response.ok) throw new Error(`MERCADO_PAGO_OAUTH_REFRESH_${response.status}`);
 
   const data = await response.json() as any;
   if (!data.access_token || !data.refresh_token || !Number.isFinite(Number(data.expires_in))) {
-    throw new Error('MP_OAUTH_REFRESH_RESPONSE_INVALID');
+    throw new Error('MERCADO_PAGO_OAUTH_REFRESH_RESPONSE_INVALID');
   }
 
   const refreshed: MercadoPagoOAuthConnection = {
