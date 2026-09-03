@@ -20,6 +20,12 @@ function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+export function buildLegacyRadarOpportunityId(externalReference: string): string {
+  const normalized = externalReference.trim();
+  if (!normalized) throw new Error('INVALID_RADAR_OPPORTUNITY_EXTERNAL_REFERENCE');
+  return `RADAR-${sha256(normalized).slice(0, 40)}`;
+}
+
 export function buildRadarOpportunityIdentity(
   input: RadarOpportunityIdentityInput,
 ): RadarOpportunityIdentity {
@@ -32,7 +38,7 @@ export function buildRadarOpportunityIdentity(
     const idempotencyKey = sha256(`${sourceType}:${externalReference}`);
     return {
       canonicalId: `RAD-${idempotencyKey.slice(0, 24)}`,
-      legacyExternalReferenceId: `RADAR-${sha256(externalReference).slice(0, 40)}`,
+      legacyExternalReferenceId: buildLegacyRadarOpportunityId(externalReference),
       idempotencyKey,
     };
   }
