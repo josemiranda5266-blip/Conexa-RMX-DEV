@@ -19,12 +19,19 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
 }) => {
   const { currentUser, setCurrentUser, trackEvent, submitVerification } = useApp();
 
-  const [professionName, setProfessionName] = useState(currentUser.professionName || 'Electricista Matriculado');
+  const initialProfession = INITIAL_PROFESSIONS.find((profession) =>
+    profession.id === currentUser.professionId ||
+    profession.name.toLocaleLowerCase() === (currentUser.professionName || '').toLocaleLowerCase() ||
+    (profession.id === 'prof-electricista' && currentUser.professionName === 'Electricista Matriculado')
+  ) || INITIAL_PROFESSIONS[0];
+
+  const [professionId, setProfessionId] = useState(currentUser.professionId || initialProfession.id);
+  const [professionName, setProfessionName] = useState(initialProfession.name);
   const [businessName, setBusinessName] = useState(currentUser.businessName || '');
   const [specialtiesText, setSpecialtiesText] = useState((currentUser.specialties || ['Instalaciones domiciliarias', 'Reparaciones']).join(', '));
   const [description, setDescription] = useState(currentUser.description || '');
   const [workZoneRadiusKm, setWorkZoneRadiusKm] = useState(currentUser.workZoneRadiusKm || 20);
-  const [workHours, setWorkHours] = useState(currentUser.workHours || 'Lunes a Sábado de 08:00 a 19:00');
+  const [workingHours, setWorkingHours] = useState(currentUser.workingHours || currentUser.workHours || 'Lunes a Sábado de 08:00 a 19:00');
   const [matriculaOrDegree, setMatriculaOrDegree] = useState(currentUser.matriculaOrDegree || '');
   const [hourlyRateArs, setHourlyRateArs] = useState<number>(currentUser.hourlyRateArs || 15000);
   const [verificationFile, setVerificationFile] = useState<File | null>(null);
@@ -33,6 +40,12 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const selectedProfession = INITIAL_PROFESSIONS.find((profession) => profession.id === professionId);
+    if (!selectedProfession) {
+      console.error('[CONEXA PROFILE] Profesión inválida seleccionada.');
+      return;
+    }
 
     const updatedSpecialties = specialtiesText
       .split(',')
@@ -51,12 +64,14 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
       hasClientProfile: true,
       activeMode: 'PROFESSIONAL' as const,
       role: currentUser.role,
-      professionName,
-      businessName: businessName || `${professionName} ${currentUser.name.split(' ')[0]}`,
+      professionId: selectedProfession.id,
+      professionName: selectedProfession.name,
+      businessName: businessName || `${selectedProfession.name} ${currentUser.name.split(' ')[0]}`,
       specialties: updatedSpecialties.length > 0 ? updatedSpecialties : ['Atención rápida', 'Presupuestos sin cargo'],
-      description: description || `Servicios profesionales de ${professionName} en Santiago del Estero y zonas aledañas. Atendido directamente por ${currentUser.name}.`,
+      description: description || `Servicios profesionales de ${selectedProfession.name} en Santiago del Estero y zonas aledañas. Atendido directamente por ${currentUser.name}.`,
       workZoneRadiusKm: Number(workZoneRadiusKm),
-      workHours,
+      workingHours,
+      workHours: workingHours,
       matriculaOrDegree,
       hourlyRateArs: Number(hourlyRateArs),
       availabilityStatus: 'DISPONIBLE' as const
@@ -76,12 +91,13 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
           Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
-          professionName,
+          professionId: selectedProfession.id,
+          professionName: selectedProfession.name,
           businessName,
           specialties: updatedSpecialties,
           description,
           workZoneRadiusKm: Number(workZoneRadiusKm),
-          workHours,
+          workingHours,
           matriculaOrDegree,
           hourlyRateArs: Number(hourlyRateArs)
         })
@@ -106,7 +122,7 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
       console.error('[CONEXA PROFILE] Error guardando perfil profesional:', err);
       return;
     }
-    trackEvent('became_professional', { userId: targetUid, professionName });
+    trackEvent('became_professional', { userId: targetUid, professionName: selectedProfession.name });
 
     if (onSuccess) onSuccess();
     onClose();
@@ -146,15 +162,19 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
               Profesión u Oficio Principal *
             </label>
             <select
-              value={professionName}
-              onChange={(e) => setProfessionName(e.target.value)}
+              value={professionId}
+              onChange={(e) => {
+                const selected = INITIAL_PROFESSIONS.find((profession) => profession.id === e.target.value);
+                if (!selected) return;
+                setProfessionId(selected.id);
+                setProfessionName(selected.name);
+              }}
               className="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
               required
             >
               {INITIAL_PROFESSIONS.map(p => (
-                <option key={p.id} value={p.name}>{p.name}</option>
+                <option key={p.id} value={p.id}>{p.name}</option>
               ))}
-              <option value="Otro Oficio / Técnico">Otro Oficio / Técnico Especializado</option>
             </select>
           </div>
 
@@ -241,8 +261,8 @@ export const BecomeProfessionalModal: React.FC<BecomeProfessionalModalProps> = (
               </label>
               <input
                 type="text"
-                value={workHours}
-                onChange={(e) => setWorkHours(e.target.value)}
+                value={workingHours}
+                onChange={(e) => setWorkingHours(e.target.value)}
                 placeholder="Lun a Vie de 8 a 19hs / Urgencias 24hs"
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
