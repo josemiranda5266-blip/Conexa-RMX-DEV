@@ -1,7 +1,7 @@
 import { getAdminDb } from './firebaseAdmin.js';
 import { normalizeProfessionalProfileWrite, type ProfessionalProfileWriteInput } from './professionalProfilePolicy.js';
 import { getProfessionById, getProfessionByName } from '../domain/professionCatalog.js';
-import { syncPublicProfessionalProfileFromUser } from './publicProfessionalProfileProjection.js';
+import { buildPublicProfessionalProfileDocument } from './publicProfessionalProfileProjection.js';
 
 export interface SaveProfessionalProfileResult {
   user: Record<string, unknown>;
@@ -16,17 +16,9 @@ export async function saveProfessionalProfile(
 
   const firestore = getAdminDb();
   const userRef = firestore.collection('users').doc(normalizedUserId);
-  const userSnap = await userRef.get();
-  if (!userSnap.exists) throw new Error('USER_NOT_FOUND');
+  const publicProfileRef = firestore.collection('public_professional_profiles').doc(normalizedUserId);
 
-  const existing = (userSnap.data() || {}) as Record<string, unknown>;
-  if (existing.isBlocked === true) throw new Error('USER_BLOCKED');
-
-  const normalized = normalizeProfessionalProfileWrite(
-    input,
-    typeof existing.name === 'string' ? existing.name : '',
-  );
-
+  const normalized = normalizeProfessionalProfileWrite(input, '');
   const catalogEntry = normalized.professionId
     ? getProfessionById(normalized.professionId)
     : getProfessionByName(normalized.professionName);
@@ -38,32 +30,49 @@ export async function saveProfessionalProfile(
     throw new Error('PROFESSION_ID_NAME_MISMATCH');
   }
 
-  const profileFields = {
-    professionId: catalogEntry.id,
-    professionName: catalogEntry.name,
-    businessName: normalized.businessName,
-    specialties: normalized.specialties,
-    description: normalized.description,
-    workZoneRadiusKm: normalized.workZoneRadiusKm,
-    workingHours: normalized.workingHours,
-    // Keep the legacy field synchronized while consumers migrate to workingHours.
-    workHours: normalized.workingHours,
-    matriculaOrDegree: normalized.matriculaOrDegree,
-    hourlyRateArs: normalized.hourlyRateArs,
-    servicesOffered: normalized.servicesOffered,
-    portfolioImages: normalized.portfolioImages,
-    hasProfessionalProfile: true,
-    isProfessional: true,
-    hasClientProfile: existing.hasClientProfile !== false,
-    availabilityStatus: existing.availabilityStatus || 'DISPONIBLE',
-  };
+  const result = await firestore.runTransaction(async (tx: any) => {
+    const userSnap = await tx.get(userRef);
+    if (!userSnap.exists) throw new Error('USER_NOT_FOUND');
 
-  await userRef.set(profileFields, { merge: true });
+    const existing = (userSnap.data() || {}) as Record<string, unknown>;
+    if (existing.isBlocked === true) throw new Error('USER_BLOCKED');
 
-  const updatedSnap = await userRef.get();
-  const updatedUser = { id: normalizedUserId, ...(updatedSnap.data() || {}) } as Record<string, unknown>;
+    const validated = normalizeProfessionalProfileWrite(
+      input,
+      typeof existing.name === 'string' ? existing.name : '',
+    );
 
-  await syncPublicProfessionalProfileFromUser(updatedUser as any);
+    const fields = {
+      professionId: catalogEntry.id,
+      professionName: catalogEntry.name,
+      businessName: validated.businessName,
+      specialties: validated.specialties,
+      description: validated.description,
+      workZoneRadiusKm: validated.workZoneRadiusKm,
+      workingHours: validated.workingHours,
+      // Keep the legacy field synchronized while consumers migrate to workingHours.
+      workHours: validated.workingHours,
+      matriculaOrDegree: validated.matriculaOrDegree,
+      hourlyRateArs: validated.hourlyRateArs,
+      servicesOffered: validated.servicesOffered,
+      portfolioImages: validated.portfolioImages,
+      hasProfessionalProfile: true,
+      isProfessional: true,
+      hasClientProfile: existing.hasClientProfile !== false,
+      availabilityStatus: existing.availabilityStatus || 'DISPONIBLE',
+    };
 
-  return { user: updatedUser };
+    const updatedUser = { id: normalizedUserId, ...existing, ...fields };
+    const publicDocument = buildPublicProfessionalProfileDocument(updatedUser as any);
+
+    tx.set(userRef, fields, { merge: true });
+    tx.set(publicProfileRef, {
+      ...publicDocument,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+
+    return { user: updatedUser };
+  });
+
+  return result;
 }
