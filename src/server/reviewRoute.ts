@@ -6,6 +6,28 @@ function readRating(value: unknown): number {
   return Number(value);
 }
 
+function statusForReviewError(code: string): number {
+  if (code.startsWith('INVALID_')) return 400;
+
+  if (
+    code === 'SERVICE_REQUEST_NOT_FOUND' ||
+    code === 'USER_NOT_FOUND' ||
+    code === 'PROFESSIONAL_NOT_FOUND'
+  ) return 404;
+
+  if (
+    code === 'USER_BLOCKED' ||
+    code === 'PROFESSIONAL_BLOCKED'
+  ) return 403;
+
+  if (
+    code.includes('MISMATCH') ||
+    code === 'REVIEW_SERVICE_NOT_COMPLETED'
+  ) return 409;
+
+  return 500;
+}
+
 export async function handleProfessionalReviewSave(req: Request, res: Response): Promise<void> {
   try {
     const auth = await verifyAuthToken(req);
@@ -33,16 +55,9 @@ export async function handleProfessionalReviewSave(req: Request, res: Response):
 
     const result = await saveProfessionalReview(auth.userId, input);
     res.status(result.created ? 201 : 200).json(result);
-  } catch (error: any) {
-    const code = typeof error?.message === 'string' ? error.message : 'REVIEW_SAVE_FAILED';
-    const status =
-      code.startsWith('INVALID_') ? 400 :
-      code === 'SERVICE_REQUEST_NOT_FOUND' || code === 'USER_NOT_FOUND' ? 404 :
-      code === 'USER_BLOCKED' ? 403 :
-      code.includes('MISMATCH') || code === 'REVIEW_SERVICE_NOT_COMPLETED' ? 409 :
-      500;
-
+  } catch (error: unknown) {
+    const code = error instanceof Error ? error.message : 'REVIEW_SAVE_FAILED';
     console.error('[REVIEWS] Error guardando reseña:', code);
-    res.status(status).json({ error: code });
+    res.status(statusForReviewError(code)).json({ error: code });
   }
 }
