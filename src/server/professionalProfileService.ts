@@ -2,6 +2,7 @@ import { getAdminDb } from './firebaseAdmin.js';
 import { normalizeProfessionalProfileWrite, type ProfessionalProfileWriteInput } from './professionalProfilePolicy.js';
 import { getProfessionById, getProfessionByName } from '../domain/professionCatalog.js';
 import { buildPublicProfessionalProfileDocument } from './publicProfessionalProfileProjection.js';
+import { buildRadarCandidateProjection } from './radar/radarCandidateProjection.js';
 
 export interface SaveProfessionalProfileResult {
   user: Record<string, unknown>;
@@ -17,6 +18,7 @@ export async function saveProfessionalProfile(
   const firestore = getAdminDb();
   const userRef = firestore.collection('users').doc(normalizedUserId);
   const publicProfileRef = firestore.collection('public_professional_profiles').doc(normalizedUserId);
+  const radarCandidateRef = firestore.collection('radar_candidates').doc(normalizedUserId);
 
   const normalized = normalizeProfessionalProfileWrite(input, '');
   const catalogEntry = normalized.professionId
@@ -64,12 +66,19 @@ export async function saveProfessionalProfile(
 
     const updatedUser = { id: normalizedUserId, ...existing, ...fields };
     const publicDocument = buildPublicProfessionalProfileDocument(updatedUser as any);
+    const radarCandidate = buildRadarCandidateProjection(updatedUser as any);
 
     tx.set(userRef, fields, { merge: true });
     tx.set(publicProfileRef, {
       ...publicDocument,
       updatedAt: new Date().toISOString(),
     }, { merge: true });
+
+    if (radarCandidate) {
+      tx.set(radarCandidateRef, radarCandidate, { merge: true });
+    } else {
+      tx.delete(radarCandidateRef);
+    }
 
     return { user: updatedUser };
   });
