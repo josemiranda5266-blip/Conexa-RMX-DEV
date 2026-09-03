@@ -1,3 +1,5 @@
+import type { ServiceItem } from '../types.js';
+
 export interface ProfessionalProfileWriteInput {
   professionId?: string;
   professionName: string;
@@ -8,7 +10,7 @@ export interface ProfessionalProfileWriteInput {
   workingHours: string;
   matriculaOrDegree?: string;
   hourlyRateArs: number;
-  servicesOffered?: string[];
+  servicesOffered?: ServiceItem[];
   portfolioImages?: string[];
 }
 
@@ -22,7 +24,7 @@ export interface NormalizedProfessionalProfileWrite {
   workingHours: string;
   matriculaOrDegree: string;
   hourlyRateArs: number;
-  servicesOffered: string[];
+  servicesOffered: ServiceItem[];
   portfolioImages: string[];
 }
 
@@ -73,6 +75,33 @@ function normalizePortfolioImages(value: unknown): string[] {
   });
 }
 
+function normalizeServices(value: unknown): ServiceItem[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > MAX_SERVICES) throw new Error('INVALID_SERVICES');
+
+  return value.map((item) => {
+    if (typeof item !== 'object' || item === null) throw new Error('INVALID_SERVICES');
+    const candidate = item as Record<string, unknown>;
+    const title = validateString(candidate.title, MAX_SERVICE_TITLE_LENGTH, 'INVALID_SERVICES');
+    const description = validateString(candidate.description, 1000, 'INVALID_SERVICES');
+    if (!title || !description) throw new Error('INVALID_SERVICES');
+
+    const id = validateString(candidate.id, 120, 'INVALID_SERVICES');
+    const rawPrice = candidate.approxPriceArs;
+    const approxPriceArs = rawPrice === undefined ? undefined : Number(rawPrice);
+    if (approxPriceArs !== undefined && (!Number.isFinite(approxPriceArs) || approxPriceArs < 0 || approxPriceArs > 100_000_000)) {
+      throw new Error('INVALID_SERVICES');
+    }
+
+    return {
+      id: id || crypto.randomUUID(),
+      title,
+      description,
+      ...(approxPriceArs !== undefined ? { approxPriceArs } : {}),
+    };
+  });
+}
+
 export function normalizeProfessionalProfileWrite(
   input: ProfessionalProfileWriteInput,
   existingName: string,
@@ -89,36 +118,8 @@ export function normalizeProfessionalProfileWrite(
   const professionIdValue = validateString(input.professionId, MAX_PROFESSION_ID_LENGTH, 'INVALID_PROFESSION_ID');
   const professionId = professionIdValue || undefined;
 
-  const specialties = normalizeStringList(
-    input.specialties,
-    MAX_SPECIALTIES,
-    MAX_SPECIALTY_LENGTH,
-    'INVALID_SPECIALTIES',
-  );
-  const servicesOffered = Array.isArray(input.servicesOffered)
-    ? input.servicesOffered.map((item) => {
-        if (typeof item !== 'object' || item === null) throw new Error('INVALID_SERVICES');
-        const candidate = item as Record<string, unknown>;
-        const title = validateString(candidate.title, MAX_SERVICE_TITLE_LENGTH, 'INVALID_SERVICES');
-        const description = validateString(candidate.description, 1000, 'INVALID_SERVICES');
-        if (!title || !description) throw new Error('INVALID_SERVICES');
-        const id = validateString(candidate.id, 120, 'INVALID_SERVICES');
-        const rawPrice = candidate.approxPriceArs;
-        const approxPriceArs = rawPrice === undefined ? undefined : Number(rawPrice);
-        if (approxPriceArs !== undefined && (!Number.isFinite(approxPriceArs) || approxPriceArs < 0 || approxPriceArs > 100_000_000)) {
-          throw new Error('INVALID_SERVICES');
-        }
-        return {
-          id: id || undefined,
-          title,
-          description,
-          ...(approxPriceArs !== undefined ? { approxPriceArs } : {}),
-        };
-      })
-    : [];
-
-  if (servicesOffered.length > MAX_SERVICES) throw new Error('INVALID_SERVICES');
-
+  const specialties = normalizeStringList(input.specialties, MAX_SPECIALTIES, MAX_SPECIALTY_LENGTH, 'INVALID_SPECIALTIES');
+  const servicesOffered = normalizeServices(input.servicesOffered);
   const portfolioImages = normalizePortfolioImages(input.portfolioImages);
   const workZoneRadiusKm = Number(input.workZoneRadiusKm);
   const hourlyRateArs = Number(input.hourlyRateArs);
