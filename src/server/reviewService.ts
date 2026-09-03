@@ -63,13 +63,17 @@ export async function saveProfessionalReview(
   );
   const publicProfileRef = db.collection(PUBLIC_PROFILES_COLLECTION).doc(normalized.professionalId);
   const radarCandidateRef = db.collection(RADAR_CANDIDATES_COLLECTION).doc(normalized.professionalId);
+  const transactionsQuery = db.collection(TRANSACTIONS_COLLECTION)
+    .where('serviceRequestId', '==', normalized.serviceRequestId)
+    .limit(1);
 
   return db.runTransaction(async (tx: any) => {
-    const [requestSnap, clientSnap, professionalSnap, reviewSnap] = await Promise.all([
+    const [requestSnap, clientSnap, professionalSnap, reviewSnap, transactionSnap] = await Promise.all([
       tx.get(requestRef),
       tx.get(clientRef),
       tx.get(professionalRef),
       tx.get(reviewRef),
+      tx.get(transactionsQuery),
     ]);
 
     if (!requestSnap.exists) throw new Error('SERVICE_REQUEST_NOT_FOUND');
@@ -108,10 +112,6 @@ export async function saveProfessionalReview(
     };
     const publicDocument = buildPublicProfessionalProfileDocument(updatedProfessional as any);
     const radarCandidate = buildRadarCandidateProjection(updatedProfessional as any);
-    const transactionQuery = await db.collection(TRANSACTIONS_COLLECTION)
-      .where('serviceRequestId', '==', request.id)
-      .limit(1)
-      .get();
 
     tx.create(reviewRef, review);
     tx.set(professionalRef, {
@@ -129,15 +129,13 @@ export async function saveProfessionalReview(
       tx.delete(radarCandidateRef);
     }
 
-    // A completed review closes the commercial request. For payment-backed jobs,
-    // the transaction advances only from SERVICE_COMPLETED to REVIEW_COMPLETED;
-    // refunded/chargeback/settled states are never overwritten.
-    tx.update(requestRef, {
-      status: 'CLOSED',
-    });
+    // A verified review closes the commercial request. For payment-backed jobs,
+    // advance only SERVICE_COMPLETED -> REVIEW_COMPLETED. Never overwrite
+    // REFUNDED, CHARGEBACK or SETTLED states.
+    tx.update(requestRef, { status: 'CLOSED' });
 
-    if (!transactionQuery.empty) {
-      const transactionDoc = transactionQuery.docs[0];
+    if (!transactionSnap.empty) {
+      const transactionDoc = transactionSnap.docs[0];
       const transactionData = transactionDoc.data() as { status?: string };
       if (transactionData.status === 'SERVICE_COMPLETED') {
         tx.update(transactionDoc.ref, {
