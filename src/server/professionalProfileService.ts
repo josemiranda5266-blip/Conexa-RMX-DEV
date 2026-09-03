@@ -33,11 +33,10 @@ export async function saveProfessionalProfile(
 
   if (!catalogEntry) throw new Error('INVALID_PROFESSION_ID');
 
-  const professionName = normalized.professionName;
-  const professionNameMatchesCatalog =
-    catalogEntry.name.trim().toLocaleLowerCase() === professionName.trim().toLocaleLowerCase();
-
-  if (!professionNameMatchesCatalog) throw new Error('PROFESSION_ID_NAME_MISMATCH');
+  const professionByName = getProfessionByName(normalized.professionName);
+  if (professionByName && professionByName.id !== catalogEntry.id) {
+    throw new Error('PROFESSION_ID_NAME_MISMATCH');
+  }
 
   const profileFields = {
     professionId: catalogEntry.id,
