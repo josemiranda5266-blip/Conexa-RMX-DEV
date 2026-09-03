@@ -1,4 +1,4 @@
-# Auditoría — bloqueadores de persistencia del perfil profesional
+# Auditoría — persistencia del perfil profesional
 
 Fecha: 2026-09-03
 Rama: `integration/conexa-unified`
@@ -7,23 +7,29 @@ Rama: `integration/conexa-unified`
 
 Repositorio definitivo: `josemiranda5266-blip/Conexa-RMX-DEV`.
 
-## Hallazgos
+## Hallazgo corregido durante esta revisión
 
-1. La política estricta ya admite `professionId`, `servicesOffered` y `portfolioImages`, y normaliza `ServiceItem[]`. Sin embargo, el endpoint histórico `/api/professional-profile/save` todavía debe consumir esa política.
-2. La proyección pública ya utiliza `getAdminDb()`, que respeta `firestoreDatabaseId`; por lo tanto es apta para el mismo backend multi-database. fileciteturn899file0
-3. El endpoint debe actualizar `/users/{uid}` y, en la misma operación lógica, sincronizar `public_professional_profiles/{uid}`. No debe exponer el documento privado completo como contrato público.
-4. La activación/desactivación del perfil profesional debe tener una regla explícita para evitar perfiles públicos huérfanos cuando un usuario deja de ser profesional o es bloqueado.
+El repositorio ya contenía `src/server/professionalProfileService.ts`, que es la implementación canónica de persistencia. La creación de un segundo servicio fue detectada y convertida en un adaptador de compatibilidad (`professionalProfilePersistence.ts`) para evitar duplicación de lógica.
 
-## Estado
+El servicio canónico:
 
-La capa de validación y la proyección están listas de forma independiente. La integración dentro de `server.ts` sigue siendo el último punto de acoplamiento importante y requiere una edición segura del archivo monolítico.
+- valida con `normalizeProfessionalProfileWrite(input, existingName)`;
+- valida la profesión contra `professionCatalog`;
+- detecta inconsistencias entre `professionId` y `professionName`;
+- usa `getAdminDb()`;
+- rechaza usuarios inexistentes o bloqueados;
+- persiste `professionId`, profesión, especialidades, descripción, radio, horarios, matrícula, tarifa, servicios y portfolio;
+- mantiene `workHours` sincronizado como compatibilidad legacy;
+- escribe `/users/{uid}` y `public_professional_profiles/{uid}` dentro de una transacción.
+
+## Bloqueador restante
+
+El endpoint HTTP `/api/professional-profile/save` de `server.ts` todavía ejecuta la implementación histórica y no llama al servicio canónico.
+
+Por seguridad, no se modificó todavía el archivo monolítico de 154 KB mediante reemplazo completo. La integración requiere una edición controlada del bloque del endpoint.
 
 ## Criterio de cierre
 
-No considerar terminado el perfil profesional hasta que:
+El perfil profesional estará cerrado estructuralmente cuando `/api/professional-profile/save` delegue exclusivamente en el servicio canónico y traduzca sus códigos de error a respuestas HTTP, sin duplicar validación ni persistencia.
 
-- la entrada del endpoint pase por `normalizeProfessionalProfileWrite`;
-- se persistan servicios y portfolio normalizados;
-- la proyección pública se sincronice desde datos autoritativos;
-- el documento público no contenga campos privados;
-- una cuenta bloqueada no pueda publicar/actualizar el catálogo.
+No se ejecutaron tests ni build.
