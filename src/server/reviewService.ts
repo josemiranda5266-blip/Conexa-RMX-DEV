@@ -84,16 +84,19 @@ export async function saveProfessionalReview(
     // The canonical aggregate is derived from the authoritative professional
     // account. The public projection receives exactly the same transaction result.
     const professional = professionalSnap.data() as Record<string, unknown>;
-    const aggregate = calculateUpdatedReputation(
+    if (professional.isBlocked === true) throw new Error('PROFESSIONAL_BLOCKED');
+
+    const { rating, reviewCount } = calculateUpdatedReputation(
       professional.rating,
       professional.reviewCount,
       review.overallRating,
     );
+    const reputationUpdate = { rating, reviewCount };
 
     tx.create(reviewRef, review);
-    tx.update(professionalRef, aggregate);
+    tx.update(professionalRef, reputationUpdate);
     if (publicProfileSnap.exists) {
-      tx.update(publicProfileRef, aggregate);
+      tx.update(publicProfileRef, reputationUpdate);
     }
 
     return { review, created: true };
