@@ -23,6 +23,7 @@ import {
   type Unsubscribe,
 } from '../services/conversationService';
 import { subscribeToConversationRealtime } from '../services/conversationRealtimeService';
+import { projectAuthenticatedUser } from '../services/authenticatedUserProjection';
 
 interface AppContextType {
   currentUser: UserProfile | null;
@@ -335,58 +336,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               console.log('[CONEXA AUTH] Perfil público por defecto guardado en Firestore.');
             }
             
-            // Core Auth Synch Rules: Firestore is the Source of Truth for Role & Profile (except ADMIN/SUPER_ADMIN checks)
-            const firestoreRole = profileData.role;
-            const isClaimAdmin = claimRole === 'ADMIN' || claimRole === 'SUPER_ADMIN';
-            
-            let effectiveRole: Role = 'USER';
-            if (firestoreRole === 'ADMIN' || firestoreRole === 'SUPER_ADMIN') {
-              if (isClaimAdmin) {
-                effectiveRole = firestoreRole;
-              } else {
-                console.warn(`[CONEXA SECURITY] Se detectó intento de elevación de privilegios en Firestore para UID: ${firebaseUser.uid} sin Custom Claim de Admin correspondiente.`);
-                effectiveRole = 'USER';
-              }
-            } else if (firestoreRole) {
-              effectiveRole = firestoreRole;
-            } else {
-              effectiveRole = claimRole;
-            }
+            const fallbackUser: UserProfile = {
+              id: firebaseUser.uid,
+              name: firebaseUser.displayName || 'Usuario CONEXA',
+              email: firebaseUser.email || '',
+              avatar: firebaseUser.photoURL || '',
+              role: claimRole,
+              activeMode: claimRole === 'ADMIN' || claimRole === 'SUPER_ADMIN'
+                ? 'ADMIN'
+                : claimRole === 'PROFESSIONAL'
+                  ? 'PROFESSIONAL'
+                  : 'CLIENT',
+              isProfessional: claimRole === 'PROFESSIONAL',
+              hasProfessionalProfile: claimRole === 'PROFESSIONAL',
+              joinedDate: new Date().toLocaleDateString('es-AR'),
+              location: profileData.location || {
+                city: 'Santiago del Estero',
+                province: 'Santiago del Estero',
+                country: 'Argentina',
+                lat: -27.7834,
+                lng: -64.2642,
+                approxZone: 'Santiago del Estero - Centro',
+              },
+              isIdentityVerified: firebaseUser.emailVerified || false,
+              identityVerificationStatus: 'NONE',
+              rating: 0,
+              reviewCount: 0,
+              jobsCompleted: 0,
+              trustScore: 50,
+              availabilityStatus: 'DISPONIBLE',
+            };
 
-            // Professional capability is independent from the currently selected app mode.
-            // activeMode must never create or remove a professional profile.
-            const finalHasProfessionalProfile =
-              profileData.hasProfessionalProfile === true ||
-              profileData.isProfessional === true ||
-              effectiveRole === 'PROFESSIONAL';
-
-            const finalIsProfessional = finalHasProfessionalProfile;
-
-            const finalActiveMode = profileData.activeMode || 
-                                    (effectiveRole === 'ADMIN' || effectiveRole === 'SUPER_ADMIN' ? 'ADMIN' : (finalIsProfessional ? 'PROFESSIONAL' : 'CLIENT'));
-
-            console.log('[CONEXA DIAGNOSTICS]', {
-              uid: firebaseUser.uid,
-              firestoreRole: firestoreRole || null,
-              claimRole,
-              effectiveRole,
-              isProfessional: finalIsProfessional,
-              hasProfessionalProfile: finalHasProfessionalProfile,
-              activeMode: finalActiveMode
-            });
+            const authenticatedUser = projectAuthenticatedUser(
+              { uid: firebaseUser.uid, role: claimRole },
+              profileData,
+              fallbackUser,
+            );
 
             setCurrentUser({
-              ...profileData,
-              id: firebaseUser.uid,
-              name: profileData.name || firebaseUser.displayName || 'Usuario CONEXA',
-              email: profileData.email || firebaseUser.email || '',
-              avatar: profileData.avatar || firebaseUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150',
-              role: effectiveRole,
-              activeMode: finalActiveMode,
-              isProfessional: finalIsProfessional,
-              hasProfessionalProfile: finalHasProfessionalProfile,
-              isIdentityVerified: firebaseUser.emailVerified || profileData.isIdentityVerified || false
-            } as UserProfile);
+              ...authenticatedUser,
+              name: authenticatedUser.name || firebaseUser.displayName || 'Usuario CONEXA',
+              email: authenticatedUser.email || firebaseUser.email || '',
+              avatar: authenticatedUser.avatar || firebaseUser.photoURL || '',
+              isIdentityVerified:
+                firebaseUser.emailVerified || authenticatedUser.isIdentityVerified || false,
+            });
+
             setAuthSessionReady(true);
           } else {
             // Firebase Auth configured partially or in local mode
@@ -452,9 +447,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const currentUserQuery = () => firebaseAuth.currentUser
       ? onSnapshot(doc(firestoreDb, 'users', firebaseAuth.currentUser.uid), userDoc => {
           if (!userDoc.exists()) return;
-          const data = userDoc.data() as UserProfile;
-          const updatedCurrentUser = { ...data, id: data.id || userDoc.id };
-          setCurrentUser(previousUser => previousUser ? { ...previousUser, ...updatedCurrentUser, id: firebaseAuth.currentUser!.uid } : updatedCurrentUser);
+          const data = userDoc.data() as Partial<UserProfile>;
+          const firebaseUser = firebaseAuth.currentUser;
+          if (!firebaseUser) return;
+
+          firebaseUser.getIdTokenResult()
+            .then(tokenResult => {
+              const claimRole = (tokenResult.claims.role as Role) || 'USER';
+              setCurrentUser(previousUser => {
+                if (!previousUser) return previousUser;
+                return projectAuthenticatedUser(
+                  { uid: firebaseUser.uid, role: claimRole },
+                  { ...data, id: data.id || userDoc.id },
+                  previousUser,
+                );
+              });
+            })
+            .catch(error => console.warn('[Firestore] Error resolviendo claims del usuario autenticado:', error));
         }, error => console.warn('[Firestore] Error sincronizando usuario autenticado:', error))
       : () => {};
 
