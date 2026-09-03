@@ -48,17 +48,19 @@ service cloud.firestore {
     }
 
     match /public_profiles/{userId} {
-      // Public directory identity projection. Client writes are permanently denied;
-      // the server-side Admin SDK projection is the sole authoritative writer.
       allow read: if isSignedIn();
       allow create, update, delete: if false;
     }
 
     match /public_professional_profiles/{userId} {
-      // Professional catalog projection. This collection contains only the
-      // server-approved public professional contract; clients are read-only.
       allow read: if isSignedIn();
       allow create, update, delete: if false;
+    }
+
+    // Internal RADAR matching projection. It contains ranking data such as
+    // trustScore, so it is intentionally server-only and never client-readable.
+    match /radar_candidates/{userId} {
+      allow read, create, update, delete: if false;
     }
 
     match /service_requests/{requestId} {
