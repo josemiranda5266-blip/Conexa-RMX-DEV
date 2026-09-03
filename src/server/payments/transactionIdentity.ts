@@ -7,10 +7,19 @@
  * drifting toward non-deterministic serviceRequestId queries.
  */
 
+const MAX_QUOTE_ID_LENGTH = 256;
+
+function normalizeQuoteId(quoteId: unknown): string {
+  if (typeof quoteId !== 'string') throw new Error('QUOTE_ID_REQUIRED');
+  const normalizedQuoteId = quoteId.trim();
+  if (!normalizedQuoteId || normalizedQuoteId.length > MAX_QUOTE_ID_LENGTH) {
+    throw new Error('INVALID_QUOTE_ID');
+  }
+  return normalizedQuoteId;
+}
+
 export function getTransactionIdForQuote(quoteId: string): string {
-  const normalizedQuoteId = String(quoteId || '').trim();
-  if (!normalizedQuoteId) throw new Error('QUOTE_ID_REQUIRED');
-  return `txn-${normalizedQuoteId}`;
+  return `txn-${normalizeQuoteId(quoteId)}`;
 }
 
 export function getTransactionIdForAcceptedQuote(acceptedQuoteId: string): string {
