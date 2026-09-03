@@ -1,4 +1,4 @@
-import { collection, onSnapshot, orderBy, query, type Unsubscribe } from 'firebase/firestore';
+import { collection, limit, onSnapshot, orderBy, query, type Unsubscribe } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { ServiceItem } from '../types';
 import type { PublicProfessionalProfile } from '../domain/publicProfessionalProfile';
@@ -91,13 +91,13 @@ export function subscribeToPublicProfessionalProfiles(
   const profilesQuery = query(
     collection(db, 'public_professional_profiles'),
     orderBy('updatedAt', 'desc'),
+    limit(MAX_PROFILES),
   );
 
   return onSnapshot(
     profilesQuery,
     (snapshot) => {
       const profiles = snapshot.docs
-        .slice(0, MAX_PROFILES)
         .map((doc) => normalizeProfile(doc.id, doc.data() as Record<string, unknown>));
       onData(profiles);
     },
