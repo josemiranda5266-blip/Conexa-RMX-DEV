@@ -7,6 +7,7 @@ import {
   type Unsubscribe,
 } from './conversationService';
 import { subscribeToConversationParticipantProfiles } from './conversationParticipantProfileService';
+import type { PublicUserProfile } from '../domain/publicProfile';
 
 export interface ConversationRealtimeState {
   conversations: Conversation[];
@@ -24,16 +25,19 @@ export function subscribeToConversationRealtime(
   onError?: (error: Error) => void,
 ): Unsubscribe {
   let storedConversations: StoredConversation[] = [];
+  let participantProfiles = new Map<string, PublicUserProfile>();
   let profileUnsubscribe: Unsubscribe = () => {};
   const messageUnsubscribers = new Map<string, Unsubscribe>();
   const messages: Record<string, Message[]> = {};
 
-  const publish = (profiles: ReadonlyMap<string, Parameters<typeof toConversationView>[2]>) => {
+  const publish = () => {
     const conversations = storedConversations.map((stored) =>
       toConversationView(
         stored,
         userId,
-        profiles.get(stored.participantIds.find((id) => id !== userId) || stored.participantIds[0]),
+        participantProfiles.get(
+          stored.participantIds.find((id) => id !== userId) || stored.participantIds[0],
+        ),
       ),
     );
 
@@ -46,9 +50,19 @@ export function subscribeToConversationRealtime(
     );
 
     profileUnsubscribe();
+    participantProfiles = new Map();
+
+    if (participantIds.length === 0) {
+      publish();
+      return;
+    }
+
     profileUnsubscribe = subscribeToConversationParticipantProfiles(
       participantIds,
-      (profiles) => publish(profiles),
+      (profiles) => {
+        participantProfiles = new Map(profiles);
+        publish();
+      },
       onError,
     );
   };
@@ -82,7 +96,7 @@ export function subscribeToConversationRealtime(
               ...(message.attachmentUrl ? { attachmentUrl: message.attachmentUrl } : {}),
               ...(message.quoteData ? { quoteData: message.quoteData as Message['quoteData'] } : {}),
             }));
-            refreshProfiles();
+            publish();
           },
           onError,
         ),
@@ -96,6 +110,7 @@ export function subscribeToConversationRealtime(
       storedConversations = nextConversations;
       syncMessages(nextConversations.map((conversation) => conversation.id));
       refreshProfiles();
+      publish();
     },
     onError,
   );
