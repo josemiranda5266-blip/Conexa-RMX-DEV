@@ -7,7 +7,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from '../lib/firebase';
-import type { PublicUserProfile } from '../domain/publicProfile';
+import { toPublicUserProfile, type PublicUserProfile } from '../domain/publicProfile';
 
 const MAX_PROFILE_QUERY_SIZE = 30;
 
@@ -47,15 +47,21 @@ export function subscribeToPublicProfiles(
     (snapshot) => {
       try {
         const profiles = snapshot.docs.map((profileDoc) => {
-          const data = profileDoc.data() as Partial<PublicUserProfile>;
-          return {
+          const data = profileDoc.data();
+          return toPublicUserProfile({
             id: profileDoc.id,
-            name: typeof data.name === 'string' ? data.name : '',
-            avatar: typeof data.avatar === 'string' ? data.avatar : '',
-            profession: typeof data.profession === 'string' ? data.profession : undefined,
-            isIdentityVerified: data.isIdentityVerified === true,
-            isProfessionalVerified: data.isProfessionalVerified === true,
-          } satisfies PublicUserProfile;
+            name: data.name,
+            avatar: data.avatar,
+            professionName: data.professionName,
+            bioPublic: data.bioPublic,
+            location: data.location,
+            isIdentityVerified: data.isIdentityVerified,
+            isProfessionalVerified: data.isProfessionalVerified,
+            rating: data.rating,
+            reviewCount: data.reviewCount,
+            jobsCompleted: data.jobsCompleted,
+            availabilityStatus: data.availabilityStatus,
+          });
         });
         onData(profiles);
       } catch (error) {
