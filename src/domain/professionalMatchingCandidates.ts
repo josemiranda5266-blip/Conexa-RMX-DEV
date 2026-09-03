@@ -19,6 +19,9 @@ export interface ProfessionalCandidateMatchOptions {
   includeUnavailable?: boolean;
 }
 
+const DEFAULT_MATCH_LIMIT = 10;
+const MAX_MATCH_LIMIT = 50;
+
 /**
  * Candidate-only RADAR boundary.
  *
@@ -32,7 +35,10 @@ export function findMatchingProfessionalCandidates(
   opportunity: RadarOpportunityInput,
   options: ProfessionalCandidateMatchOptions = {},
 ): ProfessionalMatch[] {
-  const limit = Math.max(0, Math.floor(options.limit ?? 10));
+  const requestedLimit = options.limit ?? DEFAULT_MATCH_LIMIT;
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.min(MAX_MATCH_LIMIT, Math.max(0, Math.floor(requestedLimit)))
+    : DEFAULT_MATCH_LIMIT;
 
   return candidates
     .filter(isDiscoverableProfessional)
@@ -40,7 +46,12 @@ export function findMatchingProfessionalCandidates(
     .filter(candidate => matchesProfession(candidate, opportunity))
     .filter(candidate => matchesLocation(candidate, opportunity))
     .map(candidate => calculateProfessionalMatchScore(candidate, opportunity))
-    .sort((a, b) => b.matchScore - a.matchScore)
+    .sort((a, b) =>
+      b.matchScore - a.matchScore ||
+      b.candidate.trustScore - a.candidate.trustScore ||
+      b.candidate.rating - a.candidate.rating ||
+      a.candidate.id.localeCompare(b.candidate.id)
+    )
     .slice(0, limit);
 }
 
