@@ -112,7 +112,23 @@ service cloud.firestore {
       }
     }
 
-    match /reports/{reportId} { allow create: if isSignedIn() && request.resource.data.reporterId == request.auth.uid; allow read, update, delete: if isAdmin(); }
+    match /reports/{reportId} {
+      function validReportReason() {
+        return request.resource.data.reason in ['SPAM','ESTAFA','ACOSO','PERFIL_FALSO','SUPLANTACION','INAPROPIADO','OTRO'];
+      }
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['reporterId','reporterName','reportedUserId','reportedUserName','reason','description','createdAt','status'])
+        && request.resource.data.keys().hasAll(['reporterId','reportedUserId','reason','description','createdAt','status'])
+        && request.resource.data.reporterId == request.auth.uid
+        && request.resource.data.reportedUserId is string
+        && request.resource.data.reportedUserId != request.auth.uid
+        && validReportReason()
+        && request.resource.data.description is string
+        && request.resource.data.description.size() > 0
+        && request.resource.data.description.size() <= 2000
+        && request.resource.data.status == 'PENDING';
+      allow read, update, delete: if isAdmin();
+    }
     match /reviews/{reviewId} { allow read: if isSignedIn(); allow create: if false; allow update, delete: if isAdmin(); }
     match /verifications/{verifId} {
       allow create: if false;
