@@ -55,6 +55,10 @@ export function assertReviewEligible(
 ): void {
   if (request.clientId !== clientId) throw new Error('REVIEW_CLIENT_MISMATCH');
   if (request.assignedProfessionalId !== professionalId) throw new Error('REVIEW_PROFESSIONAL_MISMATCH');
+
+  // COMPLETED is accepted for compatibility with requests that have not yet
+  // been advanced to REVIEW_PENDING. REVIEW_PENDING is the canonical state
+  // exposed by the completion lifecycle before the client submits feedback.
   if (request.status !== 'COMPLETED' && request.status !== 'REVIEW_PENDING') {
     throw new Error('REVIEW_SERVICE_NOT_COMPLETED');
   }
@@ -70,6 +74,8 @@ export function buildReviewDocument(
   return {
     id,
     jobId: request.id,
+    serviceRequestId: request.id,
+    authorId: client.id,
     clientId: client.id,
     clientName: client.name || 'Usuario CONEXA',
     clientAvatar: client.avatar || '',
