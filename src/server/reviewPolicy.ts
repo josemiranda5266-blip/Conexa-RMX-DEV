@@ -55,7 +55,7 @@ export function assertReviewEligible(
 ): void {
   if (request.clientId !== clientId) throw new Error('REVIEW_CLIENT_MISMATCH');
   if (request.assignedProfessionalId !== professionalId) throw new Error('REVIEW_PROFESSIONAL_MISMATCH');
-  if (request.status !== 'COMPLETED' && request.status !== 'REVIEW_PENDING' && request.status !== 'CLOSED') {
+  if (request.status !== 'COMPLETED' && request.status !== 'REVIEW_PENDING') {
     throw new Error('REVIEW_SERVICE_NOT_COMPLETED');
   }
 }
