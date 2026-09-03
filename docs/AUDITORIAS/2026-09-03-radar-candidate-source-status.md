@@ -8,36 +8,35 @@ Rama: `integration/conexa-unified`
 
 El repositorio definitivo es `josemiranda5266-blip/Conexa-RMX-DEV`. La rama de trabajo definitiva es `integration/conexa-unified`.
 
-## Estado técnico
+## Estado técnico actual
 
-`src/server/radar/radarCandidateRepository.ts` ya define una fuente server-side con un contrato mínimo `RadarCandidate` y un máximo de 500 documentos.
+La fuente server-side de RADAR está migrada a una proyección interna dedicada:
 
-Sin embargo, la implementación actual todavía lee `users`. Por lo tanto, **no debe considerarse una migración completa de la fuente**. La ganancia actual es de encapsulación y reducción de datos hacia el matcher, no de reducción de lectura en Firestore.
+- `src/server/radar/radarCandidateRepository.ts` consulta `radar_candidates`, no `/users`.
+- El lector mantiene un contrato mínimo `RadarCandidate` y un límite defensivo de 500 documentos.
+- `radar_candidates/{userId}` se sincroniza desde `professionalProfileService.ts` dentro de la misma transacción que actualiza el perfil y la proyección pública.
+- La proyección se construye mediante `toRadarCandidate`, por lo que quedan fuera credenciales, contacto privado, dirección exacta y otros campos ajenos al matching.
+- `trustScore` permanece en la proyección interna y no se expone mediante `public_professional_profiles`.
+- Las reglas de Firestore mantienen `radar_candidates` cerrado al cliente; el acceso queda reservado al backend.
 
-## Próximo diseño correcto
+## Resultado de la migración
 
-La fuente definitiva debe ser una proyección interna específica de RADAR, por ejemplo `radar_candidates`, con solamente:
+La afirmación anterior de que el repositorio todavía leía `users` quedó obsoleta. La migración de **fuente de lectura** ya está implementada.
 
-- identidad pública necesaria para el matching;
-- professionId/professionName;
-- specialties;
-- city/province/approxZone;
-- rating/reviewCount/jobsCompleted;
-- trustScore interno;
-- availabilityStatus;
-- verification flags;
-- avatar.
+Esto elimina una de las principales lecturas innecesarias de `/users` para el RADAR server-side y establece una frontera de datos explícita entre perfil privado, proyección pública y candidato interno de matching.
 
-`trustScore` debe permanecer fuera de las proyecciones públicas.
+## Riesgo residual
 
-La proyección debe actualizarse junto con los cambios relevantes del perfil profesional y de reputación, y el lector RADAR debe consultar esa colección directamente.
+El lector todavía aplica `limit(500)` sin filtros específicos de oportunidad. Esto es una barrera de carga, no una estrategia definitiva de escalabilidad. Antes de producción a gran volumen, el matching server-side debe pasar a consultas acotadas por ubicación/profesión/estado o a una estrategia de particionado/paginación compatible con Firestore.
+
+También queda pendiente integrar esta infraestructura con el endpoint productivo de `/api/radar/match` dentro de `server.ts`, que continúa siendo el principal punto de integración monolítico pendiente.
 
 ## Decisión arquitectónica
 
-No se migrará RADAR directamente a `public_professional_profiles`, porque esa colección está diseñada para consumo público y deliberadamente excluye `trustScore` y otros atributos internos.
+No se utiliza `public_professional_profiles` como fuente de RADAR porque esa colección está diseñada para consumo público y deliberadamente excluye `trustScore` y otros atributos internos.
 
-No se modifica `server.ts` en esta etapa debido a su tamaño y al riesgo de reemplazo incompleto. La integración del endpoint se hará cuando exista una operación de edición segura y completa.
+La fuente interna `radar_candidates` es la frontera canónica para descubrimiento y scoring server-side.
 
 ## Verificación dinámica
 
-No se ejecutaron tests ni build. La validación dinámica queda reservada para la etapa final.
+No se ejecutaron tests ni build. La validación dinámica queda reservada para la etapa final, después de completar las correcciones estructurales pendientes.
