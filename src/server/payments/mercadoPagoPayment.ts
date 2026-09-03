@@ -19,7 +19,7 @@ export async function createMercadoPagoPreference(connection: MercadoPagoOAuthCo
   if (!input.transactionId?.trim()) throw new Error('TRANSACTION_ID_REQUIRED');
   const { token, connection: validConnection } = await accessToken(connection);
   const base = input.appUrl.replace(/\/$/, '');
-  const webhookUrl = `${base}/api/mercadopago/webhook?merchantId=${encodeURIComponent(validConnection.merchantId)}`;
+  const webhookUrl = `${base}/api/mercadopago/webhook?transactionId=${encodeURIComponent(input.transactionId)}`;
   const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
