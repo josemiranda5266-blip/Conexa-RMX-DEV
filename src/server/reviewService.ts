@@ -15,6 +15,7 @@ const REVIEWS_COLLECTION = 'reviews';
 const USERS_COLLECTION = 'users';
 const REQUESTS_COLLECTION = 'service_requests';
 const PUBLIC_PROFESSIONAL_PROFILES_COLLECTION = 'public_professional_profiles';
+const PUBLIC_PROFESSIONAL_PROFILES_COLLECTION = 'public_professional_profiles';
 const RADAR_CANDIDATES_COLLECTION = 'radar_candidates';
 
 export interface SaveReviewResult {
@@ -54,6 +55,8 @@ export async function saveProfessionalReview(
   const reviewRef = db.collection(REVIEWS_COLLECTION).doc(
     buildReviewId(normalizedClientId, normalized.professionalId, normalized.serviceRequestId),
   );
+  const professionalRef = db.collection(USERS_COLLECTION).doc(normalized.professionalId);
+  const publicProfileRef = db.collection(PUBLIC_PROFESSIONAL_PROFILES_COLLECTION).doc(normalized.professionalId);
 
   const result = await db.runTransaction(async (tx: any) => {
     const [requestSnap, clientSnap, professionalSnap, reviewSnap] = await Promise.all([
@@ -61,6 +64,8 @@ export async function saveProfessionalReview(
       tx.get(clientRef),
       tx.get(professionalRef),
       tx.get(reviewRef),
+      tx.get(professionalRef),
+      tx.get(publicProfileRef),
     ]);
 
     if (!requestSnap.exists) throw new Error('SERVICE_REQUEST_NOT_FOUND');
@@ -69,6 +74,7 @@ export async function saveProfessionalReview(
     if (reviewSnap.exists) {
       return { review: reviewSnap.data() as Review, created: false };
     }
+    if (!professionalSnap.exists) throw new Error('PROFESSIONAL_NOT_FOUND');
 
     const request = requestSnap.data() as ServiceRequest;
     const client = clientSnap.data() as { id?: string; name?: string; avatar?: string; isBlocked?: boolean };
