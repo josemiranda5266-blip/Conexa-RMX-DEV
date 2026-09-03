@@ -2,6 +2,8 @@ import { createHash } from 'crypto';
 import { getAdminDb } from './firebaseAdmin.js';
 import type { Review, ServiceRequest } from '../types.js';
 import { calculateUpdatedReputation } from './reputationService.js';
+import { buildPublicProfessionalProfileDocument } from './publicProfessionalProfileProjection.js';
+import { buildRadarCandidateProjection } from './radar/radarCandidateProjection.js';
 import {
   assertReviewEligible,
   buildReviewDocument,
@@ -13,6 +15,7 @@ const REVIEWS_COLLECTION = 'reviews';
 const USERS_COLLECTION = 'users';
 const REQUESTS_COLLECTION = 'service_requests';
 const PUBLIC_PROFESSIONAL_PROFILES_COLLECTION = 'public_professional_profiles';
+const RADAR_CANDIDATES_COLLECTION = 'radar_candidates';
 
 export interface SaveReviewResult {
   review: Review;
@@ -47,16 +50,16 @@ export async function saveProfessionalReview(
   const clientRef = db.collection(USERS_COLLECTION).doc(normalizedClientId);
   const professionalRef = db.collection(USERS_COLLECTION).doc(normalized.professionalId);
   const publicProfileRef = db.collection(PUBLIC_PROFESSIONAL_PROFILES_COLLECTION).doc(normalized.professionalId);
+  const radarCandidateRef = db.collection(RADAR_CANDIDATES_COLLECTION).doc(normalized.professionalId);
   const reviewRef = db.collection(REVIEWS_COLLECTION).doc(
     buildReviewId(normalizedClientId, normalized.professionalId, normalized.serviceRequestId),
   );
 
   const result = await db.runTransaction(async (tx: any) => {
-    const [requestSnap, clientSnap, professionalSnap, publicProfileSnap, reviewSnap] = await Promise.all([
+    const [requestSnap, clientSnap, professionalSnap, reviewSnap] = await Promise.all([
       tx.get(requestRef),
       tx.get(clientRef),
       tx.get(professionalRef),
-      tx.get(publicProfileRef),
       tx.get(reviewRef),
     ]);
 
@@ -92,11 +95,24 @@ export async function saveProfessionalReview(
       review.overallRating,
     );
     const reputationUpdate = { rating, reviewCount };
+    const updatedProfessional = {
+      id: normalized.professionalId,
+      ...professional,
+      ...reputationUpdate,
+    };
+    const publicProfile = buildPublicProfessionalProfileDocument(updatedProfessional);
+    const radarCandidate = buildRadarCandidateProjection(updatedProfessional as any);
 
     tx.create(reviewRef, review);
     tx.update(professionalRef, reputationUpdate);
-    if (publicProfileSnap.exists) {
-      tx.update(publicProfileRef, reputationUpdate);
+    tx.set(publicProfileRef, {
+      ...publicProfile,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+    if (radarCandidate) {
+      tx.set(radarCandidateRef, radarCandidate, { merge: true });
+    } else {
+      tx.delete(radarCandidateRef);
     }
 
     return { review, created: true };
