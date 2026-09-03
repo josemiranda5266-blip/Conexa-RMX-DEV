@@ -1,9 +1,6 @@
 import { getAdminDb } from './firebaseAdmin.js';
 import { normalizeProfessionalProfileWrite, type ProfessionalProfileWriteInput } from './professionalProfilePolicy.js';
-import {
-  syncPublicProfessionalProfileFromUser,
-  type PublicProfessionalProfileSource,
-} from './publicProfessionalProfileProjection.js';
+import { buildPublicProfessionalProfileDocument } from './publicProfessionalProfileProjection.js';
 
 export type ProfessionalProfilePersistenceResult = {
   user: Record<string, unknown>;
@@ -13,7 +10,6 @@ export async function persistProfessionalProfile(
   userId: string,
   input: ProfessionalProfileWriteInput,
 ): Promise<ProfessionalProfilePersistenceResult> {
-  const normalized = normalizeProfessionalProfileWrite(input);
   const db = getAdminDb();
   const userRef = db.collection('users').doc(userId);
   const userSnap = await userRef.get();
@@ -31,14 +27,20 @@ export async function persistProfessionalProfile(
     throw error;
   }
 
+  const normalized = normalizeProfessionalProfileWrite(
+    input,
+    typeof existing.name === 'string' ? existing.name : '',
+  );
+
   const profile = {
     professionId: normalized.professionId || null,
     professionName: normalized.professionName,
-    businessName: normalized.businessName || `${normalized.professionName} ${(existing.name || 'Profesional').toString().split(/\s+/)[0]}`,
+    businessName: normalized.businessName,
     specialties: normalized.specialties,
     description: normalized.description,
     workZoneRadiusKm: normalized.workZoneRadiusKm,
     workingHours: normalized.workingHours,
+    workHours: normalized.workingHours,
     matriculaOrDegree: normalized.matriculaOrDegree,
     hourlyRateArs: normalized.hourlyRateArs,
     servicesOffered: normalized.servicesOffered,
@@ -49,11 +51,16 @@ export async function persistProfessionalProfile(
     availabilityStatus: existing.availabilityStatus || 'DISPONIBLE',
   };
 
-  await userRef.set(profile, { merge: true });
-  const updatedSnap = await userRef.get();
-  const updatedUser = { id: userId, ...(updatedSnap.data() || {}) } as Record<string, unknown>;
+  const updatedUser = { id: userId, ...existing, ...profile } as Record<string, unknown>;
+  const publicDocument = buildPublicProfessionalProfileDocument(updatedUser as any);
 
-  await syncPublicProfessionalProfileFromUser(updatedUser as PublicProfessionalProfileSource);
+  await db.runTransaction(async (tx: any) => {
+    tx.set(userRef, profile, { merge: true });
+    tx.set(db.collection('public_professional_profiles').doc(userId), {
+      ...publicDocument,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  });
 
   return { user: updatedUser };
 }
