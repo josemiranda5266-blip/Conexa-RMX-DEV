@@ -1,19 +1,16 @@
 import type { UserProfile } from '../types';
-import { normalizeProfessionalCandidate, type ProfessionalCandidate } from '../domain/professionalMatching';
+import { toRadarCandidate, type RadarCandidate } from '../domain/radarCandidate';
 
 /**
  * Transitional RADAR candidate provider.
  *
- * The matching engine consumes only ProfessionalCandidate. This adapter is the
- * current bridge while AppContext still owns the legacy `/users` collection.
- * It deliberately drops every UserProfile field that is not part of the
- * matching contract.
- *
- * Future production migration can replace this implementation with a scoped
- * backend candidate query without changing the matching engine API.
+ * The source is still the legacy /users collection, but the privacy boundary
+ * is now explicit: callers receive only RadarCandidate projections. The
+ * implementation can later be replaced by a scoped backend query without
+ * changing the matching contract.
  */
-export function buildRadarCandidates(users: UserProfile[]): ProfessionalCandidate[] {
+export function buildRadarCandidates(users: UserProfile[]): RadarCandidate[] {
   return users
-    .map(normalizeProfessionalCandidate)
-    .filter((candidate): candidate is ProfessionalCandidate => candidate !== null);
+    .map(toRadarCandidate)
+    .filter((candidate): candidate is RadarCandidate => candidate !== null);
 }
