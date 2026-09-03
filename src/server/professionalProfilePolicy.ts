@@ -79,7 +79,7 @@ function normalizeServices(value: unknown): ServiceItem[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value) || value.length > MAX_SERVICES) throw new Error('INVALID_SERVICES');
 
-  return value.map((item) => {
+  return value.map((item, index) => {
     if (typeof item !== 'object' || item === null) throw new Error('INVALID_SERVICES');
     const candidate = item as Record<string, unknown>;
     const title = validateString(candidate.title, MAX_SERVICE_TITLE_LENGTH, 'INVALID_SERVICES');
@@ -94,7 +94,7 @@ function normalizeServices(value: unknown): ServiceItem[] {
     }
 
     return {
-      id: id || crypto.randomUUID(),
+      id: id || `service-${index + 1}`,
       title,
       description,
       ...(approxPriceArs !== undefined ? { approxPriceArs } : {}),
