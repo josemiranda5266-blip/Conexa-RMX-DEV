@@ -31,18 +31,20 @@ async function readOrCreateCheckpoint(
   userId: string,
 ): Promise<AccountDeletionCheckpoint> {
   const ref = checkpointRef(db, userId);
-  const snapshot = await ref.get();
-  if (snapshot.exists) return snapshot.data() as AccountDeletionCheckpoint;
+  return db.runTransaction(async (tx: any) => {
+    const snapshot = await tx.get(ref);
+    if (snapshot.exists) return snapshot.data() as AccountDeletionCheckpoint;
 
-  const timestamp = now();
-  const checkpoint: AccountDeletionCheckpoint = {
-    userId,
-    stage: 'REQUESTED',
-    requestedAt: timestamp,
-    updatedAt: timestamp,
-  };
-  await ref.create(checkpoint);
-  return checkpoint;
+    const timestamp = now();
+    const checkpoint: AccountDeletionCheckpoint = {
+      userId,
+      stage: 'REQUESTED',
+      requestedAt: timestamp,
+      updatedAt: timestamp,
+    };
+    tx.create(ref, checkpoint);
+    return checkpoint;
+  });
 }
 
 async function advanceStage(
@@ -110,8 +112,8 @@ async function cleanupFirestore(db: AccountDeletionServiceDb, userId: string): P
     await batch.commit();
   }
 
-  // Anonymize ownership on commercial records instead of deleting financial
-  // history. This keeps transaction/request/review auditability intact.
+  // Anonymize client ownership on commercial records instead of deleting
+  // financial history. This keeps transaction/request/review auditability intact.
   for (const collectionName of ['service_requests', 'transactions', 'reviews']) {
     const snapshot = await db.collection(collectionName).where('clientId', '==', userId).get();
     for (let offset = 0; offset < snapshot.docs.length; offset += BATCH_SIZE) {
@@ -124,6 +126,48 @@ async function cleanupFirestore(db: AccountDeletionServiceDb, userId: string): P
       });
       await batch.commit();
     }
+  }
+
+  // Remove professional identity from mutable service-request assignment data.
+  // Historical financial records retain the opaque professional reference for
+  // auditability, while public projections are already deleted above.
+  for (const fieldName of ['assignedProfessionalId']) {
+    const snapshot = await db.collection('service_requests').where(fieldName, '==', userId).get();
+    for (let offset = 0; offset < snapshot.docs.length; offset += BATCH_SIZE) {
+      const batch = db.batch();
+      snapshot.docs.slice(offset, offset + BATCH_SIZE).forEach((doc: any) => {
+        batch.update(doc.ref, {
+          assignedProfessionalId: 'DELETED_PROFESSIONAL',
+        });
+      });
+      await batch.commit();
+    }
+  }
+
+  // Remove deleted professionals from candidate/bidding arrays where present.
+  const biddingSnapshot = await db.collection('service_requests').where('biddingProfessionalIds', 'array-contains', userId).get();
+  for (let offset = 0; offset < biddingSnapshot.docs.length; offset += BATCH_SIZE) {
+    const batch = db.batch();
+    biddingSnapshot.docs.slice(offset, offset + BATCH_SIZE).forEach((doc: any) => {
+      const data = doc.data() as { biddingProfessionalIds?: unknown };
+      const ids = Array.isArray(data.biddingProfessionalIds)
+        ? data.biddingProfessionalIds.filter((id) => id !== userId)
+        : [];
+      batch.update(doc.ref, { biddingProfessionalIds: ids });
+    });
+    await batch.commit();
+  }
+
+  // Preserve verified review evidence but anonymize the professional reference
+  // if the account owner is deleted, preventing the deleted UID from remaining
+  // as a live identity in mutable documents.
+  const professionalReviews = await db.collection('reviews').where('professionalId', '==', userId).get();
+  for (let offset = 0; offset < professionalReviews.docs.length; offset += BATCH_SIZE) {
+    const batch = db.batch();
+    professionalReviews.docs.slice(offset, offset + BATCH_SIZE).forEach((doc: any) => {
+      batch.update(doc.ref, { professionalId: 'DELETED_PROFESSIONAL' });
+    });
+    await batch.commit();
   }
 }
 
