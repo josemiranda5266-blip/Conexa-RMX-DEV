@@ -1,30 +1,28 @@
-# Auditoría — reputación y cierre transaccional de Reviews
+# Auditoría — reputación transaccional
 
 Fecha: 2026-09-03
 Rama definitiva: `integration/conexa-unified`
 
 ## Corrección aplicada
 
-`src/server/reviewService.ts` ahora realiza dentro de una única transacción Firestore:
+Se endureció `src/server/reviewService.ts`.
 
-- lectura del `ServiceRequest`;
-- lectura del cliente autenticado;
-- lectura del profesional;
-- lectura del Review determinístico;
-- lectura de la transacción financiera asociada, cuando existe;
-- creación idempotente de la Review;
-- actualización autoritativa de `rating` y `reviewCount` del profesional;
-- actualización de `public_professional_profiles`;
-- actualización de `radar_candidates`;
-- cierre del `ServiceRequest` en `CLOSED`;
-- transición financiera `SERVICE_COMPLETED -> REVIEW_COMPLETED` cuando corresponde.
+La creación autoritativa de una reseña ahora:
 
-Las transiciones financieras `REFUNDED`, `CHARGEBACK` y `SETTLED` no son sobrescritas.
+- verifica que el profesional exista;
+- rechaza profesionales bloqueados;
+- calcula `rating` y `reviewCount` dentro de la misma transacción que crea la reseña;
+- actualiza la cuenta profesional autoritativa;
+- actualiza, si existe, `public_professional_profiles/{professionalId}`;
+- no persiste el campo interno `changed` del helper de cálculo.
 
-## Hallazgo importante
+## Garantía
 
-La agregación de reputación usa el acumulado actual del perfil. Esto es correcto para un modelo donde Reviews son inmutables para clientes y los cambios/borrados administrativos son excepcionales. Si en el futuro se permiten editar/eliminar Reviews, será necesario recalcular agregados desde Reviews o implementar una compensación transaccional.
+Una reseña creada mediante el servicio autoritativo no puede dejar separados los agregados de la cuenta profesional y su proyección pública, salvo que la proyección pública no exista, caso en el cual la cuenta canónica sigue siendo la fuente de verdad.
 
-## Estado pendiente
+## Pendientes
 
-Todavía falta integrar la ruta HTTP al runtime principal y sustituir el escritor legacy del `AppContext`. Sin esas dos integraciones, la arquitectura nueva no es aún el único camino efectivo.
+- Registrar el endpoint en el runtime principal.
+- Migrar `ReviewModal` y `AppContext.addReview()`.
+- Definir política completa para recalcular reputación ante moderación o eliminación de una reseña.
+- Revisar la anonimización de reseñas durante eliminación de cuenta para preservar consistencia histórica de agregados.
