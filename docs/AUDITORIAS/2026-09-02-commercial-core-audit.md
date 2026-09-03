@@ -35,6 +35,7 @@
 - Reserva del OAuth nonce endurecida: `reserveOAuthState` ahora usa transacción + `tx.create`, evitando sobrescribir una reserva existente para el mismo nonce.
 - Handler modular de webhook endurecido para derivar el `merchantId` desde el `professionalId` de la transacción referenciada por `transactionId`, en lugar de confiar en un `merchantId` aportado por el emisor de la notificación.
 - Modelo `ServiceRequest` preparado para persistir `acceptedQuoteId`, formalizando la relación explícita entre solicitud y cotización ganadora.
+- `notification_url` del checkout modular de Mercado Pago corregida para transportar `transactionId`, alineándose con el handler modular que resuelve el comercio desde la transacción y evitando depender de un `merchantId` enviado por la notificación.
 
 ## Descubrimientos — OAuth y webhook
 
@@ -61,6 +62,8 @@ Se corrigió `reserveOAuthState` para que la reserva del nonce sea create-only m
 Existe un handler modular en `src/server/payments/mercadoPagoWebhook.ts` y un handler inline dentro de `server.ts`. El modular delega en `reconcileMercadoPagoPayment` y utiliza la validación de firma modular.
 
 `src/server/payments/registerMercadoPagoWebhookRoute.ts` encapsula el registro de la ruta. Además, el checkout actual construye `notification_url` con `transactionId`, por lo que el handler modular fue ajustado para resolver el comercio desde la transacción propietaria y no desde un `merchantId` controlable por la notificación.
+
+**Corrección aplicada:** `src/server/payments/mercadoPagoPayment.ts` ahora genera `notification_url=/api/mercadopago/webhook?transactionId={txnId}`. Antes enviaba `merchantId`, que no coincidía con el contrato del handler modular.
 
 **Riesgo actual:** el servidor principal todavía conserva su implementación inline, por lo que el handler modular no es aún la única autoridad efectiva.
 
@@ -124,6 +127,7 @@ La ruta `/api/user/delete-account` verifica autenticación y limita la operació
 - Se endureció la reserva modular del OAuth nonce con creación transaccional no sobrescribible.
 - Se endureció el reconciliador modular para conservar el estado financiero del proveedor sin degradar automáticamente el estado comercial avanzado.
 - Se endureció el handler modular de webhook para derivar el comercio desde la transacción referenciada.
+- Se corrigió el `notification_url` del checkout modular para enviar `transactionId`, alineándolo con el contrato del webhook modular.
 - Se registró el riesgo de consistencia de la eliminación de cuenta y se dejó pendiente una refactorización segura/idempotente.
 
 ### Próxima tarea prioritaria
