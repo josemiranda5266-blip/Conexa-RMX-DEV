@@ -56,7 +56,7 @@ function normalizePortfolioImages(value: unknown): string[] {
   return normalizeStringList(value, 20, 2048).filter((url) => {
     try {
       const parsed = new URL(url);
-      return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+      return parsed.protocol === 'https:';
     } catch {
       return false;
     }
