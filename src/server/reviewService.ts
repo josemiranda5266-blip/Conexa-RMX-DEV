@@ -1,8 +1,6 @@
 import { createHash } from 'crypto';
 import { getAdminDb } from './firebaseAdmin.js';
 import type { Review, ServiceRequest } from '../types.js';
-import { buildPublicProfessionalProfileDocument } from './publicProfessionalProfileProjection.js';
-import { buildRadarCandidateProjection } from './radar/radarCandidateProjection.js';
 import {
   assertReviewEligible,
   buildReviewDocument,
@@ -13,9 +11,7 @@ import {
 const REVIEWS_COLLECTION = 'reviews';
 const USERS_COLLECTION = 'users';
 const REQUESTS_COLLECTION = 'service_requests';
-const PUBLIC_PROFILES_COLLECTION = 'public_professional_profiles';
-const RADAR_CANDIDATES_COLLECTION = 'radar_candidates';
-const TRANSACTIONS_COLLECTION = 'transactions';
+const PUBLIC_PROFESSIONAL_PROFILES_COLLECTION = 'public_professional_profiles';
 
 export interface SaveReviewResult {
   review: Review;
@@ -27,21 +23,30 @@ function buildReviewId(clientId: string, professionalId: string, serviceRequestI
   return `REV-${createHash('sha256').update(seed).digest('hex').slice(0, 40)}`;
 }
 
-function calculateRating(existing: Record<string, unknown>, nextRating: number): { rating: number; reviewCount: number } {
-  const previousCountRaw = Number(existing.reviewCount);
-  const previousRatingRaw = Number(existing.rating);
-  const normalizedPreviousCount = Number.isFinite(previousCountRaw)
-    ? Math.max(0, Math.trunc(previousCountRaw))
-    : 0;
-  const previousRating = Number.isFinite(previousRatingRaw)
-    ? Math.max(0, Math.min(5, previousRatingRaw))
-    : 0;
-  const reviewCount = normalizedPreviousCount + 1;
-  const rating = reviewCount === 1
-    ? nextRating
-    : Math.round((((previousRating * normalizedPreviousCount) + nextRating) / reviewCount) * 10) / 10;
+function isAlreadyExists(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { code?: unknown; status?: unknown; message?: unknown };
+  return candidate.code === 6 || candidate.code === '6' || candidate.code === 'ALREADY_EXISTS' ||
+    candidate.status === 6 || candidate.status === 'ALREADY_EXISTS' ||
+    (typeof candidate.message === 'string' && /already exists|already-exists|ALREADY_EXISTS/i.test(candidate.message));
+}
 
-  return { rating, reviewCount };
+function normalizeAggregate(value: unknown): { rating: number; reviewCount: number } {
+  const source = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const rating = Number(source.rating);
+  const reviewCount = Number(source.reviewCount);
+  return {
+    rating: Number.isFinite(rating) && rating >= 0 ? rating : 0,
+    reviewCount: Number.isFinite(reviewCount) && reviewCount >= 0 ? Math.floor(reviewCount) : 0,
+  };
+}
+
+function nextAggregate(current: { rating: number; reviewCount: number }, rating: number) {
+  const reviewCount = current.reviewCount + 1;
+  return {
+    rating: Number(((current.rating * current.reviewCount + rating) / reviewCount).toFixed(2)),
+    reviewCount,
+  };
 }
 
 export async function saveProfessionalReview(
@@ -58,41 +63,30 @@ export async function saveProfessionalReview(
   const requestRef = db.collection(REQUESTS_COLLECTION).doc(normalized.serviceRequestId);
   const clientRef = db.collection(USERS_COLLECTION).doc(normalizedClientId);
   const professionalRef = db.collection(USERS_COLLECTION).doc(normalized.professionalId);
+  const publicProfileRef = db.collection(PUBLIC_PROFESSIONAL_PROFILES_COLLECTION).doc(normalized.professionalId);
   const reviewRef = db.collection(REVIEWS_COLLECTION).doc(
     buildReviewId(normalizedClientId, normalized.professionalId, normalized.serviceRequestId),
   );
-  const publicProfileRef = db.collection(PUBLIC_PROFILES_COLLECTION).doc(normalized.professionalId);
-  const radarCandidateRef = db.collection(RADAR_CANDIDATES_COLLECTION).doc(normalized.professionalId);
-  const transactionsQuery = db.collection(TRANSACTIONS_COLLECTION)
-    .where('serviceRequestId', '==', normalized.serviceRequestId)
-    .limit(1);
 
-  return db.runTransaction(async (tx: any) => {
-    const [requestSnap, clientSnap, professionalSnap, reviewSnap, publicProfileSnap, transactionSnap] = await Promise.all([
+  const result = await db.runTransaction(async (tx: any) => {
+    const [requestSnap, clientSnap, professionalSnap, publicProfileSnap, reviewSnap] = await Promise.all([
       tx.get(requestRef),
       tx.get(clientRef),
       tx.get(professionalRef),
-      tx.get(reviewRef),
       tx.get(publicProfileRef),
-      tx.get(transactionsQuery),
+      tx.get(reviewRef),
     ]);
 
     if (!requestSnap.exists) throw new Error('SERVICE_REQUEST_NOT_FOUND');
     if (!clientSnap.exists) throw new Error('USER_NOT_FOUND');
     if (!professionalSnap.exists) throw new Error('PROFESSIONAL_NOT_FOUND');
-
-    // Firestore transactions retry automatically on concurrent writes. If a retry
-    // sees the deterministic review document, this becomes an idempotent no-op.
     if (reviewSnap.exists) {
       return { review: reviewSnap.data() as Review, created: false };
     }
 
     const request = requestSnap.data() as ServiceRequest;
     const client = clientSnap.data() as { id?: string; name?: string; avatar?: string; isBlocked?: boolean };
-    const professional = professionalSnap.data() as Record<string, unknown>;
-
     if (client.isBlocked === true) throw new Error('USER_BLOCKED');
-    if (professional.isBlocked === true) throw new Error('PROFESSIONAL_BLOCKED');
 
     assertReviewEligible(request, normalizedClientId, normalized.professionalId);
 
@@ -104,61 +98,19 @@ export async function saveProfessionalReview(
       new Date().toISOString(),
     );
 
-    const aggregate = calculateRating(professional, normalized.overallRating);
-    const updatedProfessional = {
-      ...professional,
-      id: normalized.professionalId,
-      rating: aggregate.rating,
-      reviewCount: aggregate.reviewCount,
-    };
-    const publicDocument = buildPublicProfessionalProfileDocument(updatedProfessional as any);
-    const radarCandidate = buildRadarCandidateProjection(updatedProfessional as any);
+    const aggregateSource = publicProfileSnap.exists ? publicProfileSnap.data() : professionalSnap.data();
+    const aggregate = nextAggregate(normalizeAggregate(aggregateSource), review.overallRating);
 
     tx.create(reviewRef, review);
-    tx.set(professionalRef, {
-      rating: aggregate.rating,
-      reviewCount: aggregate.reviewCount,
-    }, { merge: true });
-
-    // Do not create a public profile as a side effect of reviewing a professional
-    // who has no public projection yet. If it exists, keep its public contract in sync.
+    tx.update(professionalRef, aggregate);
     if (publicProfileSnap.exists) {
-      tx.set(publicProfileRef, {
-        ...publicDocument,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-    }
-
-    if (radarCandidate) {
-      tx.set(radarCandidateRef, radarCandidate, { merge: true });
-    } else {
-      tx.delete(radarCandidateRef);
-    }
-
-    // Keep the request lifecycle canonical: REVIEW_PENDING is the state that
-    // explicitly grants the client the review action. A review closes it.
-    // A verified review closes the commercial request. For payment-backed jobs,
-    // advance only SERVICE_COMPLETED -> REVIEW_COMPLETED. Never overwrite
-    // REFUNDED, CHARGEBACK or SETTLED states.
-    tx.update(requestRef, {
-      status: 'CLOSED',
-      reviewCompletedAt: review.createdAt,
-      reviewId: review.id,
-    });
-
-    if (!transactionSnap.empty) {
-      const transactionDoc = transactionSnap.docs[0];
-      const transactionData = transactionDoc.data() as { status?: string };
-      if (transactionData.status === 'SERVICE_COMPLETED') {
-        tx.update(transactionDoc.ref, {
-          status: 'REVIEW_COMPLETED',
-          reviewCompletedAt: review.createdAt,
-        });
-      }
+      tx.update(publicProfileRef, aggregate);
     }
 
     return { review, created: true };
   });
+
+  return result;
 }
 
 export function reviewIdForService(
@@ -167,4 +119,8 @@ export function reviewIdForService(
   serviceRequestId: string,
 ): string {
   return buildReviewId(clientId, professionalId, serviceRequestId);
+}
+
+export function isReviewAlreadyExistsError(error: unknown): boolean {
+  return isAlreadyExists(error);
 }
