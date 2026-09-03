@@ -5,6 +5,7 @@ import {
   normalizeRadarOpportunityWrite,
   type RadarOpportunityWriteInput,
 } from './radarOpportunityPolicy.js';
+import { buildRadarOpportunityIdentity } from './radarOpportunityIdentity.js';
 import type { RadarOpportunity } from '../../types.js';
 import type { RadarCandidate } from '../../domain/radarCandidate.js';
 
@@ -29,6 +30,29 @@ export interface PersistedRadarOpportunity extends RadarOpportunity {
   idempotencyKey: string;
 }
 
+function getOpportunityIdentityIds(
+  normalized: ReturnType<typeof normalizeRadarOpportunityWrite>,
+  idempotencyKey: string,
+): string[] {
+  const identity = buildRadarOpportunityIdentity({
+    sourceType: normalized.sourceType,
+    externalReference: normalized.externalReference,
+    source: normalized.source,
+    description: normalized.description,
+    city: normalized.city,
+    province: normalized.province,
+  });
+
+  const currentServiceId = buildOpportunityId(normalized.sourceType, idempotencyKey);
+  const ids = [identity.canonicalId, currentServiceId];
+
+  if (identity.legacyExternalReferenceId) {
+    ids.push(identity.legacyExternalReferenceId);
+  }
+
+  return [...new Set(ids)];
+}
+
 export async function persistRadarOpportunity(
   input: RadarOpportunityWriteInput,
   matchedProfessionals: RadarOpportunity['matchedProfessionals'] = [],
@@ -45,20 +69,22 @@ export async function persistRadarOpportunity(
 ): Promise<{ opportunity: PersistedRadarOpportunity; created: boolean }> {
   const normalized = normalizeRadarOpportunityWrite(input);
   const idempotencyKey = stableIdempotencyKey(normalized);
-  const opportunityId = buildOpportunityId(normalized.sourceType, idempotencyKey);
-  const ref = db.collection(OPPORTUNITY_COLLECTION).doc(opportunityId);
-  const existingSnapshot = await ref.get();
+  const identityIds = getOpportunityIdentityIds(normalized, idempotencyKey);
+  const canonicalId = identityIds[0];
 
-  if (existingSnapshot.exists) {
-    return {
-      opportunity: existingSnapshot.data() as PersistedRadarOpportunity,
-      created: false,
-    };
+  for (const id of identityIds) {
+    const existingSnapshot = await db.collection(OPPORTUNITY_COLLECTION).doc(id).get();
+    if (existingSnapshot.exists) {
+      return {
+        opportunity: existingSnapshot.data() as PersistedRadarOpportunity,
+        created: false,
+      };
+    }
   }
 
   const timestamp = now();
   const opportunity: PersistedRadarOpportunity = {
-    id: opportunityId,
+    id: canonicalId,
     ...normalized,
     matchedProfessionals,
     matchingStatus: matchedProfessionals.length > 0 ? 'COMPLETED' : 'NOT_RUN',
@@ -69,17 +95,21 @@ export async function persistRadarOpportunity(
     idempotencyKey,
   };
 
+  const ref = db.collection(OPPORTUNITY_COLLECTION).doc(canonicalId);
+
   try {
     await ref.create(opportunity);
     return { opportunity, created: true };
   } catch (error: any) {
     if (error?.code === 6 || error?.code === '6' || error?.code === 'ALREADY_EXISTS') {
-      const concurrentSnapshot = await ref.get();
-      if (concurrentSnapshot.exists) {
-        return {
-          opportunity: concurrentSnapshot.data() as PersistedRadarOpportunity,
-          created: false,
-        };
+      for (const id of identityIds) {
+        const concurrentSnapshot = await db.collection(OPPORTUNITY_COLLECTION).doc(id).get();
+        if (concurrentSnapshot.exists) {
+          return {
+            opportunity: concurrentSnapshot.data() as PersistedRadarOpportunity,
+            created: false,
+          };
+        }
       }
     }
     throw error;
