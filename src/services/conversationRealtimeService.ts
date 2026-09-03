@@ -30,15 +30,27 @@ export function subscribeToConversationRealtime(
 
   const publish = (profiles: ReadonlyMap<string, Parameters<typeof toConversationView>[2]>) => {
     const conversations = storedConversations.map((stored) =>
-      toConversationView(stored, userId, profiles.get(
-        stored.participantIds.find((id) => id !== userId) || stored.participantIds[0],
-      )),
+      toConversationView(
+        stored,
+        userId,
+        profiles.get(stored.participantIds.find((id) => id !== userId) || stored.participantIds[0]),
+      ),
     );
 
-    onState({
-      conversations,
-      messages: { ...messages },
-    });
+    onState({ conversations, messages: { ...messages } });
+  };
+
+  const refreshProfiles = () => {
+    const participantIds = Array.from(
+      new Set(storedConversations.flatMap((conversation) => conversation.participantIds)),
+    );
+
+    profileUnsubscribe();
+    profileUnsubscribe = subscribeToConversationParticipantProfiles(
+      participantIds,
+      (profiles) => publish(profiles),
+      onError,
+    );
   };
 
   const syncMessages = (conversationIds: string[]) => {
@@ -64,13 +76,13 @@ export function subscribeToConversationRealtime(
               conversationId: message.conversationId,
               senderId: message.senderId,
               senderName: message.senderName,
-              createdAt: message.createdAt,
+              createdAt: message.createdAt?.toDate().toISOString() || new Date(0).toISOString(),
               type: message.type,
               content: message.content,
               ...(message.attachmentUrl ? { attachmentUrl: message.attachmentUrl } : {}),
-              ...(message.quoteData ? { quoteData: message.quoteData } : {}),
+              ...(message.quoteData ? { quoteData: message.quoteData as Message['quoteData'] } : {}),
             }));
-            void publishProfiles();
+            refreshProfiles();
           },
           onError,
         ),
@@ -78,25 +90,12 @@ export function subscribeToConversationRealtime(
     });
   };
 
-  const publishProfiles = async () => {
-    const participantIds = Array.from(
-      new Set(storedConversations.flatMap((conversation) => conversation.participantIds)),
-    );
-
-    profileUnsubscribe();
-    profileUnsubscribe = subscribeToConversationParticipantProfiles(
-      participantIds,
-      (profiles) => publish(profiles),
-      onError,
-    );
-  };
-
   const unsubscribeConversations = subscribeToUserConversations(
     userId,
     (nextConversations) => {
       storedConversations = nextConversations;
       syncMessages(nextConversations.map((conversation) => conversation.id));
-      void publishProfiles();
+      refreshProfiles();
     },
     onError,
   );
