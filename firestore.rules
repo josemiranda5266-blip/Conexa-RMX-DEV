@@ -48,9 +48,15 @@ service cloud.firestore {
     }
 
     match /public_profiles/{userId} {
-      // Public directory data is readable only to authenticated CONEXA users.
-      // Client writes are permanently denied; the server-side Admin SDK projection
-      // is the sole authoritative writer and bypasses Firestore client rules.
+      // Public directory identity projection. Client writes are permanently denied;
+      // the server-side Admin SDK projection is the sole authoritative writer.
+      allow read: if isSignedIn();
+      allow create, update, delete: if false;
+    }
+
+    match /public_professional_profiles/{userId} {
+      // Professional catalog projection. This collection contains only the
+      // server-approved public professional contract; clients are read-only.
       allow read: if isSignedIn();
       allow create, update, delete: if false;
     }
