@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { verifyUserAuthToken } from '../auth.js';
+import { verifyAuthToken } from '../auth.js';
 import { createServiceRequestFromRadarOpportunity } from './radarOpportunityConversionService.js';
 
 export async function handleRadarOpportunityConversion(
@@ -7,15 +7,15 @@ export async function handleRadarOpportunityConversion(
   res: Response,
 ): Promise<void> {
   try {
-    const user = await verifyUserAuthToken(req);
-    if (!user?.uid) {
-      res.status(401).json({ error: 'No autenticado' });
+    const auth = await verifyAuthToken(req);
+    if (!auth.isAuthenticated) {
+      res.status(401).json({ error: auth.errorReason });
       return;
     }
 
     const opportunityId = String(req.params.opportunityId || '').trim();
     if (!opportunityId) {
-      res.status(400).json({ error: 'ID de oportunidad requerido' });
+      res.status(400).json({ error: 'INVALID_RADAR_OPPORTUNITY_ID' });
       return;
     }
 
@@ -32,7 +32,7 @@ export async function handleRadarOpportunityConversion(
 
     const result = await createServiceRequestFromRadarOpportunity({
       opportunityId,
-      clientUserId: user.uid,
+      clientUserId: auth.userId,
       professionalId,
       preferredDate,
       preferredTimeSlot,
@@ -43,7 +43,7 @@ export async function handleRadarOpportunityConversion(
     const code = typeof error?.message === 'string' ? error.message : 'RADAR_CONVERSION_FAILED';
 
     const status =
-      code === 'No autenticado' ? 401 :
+      code.startsWith('INVALID_') ? 400 :
       code.includes('NOT_FOUND') ? 404 :
       code.includes('CLIENT_MISMATCH') ||
       code.includes('CLIENT_BLOCKED') ||
@@ -53,7 +53,6 @@ export async function handleRadarOpportunityConversion(
       code.includes('PROFESSIONAL_BLOCKED') ||
       code.includes('PROFESSIONAL_NOT_VERIFIED') ||
       code.includes('PROFESSIONAL_UNAVAILABLE') ? 409 :
-      code.includes('INVALID_') ? 400 :
       code.includes('INCONSISTENT') ||
       code.includes('SERVICE_REQUEST_MISSING') ||
       code.includes('COLLISION') ? 500 :
