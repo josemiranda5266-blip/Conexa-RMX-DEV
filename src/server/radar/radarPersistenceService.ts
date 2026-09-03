@@ -46,6 +46,8 @@ export interface PersistRadarOpportunityInput {
 const MAX_EXTERNAL_REFERENCE_LENGTH = 240;
 const MAX_DESCRIPTION_LENGTH = 5000;
 const MAX_MATCHES = 10;
+const MAX_MATCHES_PAYLOAD_BYTES = 120_000;
+const MAX_METADATA_BYTES = 64_000;
 
 function requireBoundedString(value: unknown, field: string, maxLength: number): string {
   if (typeof value !== 'string') throw new Error(`INVALID_RADAR_${field.toUpperCase()}`);
@@ -64,9 +66,61 @@ function clampScore(value: unknown, field: string): number {
   return Math.round(score);
 }
 
+function normalizeBoundedRecord(
+  value: unknown,
+  field: string,
+  maxBytes = MAX_METADATA_BYTES,
+): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`INVALID_RADAR_${field.toUpperCase()}`);
+  }
+
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    throw new Error(`INVALID_RADAR_${field.toUpperCase()}`);
+  }
+
+  if (new TextEncoder().encode(serialized).byteLength > maxBytes) {
+    throw new Error(`INVALID_RADAR_${field.toUpperCase()}_TOO_LARGE`);
+  }
+
+  return { ...(value as Record<string, unknown>) };
+}
+
+function normalizeMatches(value: unknown[]): unknown[] {
+  const matches = value.slice(0, MAX_MATCHES);
+
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(matches);
+  } catch {
+    throw new Error('INVALID_RADAR_MATCHES');
+  }
+
+  if (new TextEncoder().encode(serialized).byteLength > MAX_MATCHES_PAYLOAD_BYTES) {
+    throw new Error('INVALID_RADAR_MATCHES_TOO_LARGE');
+  }
+
+  return matches;
+}
+
 function buildRadarOpportunityId(externalReference: string): string {
   const digest = crypto.createHash('sha256').update(externalReference).digest('hex').slice(0, 40);
   return `RADAR-${digest}`;
+}
+
+function isAlreadyExistsError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+
+  const candidate = error as { code?: unknown; status?: unknown; message?: unknown };
+  return candidate.code === 6 ||
+    candidate.code === '6' ||
+    candidate.code === 'ALREADY_EXISTS' ||
+    candidate.status === 6 ||
+    candidate.status === 'ALREADY_EXISTS' ||
+    (typeof candidate.message === 'string' && /already exists|already-exists|ALREADY_EXISTS/i.test(candidate.message));
 }
 
 /**
@@ -108,9 +162,9 @@ export async function persistRadarOpportunity(
     ? 0
     : clampScore(input.spamRiskScore, 'SPAM_RISK_SCORE');
 
-  const matches = Array.isArray(input.matchedProfessionals)
-    ? input.matchedProfessionals.slice(0, MAX_MATCHES)
-    : [];
+  const matches = normalizeMatches(input.matchedProfessionals);
+  const aiAnalysis = normalizeBoundedRecord(input.aiAnalysis, 'AI_ANALYSIS');
+  const attribution = normalizeBoundedRecord(input.attribution, 'ATTRIBUTION');
 
   const documentId = buildRadarOpportunityId(externalReference);
   const ref = db.collection('radar_opportunities').doc(documentId);
@@ -128,7 +182,7 @@ export async function persistRadarOpportunity(
     description,
     city,
     province,
-    ...(input.neighborhood ? { neighborhood: String(input.neighborhood).trim().slice(0, 120) } : {}),
+    ...(input.neighborhood ? { neighborhood: input.neighborhood.trim().slice(0, 120) } : {}),
     urgency,
     intentScore,
     confidenceScore,
@@ -138,8 +192,8 @@ export async function persistRadarOpportunity(
     conversionStatus: 'NOT_STARTED',
     consentStatus,
     contactMethod,
-    aiAnalysis: input.aiAnalysis,
-    attribution: input.attribution,
+    aiAnalysis,
+    attribution,
     lastUpdated: input.now,
   };
 
@@ -152,8 +206,24 @@ export async function persistRadarOpportunity(
     };
   }
 
-  await ref.create({ ...opportunity, createdAt: input.now });
-  return { id: documentId, created: true, opportunity };
+  try {
+    await ref.create({ ...opportunity, createdAt: input.now });
+    return { id: documentId, created: true, opportunity };
+  } catch (error) {
+    // Deterministic document IDs make concurrent webhook retries converge on
+    // one record. Firestore create() rejects the losing writer; read the
+    // winner instead of surfacing a false duplicate failure.
+    if (!isAlreadyExistsError(error)) throw error;
+
+    const concurrent = await ref.get();
+    if (!concurrent.exists) throw error;
+
+    return {
+      id: documentId,
+      created: false,
+      opportunity: { ...(concurrent.data() || {}), id: documentId },
+    };
+  }
 }
 
 export async function persistRadarConversion(
@@ -163,13 +233,14 @@ export async function persistRadarConversion(
   now: string,
 ): Promise<void> {
   const id = requireBoundedString(opportunityId, 'OPPORTUNITY_ID', 120);
+  const normalizedConversion = normalizeBoundedRecord(conversion, 'CONVERSION');
   const ref = db.collection('radar_opportunities').doc(id);
   const snapshot = await ref.get();
   if (!snapshot.exists) throw new Error('RADAR_OPPORTUNITY_NOT_FOUND');
 
   await ref.update({
     conversionStatus: 'CONVERTED',
-    conversion,
+    conversion: normalizedConversion,
     convertedAt: now,
     lastUpdated: now,
   });
