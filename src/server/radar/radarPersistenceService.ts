@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 export interface RadarPersistenceDb {
   collection(name: string): {
     doc(id: string): RadarPersistenceDocRef;
@@ -62,6 +64,11 @@ function clampScore(value: unknown, field: string): number {
   return Math.round(score);
 }
 
+function buildRadarOpportunityId(externalReference: string): string {
+  const digest = crypto.createHash('sha256').update(externalReference).digest('hex').slice(0, 40);
+  return `RADAR-${digest}`;
+}
+
 /**
  * Persist a RADAR opportunity using a deterministic external reference.
  *
@@ -105,7 +112,7 @@ export async function persistRadarOpportunity(
     ? input.matchedProfessionals.slice(0, MAX_MATCHES)
     : [];
 
-  const documentId = `RADAR-${Buffer.from(externalReference).toString('base64url').slice(0, 80)}`;
+  const documentId = buildRadarOpportunityId(externalReference);
   const ref = db.collection('radar_opportunities').doc(documentId);
   const existing = await ref.get();
 
