@@ -30,7 +30,7 @@ export interface AccountDeletionCheckpoint {
 export function normalizeDeletionUserId(userId: unknown): string {
   if (typeof userId !== 'string') throw new Error('INVALID_DELETION_USER_ID');
   const normalized = userId.trim();
-  if (!normalized || normalized.length > 128) throw new Error('INVALID_DELETION_USER_ID');
+  if (!normalized || normalized.length > 128 || normalized.includes('/')) throw new Error('INVALID_DELETION_USER_ID');
   return normalized;
 }
 
