@@ -1,5 +1,6 @@
 import type { MatchedProfessional, RadarOpportunity } from '../../types.js';
 import { findMatchingProfessionalCandidates } from '../../domain/professionalMatchingCandidates.js';
+import { toMatchedProfessional } from '../../domain/professionalMatching.js';
 import { loadRadarCandidates } from './radarCandidateRepository.js';
 
 export interface RadarOpportunityMatchingResult {
@@ -16,7 +17,7 @@ export async function matchRadarOpportunity(
 
   return {
     matchedProfessionals: matches.map((match, index) => ({
-      ...match.matchedProfessional,
+      ...toMatchedProfessional(match.candidate, match.matchScore, match.matchReasons),
       rank: index + 1,
     })),
     matchingStatus: 'COMPLETED',
