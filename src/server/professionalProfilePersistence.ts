@@ -6,32 +6,14 @@ export type ProfessionalProfilePersistenceResult = {
   user: Record<string, unknown>;
 };
 
-export async function persistProfessionalProfile(
-  userId: string,
-  input: ProfessionalProfileWriteInput,
-): Promise<ProfessionalProfilePersistenceResult> {
+export async function persistProfessionalProfile(userId: string, input: ProfessionalProfileWriteInput): Promise<ProfessionalProfilePersistenceResult> {
   const db = getAdminDb();
   const userRef = db.collection('users').doc(userId);
   const userSnap = await userRef.get();
-
-  if (!userSnap.exists) {
-    const error = new Error('USER_NOT_FOUND');
-    (error as any).code = 'USER_NOT_FOUND';
-    throw error;
-  }
-
+  if (!userSnap.exists) throw new Error('USER_NOT_FOUND');
   const existing = userSnap.data() || {};
-  if (existing.isBlocked === true) {
-    const error = new Error('USER_BLOCKED');
-    (error as any).code = 'USER_BLOCKED';
-    throw error;
-  }
-
-  const normalized = normalizeProfessionalProfileWrite(
-    input,
-    typeof existing.name === 'string' ? existing.name : '',
-  );
-
+  if (existing.isBlocked === true) throw new Error('USER_BLOCKED');
+  const normalized = normalizeProfessionalProfileWrite(input, typeof existing.name === 'string' ? existing.name : '');
   const profile = {
     professionId: normalized.professionId || null,
     professionName: normalized.professionName,
@@ -50,17 +32,11 @@ export async function persistProfessionalProfile(
     hasClientProfile: existing.hasClientProfile !== false,
     availabilityStatus: existing.availabilityStatus || 'DISPONIBLE',
   };
-
   const updatedUser = { id: userId, ...existing, ...profile } as Record<string, unknown>;
   const publicDocument = buildPublicProfessionalProfileDocument(updatedUser as any);
-
   await db.runTransaction(async (tx: any) => {
     tx.set(userRef, profile, { merge: true });
-    tx.set(db.collection('public_professional_profiles').doc(userId), {
-      ...publicDocument,
-      updatedAt: new Date().toISOString(),
-    }, { merge: true });
+    tx.set(db.collection('public_professional_profiles').doc(userId), { ...publicDocument, updatedAt: new Date().toISOString() }, { merge: true });
   });
-
   return { user: updatedUser };
 }
