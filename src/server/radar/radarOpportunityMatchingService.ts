@@ -16,10 +16,7 @@ export async function matchRadarOpportunity(
   const matches = findMatchingProfessionalCandidates(candidates, opportunity, { limit });
 
   return {
-    matchedProfessionals: matches.map((match, index) => ({
-      ...toMatchedProfessional(match.candidate, match.matchScore, match.matchReasons),
-      rank: index + 1,
-    })),
+    matchedProfessionals: matches.map(toMatchedProfessional),
     matchingStatus: 'COMPLETED',
   };
 }
