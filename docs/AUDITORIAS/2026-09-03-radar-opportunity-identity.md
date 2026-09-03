@@ -14,6 +14,8 @@ Eliminar o sustituir una de estas implementaciones sin una estrategia de compati
 
 Se creó `src/server/radar/radarOpportunityIdentity.ts` como primer límite explícito de identidad.
 
+Se reforzó posteriormente el módulo con `buildLegacyRadarOpportunityId(externalReference)`, que calcula explícitamente el ID histórico `RADAR-<sha256(externalReference)>` sin modificar documentos existentes.
+
 La función `buildRadarOpportunityIdentity` produce:
 
 - `canonicalId`: identidad nueva basada en `sourceType + externalReference` cuando existe referencia externa;
