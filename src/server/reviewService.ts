@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { getAdminDb } from './firebaseAdmin.js';
 import type { Review, ServiceRequest } from '../types.js';
+import { calculateUpdatedReputation } from './reputationService.js';
 import {
   assertReviewEligible,
   buildReviewDocument,
@@ -29,24 +30,6 @@ function isAlreadyExists(error: unknown): boolean {
   return candidate.code === 6 || candidate.code === '6' || candidate.code === 'ALREADY_EXISTS' ||
     candidate.status === 6 || candidate.status === 'ALREADY_EXISTS' ||
     (typeof candidate.message === 'string' && /already exists|already-exists|ALREADY_EXISTS/i.test(candidate.message));
-}
-
-function normalizeAggregate(value: unknown): { rating: number; reviewCount: number } {
-  const source = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  const rating = Number(source.rating);
-  const reviewCount = Number(source.reviewCount);
-  return {
-    rating: Number.isFinite(rating) && rating >= 0 ? rating : 0,
-    reviewCount: Number.isFinite(reviewCount) && reviewCount >= 0 ? Math.floor(reviewCount) : 0,
-  };
-}
-
-function nextAggregate(current: { rating: number; reviewCount: number }, rating: number) {
-  const reviewCount = current.reviewCount + 1;
-  return {
-    rating: Number(((current.rating * current.reviewCount + rating) / reviewCount).toFixed(2)),
-    reviewCount,
-  };
 }
 
 export async function saveProfessionalReview(
@@ -98,8 +81,14 @@ export async function saveProfessionalReview(
       new Date().toISOString(),
     );
 
-    const aggregateSource = publicProfileSnap.exists ? publicProfileSnap.data() : professionalSnap.data();
-    const aggregate = nextAggregate(normalizeAggregate(aggregateSource), review.overallRating);
+    // The canonical aggregate is derived from the authoritative professional
+    // account. The public projection receives exactly the same transaction result.
+    const professional = professionalSnap.data() as Record<string, unknown>;
+    const aggregate = calculateUpdatedReputation(
+      professional.rating,
+      professional.reviewCount,
+      review.overallRating,
+    );
 
     tx.create(reviewRef, review);
     tx.update(professionalRef, aggregate);
