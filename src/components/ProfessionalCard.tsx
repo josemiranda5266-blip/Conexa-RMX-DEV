@@ -1,13 +1,13 @@
 import React from 'react';
-import { UserProfile } from '../types';
+import { PublicProfessionalProfile } from '../domain/publicProfessionalProfile';
 import { TrustBadge } from './TrustBadge';
-import { Star, MapPin, Briefcase, MessageSquare, Heart, Clock, ChevronRight } from 'lucide-react';
+import { Star, MapPin, Briefcase, MessageSquare, Heart, ChevronRight } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 interface ProfessionalCardProps {
-  professional: UserProfile;
-  onViewDetail: (pro: UserProfile) => void;
-  onContact: (pro: UserProfile) => void;
+  professional: PublicProfessionalProfile;
+  onViewDetail: (pro: PublicProfessionalProfile) => void;
+  onContact: (pro: PublicProfessionalProfile) => void;
 }
 
 export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({
@@ -19,29 +19,20 @@ export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({
   const isFav = favorites.includes(professional.id);
 
   return (
-    <div 
+    <div
       id={`pro-card-${professional.id}`}
       className="bg-white/70 backdrop-blur-md rounded-3xl border border-white/80 shadow-md hover:shadow-2xl hover:border-blue-400/50 hover:bg-white/85 transition-all duration-300 p-4 relative group flex flex-col justify-between hover:-translate-y-0.5"
     >
-      {/* Top Header */}
       <div>
-        {professional.isDemoData && (
-          <div className="mb-2">
-            <span className="text-[10px] font-extrabold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300/80 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1 shadow-2xs">
-              <span>🧪</span>
-              <span>DATOS DE DEMOSTRACIÓN — BETA</span>
-            </span>
-          </div>
-        )}
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="flex items-center gap-3">
             <div className="relative">
-              <img 
-                src={professional.avatar} 
-                alt={professional.name} 
+              <img
+                src={professional.avatar}
+                alt={professional.name}
                 className="w-14 h-14 rounded-2xl object-cover border-2 border-white shadow-sm"
               />
-              <span 
+              <span
                 className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white ${
                   professional.availabilityStatus === 'DISPONIBLE' ? 'bg-emerald-500' : 'bg-amber-500'
                 }`}
@@ -70,8 +61,8 @@ export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({
               toggleFavorite(professional.id);
             }}
             className={`p-2 rounded-2xl transition-all ${
-              isFav 
-                ? 'bg-rose-500/10 text-rose-600 border border-rose-200/80' 
+              isFav
+                ? 'bg-rose-500/10 text-rose-600 border border-rose-200/80'
                 : 'bg-white/60 text-slate-400 hover:text-slate-600 border border-white/80 hover:bg-white'
             }`}
             title={isFav ? 'Quitar de favoritos' : 'Guardar en favoritos'}
@@ -81,15 +72,12 @@ export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({
           </button>
         </div>
 
-        {/* Verification Badges */}
-        <TrustBadge 
+        <TrustBadge
           isIdentityVerified={professional.isIdentityVerified}
           isProfessionalVerified={professional.isProfessionalVerified}
-          trustScore={professional.trustScore}
           size="sm"
         />
 
-        {/* Stats & Location Bar */}
         <div className="grid grid-cols-2 gap-2 my-3 p-2.5 bg-slate-50/70 backdrop-blur-sm rounded-2xl border border-white/60 text-xs shadow-2xs">
           <div className="flex items-center gap-1.5 text-slate-700 font-semibold">
             <Star size={14} className="text-amber-500 fill-amber-500 shrink-0" />
@@ -105,15 +93,13 @@ export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({
           </div>
         </div>
 
-        {/* Description snippet */}
         {professional.description && (
           <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed mb-3">
             {professional.description}
           </p>
         )}
 
-        {/* Specialties tags */}
-        {professional.specialties && professional.specialties.length > 0 && (
+        {professional.specialties.length > 0 && (
           <div className="flex flex-wrap gap-1 mb-3">
             {professional.specialties.slice(0, 3).map((spec, idx) => (
               <span key={idx} className="text-[11px] font-semibold bg-white/80 backdrop-blur-sm text-slate-700 px-2.5 py-0.5 rounded-full border border-white/80 shadow-2xs">
@@ -129,7 +115,6 @@ export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({
         )}
       </div>
 
-      {/* Footer Actions */}
       <div className="pt-2 border-t border-slate-100/80 flex items-center gap-2 mt-2">
         <button
           onClick={() => onViewDetail(professional)}
