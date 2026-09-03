@@ -1,23 +1,7 @@
 import type { MatchedProfessional, RadarOpportunity, UserProfile } from '../types';
+import { toRadarCandidate, type RadarCandidate } from './radarCandidate';
 
-export interface ProfessionalCandidate {
-  id: string;
-  name: string;
-  professionName: string;
-  professionId?: string;
-  specialties: string[];
-  city: string;
-  province: string;
-  approxZone: string;
-  rating: number;
-  reviewCount: number;
-  jobsCompleted: number;
-  trustScore: number;
-  availabilityStatus: UserProfile['availabilityStatus'];
-  avatar: string;
-  isIdentityVerified: boolean;
-  isProfessionalVerified: boolean;
-}
+export type ProfessionalCandidate = RadarCandidate;
 
 export interface ProfessionalMatch {
   candidate: ProfessionalCandidate;
@@ -74,28 +58,7 @@ export function getDefaultProfessionalMode(
 }
 
 export function normalizeProfessionalCandidate(user: UserProfile): ProfessionalCandidate | null {
-  if (!isProfessionalCapable(user) || user.isBlocked === true) {
-    return null;
-  }
-
-  return {
-    id: user.id,
-    name: user.name || 'Profesional CONEXA',
-    professionName: user.professionName || '',
-    professionId: user.professionId,
-    specialties: Array.isArray(user.specialties) ? user.specialties.filter(Boolean) : [],
-    city: user.location?.city || '',
-    province: user.location?.province || '',
-    approxZone: user.location?.approxZone || '',
-    rating: Number.isFinite(user.rating) ? user.rating : 0,
-    reviewCount: Number.isFinite(user.reviewCount) ? user.reviewCount : 0,
-    jobsCompleted: Number.isFinite(user.jobsCompleted) ? user.jobsCompleted : 0,
-    trustScore: Number.isFinite(user.trustScore) ? user.trustScore : 0,
-    availabilityStatus: user.availabilityStatus,
-    avatar: user.avatar || '',
-    isIdentityVerified: user.isIdentityVerified === true,
-    isProfessionalVerified: user.isProfessionalVerified === true
-  };
+  return toRadarCandidate(user);
 }
 
 export function isDiscoverableProfessional(candidate: ProfessionalCandidate): boolean {
