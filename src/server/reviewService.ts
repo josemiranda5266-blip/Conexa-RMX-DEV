@@ -8,11 +8,13 @@ import {
   type ReviewWriteInput,
 } from './reviewPolicy.js';
 import { buildPublicProfessionalProfileDocument } from './publicProfessionalProfileProjection.js';
+import { buildRadarCandidateProjection } from './radar/radarCandidateProjection.js';
 
 const REVIEWS_COLLECTION = 'reviews';
 const USERS_COLLECTION = 'users';
 const REQUESTS_COLLECTION = 'service_requests';
 const PUBLIC_PROFILES_COLLECTION = 'public_professional_profiles';
+const RADAR_CANDIDATES_COLLECTION = 'radar_candidates';
 
 export interface SaveReviewResult {
   review: Review;
@@ -35,10 +37,11 @@ function isAlreadyExists(error: unknown): boolean {
 function calculateRating(existing: Record<string, unknown>, nextRating: number): { rating: number; reviewCount: number } {
   const previousCount = Number.isFinite(existing.reviewCount) ? Number(existing.reviewCount) : 0;
   const previousRating = Number.isFinite(existing.rating) ? Number(existing.rating) : 0;
-  const reviewCount = Math.max(0, Math.trunc(previousCount)) + 1;
+  const normalizedPreviousCount = Math.max(0, Math.trunc(previousCount));
+  const reviewCount = normalizedPreviousCount + 1;
   const rating = reviewCount === 1
     ? nextRating
-    : Math.round((((previousRating * Math.max(0, Math.trunc(previousCount))) + nextRating) / reviewCount) * 10) / 10;
+    : Math.round((((previousRating * normalizedPreviousCount) + nextRating) / reviewCount) * 10) / 10;
 
   return { rating, reviewCount };
 }
@@ -61,6 +64,7 @@ export async function saveProfessionalReview(
     buildReviewId(normalizedClientId, normalized.professionalId, normalized.serviceRequestId),
   );
   const publicProfileRef = db.collection(PUBLIC_PROFILES_COLLECTION).doc(normalized.professionalId);
+  const radarCandidateRef = db.collection(RADAR_CANDIDATES_COLLECTION).doc(normalized.professionalId);
 
   const result = await db.runTransaction(async (tx: any) => {
     const [requestSnap, clientSnap, professionalSnap, reviewSnap] = await Promise.all([
@@ -101,6 +105,7 @@ export async function saveProfessionalReview(
       reviewCount: aggregate.reviewCount,
     };
     const publicDocument = buildPublicProfessionalProfileDocument(updatedProfessional as any);
+    const radarCandidate = buildRadarCandidateProjection(updatedProfessional as any);
 
     tx.create(reviewRef, review);
     tx.set(professionalRef, {
@@ -111,6 +116,12 @@ export async function saveProfessionalReview(
       ...publicDocument,
       updatedAt: new Date().toISOString(),
     }, { merge: true });
+
+    if (radarCandidate) {
+      tx.set(radarCandidateRef, radarCandidate, { merge: true });
+    } else {
+      tx.delete(radarCandidateRef);
+    }
 
     return { review, created: true };
   });
