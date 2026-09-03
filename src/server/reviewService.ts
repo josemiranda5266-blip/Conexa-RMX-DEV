@@ -135,10 +135,16 @@ export async function saveProfessionalReview(
       tx.delete(radarCandidateRef);
     }
 
+    // Keep the request lifecycle canonical: REVIEW_PENDING is the state that
+    // explicitly grants the client the review action. A review closes it.
     // A verified review closes the commercial request. For payment-backed jobs,
     // advance only SERVICE_COMPLETED -> REVIEW_COMPLETED. Never overwrite
     // REFUNDED, CHARGEBACK or SETTLED states.
-    tx.update(requestRef, { status: 'CLOSED' });
+    tx.update(requestRef, {
+      status: 'CLOSED',
+      reviewCompletedAt: review.createdAt,
+      reviewId: review.id,
+    });
 
     if (!transactionSnap.empty) {
       const transactionDoc = transactionSnap.docs[0];
