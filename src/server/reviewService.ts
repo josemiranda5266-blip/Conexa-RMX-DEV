@@ -15,6 +15,8 @@ const USERS_COLLECTION = 'users';
 const REQUESTS_COLLECTION = 'service_requests';
 const PUBLIC_PROFILES_COLLECTION = 'public_professional_profiles';
 const RADAR_CANDIDATES_COLLECTION = 'radar_candidates';
+const PUBLIC_PROFILES_COLLECTION = 'public_professional_profiles';
+const RADAR_CANDIDATES_COLLECTION = 'radar_candidates';
 const TRANSACTIONS_COLLECTION = 'transactions';
 
 export interface SaveReviewResult {
@@ -61,6 +63,9 @@ export async function saveProfessionalReview(
   const reviewRef = db.collection(REVIEWS_COLLECTION).doc(
     buildReviewId(normalizedClientId, normalized.professionalId, normalized.serviceRequestId),
   );
+  const professionalRef = db.collection(USERS_COLLECTION).doc(normalized.professionalId);
+  const publicProfileRef = db.collection(PUBLIC_PROFILES_COLLECTION).doc(normalized.professionalId);
+  const radarCandidateRef = db.collection(RADAR_CANDIDATES_COLLECTION).doc(normalized.professionalId);
   const publicProfileRef = db.collection(PUBLIC_PROFILES_COLLECTION).doc(normalized.professionalId);
   const radarCandidateRef = db.collection(RADAR_CANDIDATES_COLLECTION).doc(normalized.professionalId);
   const transactionsQuery = db.collection(TRANSACTIONS_COLLECTION)
