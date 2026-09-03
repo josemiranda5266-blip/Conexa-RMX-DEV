@@ -18,6 +18,13 @@ export interface RadarOpportunityLifecycleResult {
   changed: boolean;
 }
 
+function hasLifecycleMetadataPatch(patch: RadarOpportunityLifecyclePatch): boolean {
+  return patch.clientUserId !== undefined ||
+    patch.serviceRequestId !== undefined ||
+    patch.linkedAt !== undefined ||
+    patch.convertedAt !== undefined;
+}
+
 export async function transitionRadarOpportunity(
   opportunityId: string,
   patch: RadarOpportunityLifecyclePatch,
@@ -37,9 +44,10 @@ export async function transitionRadarOpportunity(
     }
 
     const current = snapshot.data() as RadarOpportunity;
-    const normalized = normalizeLifecyclePatch(current, patch);
 
-    if (current.status === patch.status && Object.keys(normalized).length === 1) {
+    // A repeated lifecycle command with no metadata mutation is a true no-op.
+    // This keeps webhook retries idempotent and avoids rewriting lastUpdated.
+    if (current.status === patch.status && !hasLifecycleMetadataPatch(patch)) {
       return {
         opportunity: current,
         previousStatus: current.status,
@@ -47,6 +55,7 @@ export async function transitionRadarOpportunity(
       };
     }
 
+    const normalized = normalizeLifecyclePatch(current, patch);
     transaction.update(ref, normalized);
 
     return {
