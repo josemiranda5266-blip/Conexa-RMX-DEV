@@ -1,18 +1,18 @@
 import React, { useState } from 'react';
-import { UserProfile, Review } from '../types';
+import { PublicProfessionalProfile } from '../domain/publicProfessionalProfile';
 import { TrustBadge } from './TrustBadge';
-import { 
-  X, Star, MapPin, Briefcase, MessageSquare, FileText, 
-  Clock, Shield, CheckCircle2, Award, Image as ImageIcon, Heart, PhoneOff 
+import {
+  X, Star, MapPin, Briefcase, MessageSquare, FileText,
+  Clock, CheckCircle2, Image as ImageIcon, Heart, PhoneOff
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 interface ProfessionalDetailModalProps {
-  professional: UserProfile | null;
+  professional: PublicProfessionalProfile | null;
   isOpen: boolean;
   onClose: () => void;
-  onStartChat: (pro: UserProfile) => void;
-  onRequestQuote: (pro: UserProfile) => void;
+  onStartChat: (pro: PublicProfessionalProfile) => void;
+  onRequestQuote: (pro: PublicProfessionalProfile) => void;
 }
 
 export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = ({
@@ -32,14 +32,13 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-md animate-fade-in overflow-y-auto">
-      <div 
+      <div
         id={`pro-detail-modal-${professional.id}`}
         className="bg-white/85 backdrop-blur-2xl rounded-3xl shadow-2xl max-w-2xl w-full my-auto border border-white/80 overflow-hidden flex flex-col max-h-[90vh]"
       >
-        {/* Top Cover Banner */}
         <div className="bg-slate-900/90 backdrop-blur-xl p-6 text-white relative border-b border-white/10">
-          <button 
-            onClick={onClose} 
+          <button
+            onClick={onClose}
             className="absolute top-4 right-4 text-slate-300 hover:text-white bg-white/10 p-2 rounded-full transition-colors border border-white/10"
             aria-label="Cerrar modal"
           >
@@ -48,12 +47,12 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
 
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
             <div className="relative shrink-0">
-              <img 
-                src={professional.avatar} 
-                alt={professional.name} 
+              <img
+                src={professional.avatar}
+                alt={professional.name}
                 className="w-20 h-20 rounded-2xl object-cover border-2 border-white/30 shadow-lg"
               />
-              <span 
+              <span
                 className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-slate-900 ${
                   professional.availabilityStatus === 'DISPONIBLE' ? 'bg-emerald-500' : 'bg-amber-500'
                 }`}
@@ -61,11 +60,6 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
             </div>
 
             <div className="space-y-1">
-              {professional.isDemoData && (
-                <span className="text-[10px] font-extrabold uppercase tracking-wider bg-amber-400 text-slate-950 px-2.5 py-0.5 rounded-full inline-block mb-1">
-                  🧪 DATOS DE DEMOSTRACIÓN — BETA
-                </span>
-              )}
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-xl sm:text-2xl font-bold tracking-tight">{professional.name}</h2>
                 <button
@@ -88,17 +82,15 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
                 <span>{professional.professionName || 'Profesional de Servicios'}</span>
               </div>
 
-              <TrustBadge 
+              <TrustBadge
                 isIdentityVerified={professional.isIdentityVerified}
                 isProfessionalVerified={professional.isProfessionalVerified}
-                trustScore={professional.trustScore}
                 size="sm"
               />
             </div>
           </div>
         </div>
 
-        {/* Private Data Warning Strip */}
         <div className="bg-emerald-500/10 backdrop-blur-md border-b border-emerald-500/20 px-4 py-2.5 flex items-center justify-between text-xs text-emerald-900 font-medium">
           <div className="flex items-center gap-2">
             <PhoneOff size={15} className="text-emerald-700 shrink-0" />
@@ -107,8 +99,7 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
           <span className="hidden sm:inline font-bold text-emerald-700">Privacidad Activa</span>
         </div>
 
-        {/* Quick Highlights Grid */}
-        <div className="grid grid-cols-3 divide-x divide-slate-200/60 bg-white/50 backdrop-blur-sm border-b border-white/60 text-center py-3">
+        <div className="grid grid-cols-2 divide-x divide-slate-200/60 bg-white/50 backdrop-blur-sm border-b border-white/60 text-center py-3">
           <div>
             <div className="flex items-center justify-center gap-1 font-bold text-slate-900 text-base">
               <Star size={16} className="text-amber-500 fill-amber-500" />
@@ -120,13 +111,8 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
             <p className="font-bold text-slate-900 text-base">{professional.jobsCompleted}</p>
             <p className="text-[11px] text-slate-500 font-medium">Trabajos hechos</p>
           </div>
-          <div>
-            <p className="font-bold text-emerald-700 text-base">{professional.trustScore}%</p>
-            <p className="text-[11px] text-slate-500 font-medium">Nivel Confianza</p>
-          </div>
         </div>
 
-        {/* Navigation Tabs */}
         <div className="flex border-b border-white/60 bg-white/40 backdrop-blur-md px-4">
           <button
             onClick={() => setActiveTab('SERVICIOS')}
@@ -134,7 +120,7 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
               activeTab === 'SERVICIOS' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            Servicios ({professional.servicesOffered?.length || 0})
+            Servicios ({professional.servicesOffered.length})
           </button>
           <button
             onClick={() => setActiveTab('PORTFOLIO')}
@@ -142,7 +128,7 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
               activeTab === 'PORTFOLIO' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            Portfolio ({professional.portfolioImages?.length || 0})
+            Portfolio ({professional.portfolioImages.length})
           </button>
           <button
             onClick={() => setActiveTab('RESEÑAS')}
@@ -162,9 +148,7 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
           </button>
         </div>
 
-        {/* Content Body */}
         <div className="p-5 overflow-y-auto space-y-4 flex-1">
-          {/* Tab: Servicios */}
           {activeTab === 'SERVICIOS' && (
             <div className="space-y-3">
               {professional.description && (
@@ -175,14 +159,14 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
               )}
 
               <h4 className="font-bold text-slate-900 text-sm pt-1">Servicios Ofrecidos</h4>
-              
-              {professional.servicesOffered && professional.servicesOffered.length > 0 ? (
+
+              {professional.servicesOffered.length > 0 ? (
                 <div className="space-y-2">
                   {professional.servicesOffered.map(service => (
                     <div key={service.id} className="p-3.5 rounded-xl border border-slate-200 bg-white shadow-2xs hover:border-blue-300 transition-colors">
                       <div className="flex justify-between items-start gap-2">
                         <h5 className="font-bold text-slate-900 text-sm">{service.title}</h5>
-                        {service.approxPriceArs && (
+                        {service.approxPriceArs !== undefined && (
                           <span className="font-bold text-blue-700 text-xs bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg shrink-0">
                             Desde ${service.approxPriceArs.toLocaleString('es-AR')} ARS
                           </span>
@@ -200,10 +184,9 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
             </div>
           )}
 
-          {/* Tab: Portfolio */}
           {activeTab === 'PORTFOLIO' && (
             <div className="space-y-3">
-              {professional.portfolioImages && professional.portfolioImages.length > 0 ? (
+              {professional.portfolioImages.length > 0 ? (
                 <div className="grid grid-cols-2 gap-3">
                   {professional.portfolioImages.map((imgUrl, i) => (
                     <div key={i} className="rounded-2xl overflow-hidden border border-slate-200 shadow-sm aspect-video bg-slate-100">
@@ -220,7 +203,6 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
             </div>
           )}
 
-          {/* Tab: Reseñas */}
           {activeTab === 'RESEÑAS' && (
             <div className="space-y-3">
               {proReviews.length > 0 ? (
@@ -253,7 +235,6 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
             </div>
           )}
 
-          {/* Tab: Zona & Horarios */}
           {activeTab === 'ZONA' && (
             <div className="space-y-3 text-xs text-slate-700">
               <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
@@ -280,7 +261,6 @@ export const ProfessionalDetailModal: React.FC<ProfessionalDetailModalProps> = (
           )}
         </div>
 
-        {/* Modal Footer Actions */}
         <div className="p-4 bg-white/60 backdrop-blur-md border-t border-white/60 flex flex-col sm:flex-row items-center gap-2">
           <button
             onClick={() => {
