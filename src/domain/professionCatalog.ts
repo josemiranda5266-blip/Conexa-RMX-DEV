@@ -1,6 +1,7 @@
 export interface ProfessionCatalogEntry {
   id: string;
   name: string;
+  aliases?: readonly string[];
 }
 
 /**
@@ -9,7 +10,7 @@ export interface ProfessionCatalogEntry {
  * the same catalog identifiers without importing frontend fixtures.
  */
 export const PROFESSION_CATALOG: readonly ProfessionCatalogEntry[] = [
-  { id: 'prof-electricista', name: 'Electricista' },
+  { id: 'prof-electricista', name: 'Electricista', aliases: ['Electricista Matriculado'] },
   { id: 'prof-plomero', name: 'Plomero / Fontanero' },
   { id: 'prof-gasista', name: 'Gasista Matriculado' },
   { id: 'prof-albanil', name: 'Albañil / Constructor' },
@@ -32,5 +33,8 @@ export function getProfessionById(id: string): ProfessionCatalogEntry | undefine
 
 export function getProfessionByName(name: string): ProfessionCatalogEntry | undefined {
   const normalized = name.trim().toLocaleLowerCase();
-  return PROFESSION_CATALOG.find((profession) => profession.name.toLocaleLowerCase() === normalized);
+  return PROFESSION_CATALOG.find((profession) =>
+    profession.name.toLocaleLowerCase() === normalized ||
+    profession.aliases?.some((alias) => alias.toLocaleLowerCase() === normalized),
+  );
 }
