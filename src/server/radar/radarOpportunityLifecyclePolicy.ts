@@ -29,13 +29,20 @@ export function canTransitionRadarOpportunity(
   current: RadarOpportunityLifecycleStatus,
   next: RadarOpportunityLifecycleStatus,
 ): boolean {
-  return ALLOWED_TRANSITIONS[current].includes(next);
+  const allowed = ALLOWED_TRANSITIONS[current];
+  return Array.isArray(allowed) && allowed.includes(next);
 }
 
 export function assertRadarOpportunityTransition(
   current: RadarOpportunityLifecycleStatus,
   next: RadarOpportunityLifecycleStatus,
 ): void {
+  if (!Object.prototype.hasOwnProperty.call(ALLOWED_TRANSITIONS, current)) {
+    throw new Error(`INVALID_RADAR_OPPORTUNITY_STATUS:${String(current)}`);
+  }
+  if (!Object.prototype.hasOwnProperty.call(ALLOWED_TRANSITIONS, next)) {
+    throw new Error(`INVALID_RADAR_OPPORTUNITY_STATUS:${String(next)}`);
+  }
   if (current === next) return;
   if (!canTransitionRadarOpportunity(current, next)) {
     throw new Error(`INVALID_RADAR_OPPORTUNITY_TRANSITION:${current}->${next}`);
@@ -50,13 +57,16 @@ export function normalizeLifecyclePatch(
   assertRadarOpportunityTransition(current.status, patch.status);
 
   const normalized: Partial<RadarOpportunity> & { lastUpdated: string } = {
-    status: patch.status,
     lastUpdated: timestamp,
   };
 
+  if (patch.status !== current.status) {
+    normalized.status = patch.status;
+  }
+
   if (patch.clientUserId !== undefined) {
     const clientUserId = patch.clientUserId.trim();
-    if (!clientUserId || clientUserId.length > 128) {
+    if (!clientUserId || clientUserId.length > 128 || clientUserId.includes('/')) {
       throw new Error('INVALID_RADAR_OPPORTUNITY_CLIENT_USER_ID');
     }
     normalized.clientUserId = clientUserId;
@@ -64,7 +74,7 @@ export function normalizeLifecyclePatch(
 
   if (patch.serviceRequestId !== undefined) {
     const serviceRequestId = patch.serviceRequestId.trim();
-    if (!serviceRequestId || serviceRequestId.length > 128) {
+    if (!serviceRequestId || serviceRequestId.length > 128 || serviceRequestId.includes('/')) {
       throw new Error('INVALID_RADAR_OPPORTUNITY_SERVICE_REQUEST_ID');
     }
     normalized.serviceRequestId = serviceRequestId;
@@ -103,5 +113,8 @@ export function normalizeLifecyclePatch(
 export function getAllowedRadarOpportunityTransitions(
   current: RadarOpportunityLifecycleStatus,
 ): readonly RadarOpportunityLifecycleStatus[] {
+  if (!Object.prototype.hasOwnProperty.call(ALLOWED_TRANSITIONS, current)) {
+    throw new Error(`INVALID_RADAR_OPPORTUNITY_STATUS:${String(current)}`);
+  }
   return ALLOWED_TRANSITIONS[current];
 }
