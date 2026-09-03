@@ -109,6 +109,34 @@ export async function createServiceRequestFromRadarOpportunity(
     if (opportunity.clientUserId && opportunity.clientUserId !== clientUserId) {
       throw new Error('RADAR_OPPORTUNITY_CLIENT_MISMATCH');
     }
+
+    const existingServiceRequestId = opportunity.serviceRequestId;
+    if (['SERVICE_REQUESTED', 'CONVERTED'].includes(opportunity.status)) {
+      if (!existingServiceRequestId) {
+        throw new Error('RADAR_OPPORTUNITY_CONVERSION_INCONSISTENT');
+      }
+
+      const existingRequestRef = db.collection(REQUEST_COLLECTION).doc(existingServiceRequestId);
+      const existingRequestSnapshot = await transaction.get(existingRequestRef);
+      if (!existingRequestSnapshot.exists) {
+        throw new Error('RADAR_OPPORTUNITY_SERVICE_REQUEST_MISSING');
+      }
+
+      const existingRequest = existingRequestSnapshot.data() as ServiceRequest;
+      if (
+        existingRequest.radarOpportunityId !== opportunityId ||
+        existingRequest.clientId !== clientUserId
+      ) {
+        throw new Error('RADAR_SERVICE_REQUEST_ID_COLLISION');
+      }
+
+      return {
+        opportunity,
+        serviceRequest: existingRequest,
+        created: false,
+      };
+    }
+
     if (!['REGISTERED', 'MATCHED'].includes(opportunity.status)) {
       throw new Error(`RADAR_OPPORTUNITY_NOT_CONVERTIBLE:${opportunity.status}`);
     }
