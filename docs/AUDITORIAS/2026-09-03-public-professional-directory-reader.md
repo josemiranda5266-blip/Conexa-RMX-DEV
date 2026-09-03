@@ -13,8 +13,9 @@ Preparar la migración del directorio profesional desde la colección privada `/
 - Se creó `src/services/publicProfessionalProfileService.ts` con suscripción realtime a `public_professional_profiles`.
 - La lectura queda limitada a la proyección pública; el lector no consulta `/users`.
 - El lector normaliza límites de strings, listas, servicios, reputación, disponibilidad y ubicación aproximada.
-- Se estableció un límite defensivo de 500 perfiles por snapshot para evitar cargar indefinidamente el cliente.
-- La consulta se ordena por `updatedAt` descendente para priorizar perfiles recientemente actualizados.
+- Se estableció un límite defensivo de 500 perfiles por snapshot.
+- La consulta se ordena por `updatedAt` descendente.
+- La consulta realtime ahora aplica `limit(500)` directamente en Firestore, en lugar de recibir todos los documentos y recortarlos posteriormente en memoria. Esto reduce lecturas, transferencia y trabajo del cliente a medida que crezca el catálogo.
 
 ## Frontera de privacidad
 
