@@ -18,14 +18,11 @@ import { canUseProfessionalMode, getDefaultProfessionalMode, matchOpportunityWit
 import {
   getOrCreateConversation,
   sendConversationMessage,
-  subscribeToUserConversations,
   updateConversationPrivacy,
-  subscribeToMessages,
   markConversationAsRead as markConversationAsReadInFirestore,
   type Unsubscribe,
-  type StoredConversation,
-  type StoredMessage,
 } from '../services/conversationService';
+import { subscribeToConversationRealtime } from '../services/conversationRealtimeService';
 
 interface AppContextType {
   currentUser: UserProfile | null;
@@ -230,60 +227,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem('conexa_users', JSON.stringify(users));
   }, [users]);
 
-  const formatConversationTime = (value: any): string => {
-    if (!value?.toDate) return '';
-    return value.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  const toConversationView = (stored: StoredConversation): Conversation => {
-    const otherUserId = stored.participantIds.find(id => id !== currentUser?.id) || stored.participantIds[0];
-    const otherUser = users.find(user => user.id === otherUserId);
-    const privacy = stored.privacyByUser || {};
-    const firstUserId = stored.participantIds[0];
-    const secondUserId = stored.participantIds[1];
-
-    return {
-      id: stored.id,
-      participantIds: stored.participantIds,
-      otherUser: {
-        id: otherUserId,
-        name: otherUser?.name || 'Usuario CONEXA',
-        avatar: otherUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=250',
-        profession: otherUser?.professionName,
-        isIdentityVerified: otherUser?.isIdentityVerified,
-        isProfessionalVerified: otherUser?.isProfessionalVerified,
-      },
-      lastMessage: stored.lastMessagePreview || 'Conversación iniciada',
-      lastMessageTime: formatConversationTime(stored.lastMessageAt) || 'Ahora',
-      unreadCount: currentUser ? (stored.unreadCountByUser[currentUser.id] ?? 0) : 0,
-      sharedPhoneBySender: privacy[firstUserId]?.phoneShared === true,
-      sharedPhoneByReceiver: privacy[secondUserId]?.phoneShared === true,
-      sharedAddressBySender: privacy[firstUserId]?.addressShared === true,
-      sharedAddressByReceiver: privacy[secondUserId]?.addressShared === true,
-    };
-  };
-
-  const toMessageView = (stored: StoredMessage): Message => ({
-    id: stored.id,
-    conversationId: stored.conversationId,
-    senderId: stored.senderId,
-    senderName: stored.senderName,
-    createdAt: formatConversationTime(stored.createdAt),
-    type: stored.type,
-    content: stored.content,
-    attachmentUrl: stored.attachmentUrl,
-    quoteData: stored.quoteData as Quote | undefined,
-  });
-
   useEffect(() => {
-    if (!isFirebaseConfigured || !currentUser) return;
+    if (!isFirebaseConfigured || !currentUser?.id) return;
 
-    return subscribeToUserConversations(
+    return subscribeToConversationRealtime(
       currentUser.id,
-      (stored) => setConversations(stored.map(toConversationView)),
-      (error) => console.warn('[CONEXA MESSAGING] Error sincronizando conversaciones:', error),
+      ({ conversations: nextConversations, messages: nextMessages }) => {
+        setConversations(nextConversations);
+        setMessages(nextMessages);
+      },
+      (error) => console.warn('[CONEXA MESSAGING] Error sincronizando realtime:', error),
     );
-  }, [currentUser?.id, users]);
+  }, [currentUser?.id]);
+
 
   // Firebase Auth Real Listener Effect & Real-time Firestore Sync
   useEffect(() => {
@@ -672,100 +628,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       syncQuotes(user?.uid || null);
     });
 
-    let unsubConversations = () => {};
-    let messageUnsubscribers: Record<string, () => void> = {};
-
-    const syncConversationMessages = (conversationIds: string[]) => {
-      const nextIds = new Set(conversationIds);
-
-      Object.entries(messageUnsubscribers).forEach(([conversationId, unsubscribe]) => {
-        if (!nextIds.has(conversationId)) {
-          unsubscribe();
-          delete messageUnsubscribers[conversationId];
-          setMessages(previous => {
-            const next = { ...previous };
-            delete next[conversationId];
-            return next;
-          });
-        }
-      });
-
-      conversationIds.forEach(conversationId => {
-        if (messageUnsubscribers[conversationId]) return;
-
-        messageUnsubscribers[conversationId] = onSnapshot(
-          query(
-            collection(firestoreDb, 'conversations', conversationId, 'messages'),
-            orderBy('createdAt', 'asc')
-          ),
-          snapshot => {
-            const list: Message[] = [];
-
-            snapshot.forEach(messageDoc => {
-              const data = messageDoc.data() as Message;
-              list.push({
-                ...data,
-                id: data.id || messageDoc.id
-              });
-            });
-
-            setMessages(previous => ({
-              ...previous,
-              [conversationId]: list
-            }));
-          },
-          error => {
-            console.warn('[Firestore] Error sincronizando mensajes:', conversationId, error);
-          }
-        );
-      });
-    };
-
-    const stopConversationMessages = () => {
-      Object.values(messageUnsubscribers).forEach(unsubscribe => unsubscribe());
-      messageUnsubscribers = {};
-      setMessages({});
-    };
-
-    const syncConversations = (uid: string) => {
-      unsubConversations();
-      stopConversationMessages();
-
-      const conversationsQuery = query(
-        collection(firestoreDb, 'conversations'),
-        where('participantIds', 'array-contains', uid)
-      );
-
-      unsubConversations = onSnapshot(conversationsQuery, (snapshot) => {
-        const list: Conversation[] = [];
-
-        snapshot.forEach(conversationDoc => {
-          const data = conversationDoc.data() as Conversation;
-          list.push({
-            ...data,
-            id: data.id || conversationDoc.id
-          });
-        });
-
-        setConversations(list);
-        syncConversationMessages(list.map(conversation => conversation.id));
-      });
-    };
-
-    const activeUid = firebaseAuth.currentUser?.uid;
-    if (activeUid) {
-      syncConversations(activeUid);
-    }
-
-    const unsubAuthConversations = firebaseAuth.onAuthStateChanged(user => {
-      if (user) {
-        syncConversations(user.uid);
-      } else {
-        unsubConversations();
-        stopConversationMessages();
-        setConversations([]);
-      }
-    });
 
     let unsubReports = () => {};
     let unsubVerifications = () => {};
@@ -878,9 +740,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubClientQuotes();
       unsubProfessionalQuotes();
       unsubAuthQuotes();
-      unsubConversations();
-      stopConversationMessages();
-      unsubAuthConversations();
       unsubReports();
       unsubVerifications();
       unsubAuthModeration();
@@ -1070,23 +929,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const subscribeConversationMessages = (conversationId: string): Unsubscribe => {
-    if (!currentUser || !isConversationParticipant(conversationId)) {
-      return () => undefined;
-    }
-
-    if (!isFirebaseConfigured) {
-      return () => undefined;
-    }
-
-    return subscribeToMessages(
-      conversationId,
-      (stored) => setMessages(prev => ({
-        ...prev,
-        [conversationId]: stored.map(toMessageView),
-      })),
-      (error) => console.warn('[CONEXA MESSAGING] Error sincronizando mensajes:', error),
-    );
+  const subscribeConversationMessages = (_conversationId: string): Unsubscribe => {
+    // Production realtime messaging is owned centrally by conversationRealtimeService.
+    // Keep this compatibility method as a no-op so legacy consumers cannot create
+    // a second listener graph.
+    return () => undefined;
   };
 
   const markConversationAsRead = async (conversationId: string): Promise<void> => {
