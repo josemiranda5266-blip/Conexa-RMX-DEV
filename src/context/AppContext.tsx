@@ -812,10 +812,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    const updatedUser = {
-      ...currentUser,
-      activeMode: getDefaultProfessionalMode(currentUser)
-    };
+    const requestedActiveMode = getDefaultProfessionalMode(currentUser);
+    const updatedUser = projectAuthenticatedUser(
+      { uid: currentUser.id, role: currentUser.role },
+      { ...currentUser, activeMode: requestedActiveMode },
+      currentUser,
+    );
 
     setCurrentUser(updatedUser);
 
@@ -843,16 +845,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return false;
     }
 
-    const updated = {
-      ...currentUser,
-      activeMode: mode
-    };
-      setCurrentUser(updated);
-      setUsers(uList => uList.map(u => u.id === currentUser.id ? updated : u));
+    const updated = projectAuthenticatedUser(
+      { uid: currentUser.id, role: currentUser.role },
+      { ...currentUser, activeMode: mode },
+      currentUser,
+    );
+
+    setCurrentUser(updated);
 
     if (isFirebaseConfigured && db) {
       const userDocRef = doc(db, 'users', currentUser.id);
-      updateDoc(userDocRef, { activeMode: mode }).catch(err => {
+      updateDoc(userDocRef, { activeMode: updated.activeMode }).catch(err => {
         console.warn('[CONEXA AUTH] Error saving activeMode to Firestore:', err);
       });
     }
