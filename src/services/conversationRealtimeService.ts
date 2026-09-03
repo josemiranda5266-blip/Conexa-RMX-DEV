@@ -27,6 +27,7 @@ export function subscribeToConversationRealtime(
   let storedConversations: StoredConversation[] = [];
   let participantProfiles = new Map<string, PublicUserProfile>();
   let profileUnsubscribe: Unsubscribe = () => {};
+  let subscribedParticipantKey = '';
   const messageUnsubscribers = new Map<string, Unsubscribe>();
   const messages: Record<string, Message[]> = {};
 
@@ -47,10 +48,16 @@ export function subscribeToConversationRealtime(
   const refreshProfiles = () => {
     const participantIds = Array.from(
       new Set(storedConversations.flatMap((conversation) => conversation.participantIds)),
-    );
+    ).sort();
+    const nextParticipantKey = participantIds.join('|');
+
+    // Conversation metadata changes frequently (for example on every new message).
+    // Keep the profile listener stable unless the actual participant set changes.
+    if (nextParticipantKey === subscribedParticipantKey) return;
 
     profileUnsubscribe();
     participantProfiles = new Map();
+    subscribedParticipantKey = nextParticipantKey;
 
     if (participantIds.length === 0) {
       publish();
@@ -118,6 +125,7 @@ export function subscribeToConversationRealtime(
   return () => {
     unsubscribeConversations();
     profileUnsubscribe();
+    subscribedParticipantKey = '';
     messageUnsubscribers.forEach((unsubscribe) => unsubscribe());
     messageUnsubscribers.clear();
   };
