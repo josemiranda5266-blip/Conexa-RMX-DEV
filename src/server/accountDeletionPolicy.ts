@@ -28,7 +28,8 @@ export interface AccountDeletionCheckpoint {
 }
 
 export function normalizeDeletionUserId(userId: unknown): string {
-  const normalized = String(userId || '').trim();
+  if (typeof userId !== 'string') throw new Error('INVALID_DELETION_USER_ID');
+  const normalized = userId.trim();
   if (!normalized || normalized.length > 128) throw new Error('INVALID_DELETION_USER_ID');
   return normalized;
 }
@@ -37,6 +38,13 @@ export function canAdvanceDeletionStage(current: AccountDeletionStage, next: Acc
   const currentIndex = ACCOUNT_DELETION_STAGES.indexOf(current);
   const nextIndex = ACCOUNT_DELETION_STAGES.indexOf(next);
   return nextIndex === currentIndex + 1 || nextIndex === currentIndex;
+}
+
+export function getNextDeletionStage(stage: AccountDeletionStage): AccountDeletionStage | null {
+  const index = ACCOUNT_DELETION_STAGES.indexOf(stage);
+  return index >= 0 && index < ACCOUNT_DELETION_STAGES.length - 1
+    ? ACCOUNT_DELETION_STAGES[index + 1]
+    : null;
 }
 
 export function isTerminalDeletionStage(stage: AccountDeletionStage): boolean {
