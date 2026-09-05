@@ -2,11 +2,12 @@ import { Request, Response } from 'express';
 import { getAdminDb } from '../firebaseAdmin.js';
 import { verifyMercadoPagoWebhookSignature } from './mercadoPagoConfig.js';
 import { reconcileMercadoPagoPayment } from './mercadoPagoReconciliation.js';
-import { MercadoPagoOAuthConnection, normalizeMercadoPagoOAuthConnection } from './mercadoPagoOAuthTokenStore.js';
+import { MercadoPagoOAuthConnection, decryptOAuthToken, normalizeMercadoPagoOAuthConnection } from './mercadoPagoOAuthTokenStore.js';
 import { startChargebackExpiryWorker } from './chargebackExpiry.js';
+import { getChargebackFromMP } from '@super-app/shared-payments';
+import { openOrUpdateChargebackCase, resolveChargebackCase } from './chargebackResolutionService.js';
 
 const CONNECTION_COLLECTION = 'mercado_pago_connections';
-
 startChargebackExpiryWorker();
 
 function resourceId(req: Request): string | undefined {
@@ -14,11 +15,16 @@ function resourceId(req: Request): string | undefined {
   const query = req.query as any;
   return query?.['data.id'] != null ? String(query['data.id']).trim() || undefined : body?.data?.id != null ? String(body.data.id).trim() || undefined : undefined;
 }
+function eventType(req: Request): string {
+  const body = req.body as any;
+  const query = req.query as any;
+  return String(body?.type || body?.topic || body?.action || query?.type || query?.topic || '').trim().toLowerCase();
+}
+function isChargebackEvent(req: Request): boolean { return eventType(req).includes('chargeback'); }
 function paymentId(req: Request): string | undefined {
   const body = req.body as any;
   const query = req.query as any;
-  const type = String(body?.type || query?.type || '').toLowerCase();
-  if (type.includes('chargeback') || String(body?.action || '').toLowerCase().includes('chargeback')) {
+  if (isChargebackEvent(req)) {
     const id = body?.data?.payment_id ?? body?.payment_id ?? query?.payment_id;
     if (id != null) return String(id).trim() || undefined;
   }
@@ -52,8 +58,41 @@ async function merchantIdForProviderPayment(providerPaymentId: string): Promise<
 export async function handleMercadoPagoWebhook(req: Request, res: Response): Promise<Response> {
   try {
     const signedResourceId = resourceId(req);
+    if (!signedResourceId) return res.status(400).json({ success: false, code: 'RESOURCE_ID_REQUIRED' });
+
+    if (isChargebackEvent(req)) {
+      const providerPaymentId = paymentId(req);
+      if (!providerPaymentId) return res.status(400).json({ success: false, code: 'PAYMENT_ID_REQUIRED' });
+      // For chargebacks the signed resource is data.id = chargeback case ID, never payment_id.
+      if (!verifyMercadoPagoWebhookSignature(signature(req), requestId(req), signedResourceId)) return res.status(401).json({ success: false, code: 'WEBHOOK_SIGNATURE_INVALID' });
+
+      const hintedTransactionId = typeof req.query.transactionId === 'string' ? req.query.transactionId.trim() : '';
+      const merchantId = hintedTransactionId ? await merchantIdForTransaction(hintedTransactionId) : await merchantIdForProviderPayment(providerPaymentId);
+      if (!merchantId) return res.status(400).json({ success: false, code: 'TRANSACTION_REFERENCE_REQUIRED' });
+      const connection = await connectionForMerchant(merchantId);
+      if (!connection) return res.status(404).json({ success: false, code: 'MERCADO_PAGO_CONNECTION_NOT_FOUND' });
+      if (String(connection.merchantId) !== merchantId) return res.status(403).json({ success: false, code: 'MERCADO_PAGO_CONNECTION_MISMATCH' });
+
+      const accessToken = decryptOAuthToken(connection.encryptedAccessToken);
+      const chargeback = await getChargebackFromMP(signedResourceId, accessToken);
+      if (chargeback.paymentId && String(chargeback.paymentId) !== String(providerPaymentId)) return res.status(400).json({ success: false, code: 'CHARGEBACK_PAYMENT_MISMATCH' });
+
+      const db = getAdminDb();
+      const paymentSnapshot = await db.collection('paymentTransactions').where('providerPaymentId', '==', String(providerPaymentId)).limit(1).get();
+      if (paymentSnapshot.empty) return res.status(404).json({ success: false, code: 'PAYMENT_TRANSACTION_NOT_FOUND' });
+      const paymentTransactionId = paymentSnapshot.docs[0].id;
+      await openOrUpdateChargebackCase({ chargeback, paymentTransactionId, merchantId, webhookAction: eventType(req) || 'chargeback', receivedAt: new Date().toISOString() });
+
+      if (chargeback.coverageApplied === true || chargeback.coverageApplied === false) {
+        const resolution = chargeback.coverageApplied ? 'Mercado Pago resolvió el chargeback a favor del comercio.' : 'Mercado Pago resolvió el chargeback en contra del comercio.';
+        const result = await resolveChargebackCase(signedResourceId, chargeback.coverageApplied, resolution);
+        return res.status(200).json({ success: true, chargebackId: signedResourceId, ...result });
+      }
+      return res.status(200).json({ success: true, chargebackId: signedResourceId, status: 'UNDER_REVIEW' });
+    }
+
     const providerPaymentId = paymentId(req);
-    if (!signedResourceId || !providerPaymentId) return res.status(400).json({ success: false, code: 'PAYMENT_ID_REQUIRED' });
+    if (!providerPaymentId) return res.status(400).json({ success: false, code: 'PAYMENT_ID_REQUIRED' });
     if (!verifyMercadoPagoWebhookSignature(signature(req), requestId(req), signedResourceId)) return res.status(401).json({ success: false, code: 'WEBHOOK_SIGNATURE_INVALID' });
 
     const hintedTransactionId = typeof req.query.transactionId === 'string' ? req.query.transactionId.trim() : '';
