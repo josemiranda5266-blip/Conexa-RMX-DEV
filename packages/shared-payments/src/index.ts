@@ -23,7 +23,10 @@ export function resolveSettlementTransition(domain: PaymentDomain, currentStatus
     return { status: current, changed: false, paid: false, refunded: false, chargeback: false, cancelled: false };
   }
   if (providerStatus === 'charged_back' || providerStatus === 'chargedback') {
+    // Provider reversals are terminal. A later/stale chargeback notification must not
+    // overwrite an already confirmed refund/cancellation state.
     if (current === 'CHARGEBACK') return { status: 'CHARGEBACK', changed: false, paid: false, refunded: false, chargeback: true, cancelled: false };
+    if (current === 'REFUNDED' || current === 'CANCELLED') return { status: current, changed: false, paid: false, refunded: false, chargeback: false, cancelled: false };
     return { status: 'CHARGEBACK', changed: true, paid: false, refunded: false, chargeback: true, cancelled: false };
   }
   if (providerStatus === 'cancelled' && (current === 'PAYMENT_PENDING' || current === 'CREATED')) return { status: 'CANCELLED', changed: true, paid: false, refunded: false, chargeback: false, cancelled: true };
