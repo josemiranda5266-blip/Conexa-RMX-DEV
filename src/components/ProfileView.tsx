@@ -21,8 +21,14 @@ import {
   X,
   Smartphone,
   Zap,
-  Award
+  Award,
+  Plus,
+  Search,
+  Layers
 } from 'lucide-react';
+import { ProfessionalSpecialty } from '../types';
+import { ProfessionCard } from './ProfessionCard';
+import { ProfessionModal } from './ProfessionModal';
 
 export const ProfileView: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenAuthModal }) => {
   const { currentUser, updateUserProfile, saveMercadoPagoDetails, transactions, logoutUser, setActiveView } = useApp();
@@ -33,6 +39,12 @@ export const ProfileView: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenA
   const [zone, setZone] = useState(currentUser.zone || '');
   const [bio, setBio] = useState(currentUser.bio || '');
   const [matricula, setMatricula] = useState(currentUser.matricula || '');
+
+  // Professions State
+  const [professions, setProfessions] = useState<ProfessionalSpecialty[]>(currentUser.professions || []);
+  const [isProfessionModalOpen, setIsProfessionModalOpen] = useState(false);
+  const [editingProfession, setEditingProfession] = useState<ProfessionalSpecialty | null>(null);
+  const [professionSearchQuery, setProfessionSearchQuery] = useState('');
 
   // Mercado Pago States
   const [mpAlias, setMpAlias] = useState(currentUser.mpAlias || '');
@@ -61,6 +73,7 @@ export const ProfileView: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenA
     setZone(currentUser.zone || '');
     setBio(currentUser.bio || '');
     setMatricula(currentUser.matricula || '');
+    setProfessions(currentUser.professions || []);
     setMpAlias(currentUser.mpAlias || '');
     setMpCvu(currentUser.mpCvu || '');
     setMpEmail(currentUser.mpEmail || currentUser.email || '');
@@ -98,6 +111,61 @@ export const ProfileView: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenA
     } finally {
       setIsSavingProfile(false);
     }
+  };
+
+  // Profession Handlers
+  const handleOpenAddProfession = () => {
+    setEditingProfession(null);
+    setIsProfessionModalOpen(true);
+  };
+
+  const handleOpenEditProfession = (prof: ProfessionalSpecialty) => {
+    setEditingProfession(prof);
+    setIsProfessionModalOpen(true);
+  };
+
+  const handleSaveProfession = async (savedProf: ProfessionalSpecialty) => {
+    let updated: ProfessionalSpecialty[];
+    const exists = professions.some(p => p.id === savedProf.id);
+
+    if (exists) {
+      updated = professions.map(p => (p.id === savedProf.id ? savedProf : p));
+    } else {
+      updated = [...professions, savedProf];
+    }
+
+    setProfessions(updated);
+
+    // Update categories and rubro automatically
+    const uniqueCategories = Array.from(new Set(updated.map(p => p.rubroId)));
+    const primaryRubro = updated[0]?.rubroId || currentUser.rubro || 'electricidad';
+
+    await updateUserProfile({
+      professions: updated,
+      categories: uniqueCategories,
+      rubro: primaryRubro,
+      isProfessional: true,
+      hasProfessionalProfile: true
+    });
+
+    setProfileSuccessMsg('¡Profesión y portafolio de fotos guardados correctamente!');
+    setTimeout(() => setProfileSuccessMsg(''), 4000);
+  };
+
+  const handleDeleteProfession = async (profId: string) => {
+    if (!window.confirm('¿Estás seguro de eliminar esta profesión de tu perfil?')) return;
+
+    const updated = professions.filter(p => p.id !== profId);
+    setProfessions(updated);
+
+    const uniqueCategories = Array.from(new Set(updated.map(p => p.rubroId)));
+    await updateUserProfile({
+      professions: updated,
+      categories: uniqueCategories
+    });
+
+    setProfileSuccessMsg('Profesión eliminada.');
+    setTimeout(() => setProfileSuccessMsg(''), 3000);
   };
 
   const handleSaveMpDetails = async (e: React.FormEvent) => {
@@ -154,7 +222,18 @@ export const ProfileView: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenA
     }, 1500);
   };
 
-  const isPro = currentUser.isProfessionalVerified || currentUser.role === 'PROFESSIONAL';
+  const isPro = currentUser.isProfessionalVerified || currentUser.role === 'PROFESSIONAL' || professions.length > 0;
+
+  const filteredProfessions = professions.filter(p => {
+    if (!professionSearchQuery.trim()) return true;
+    const q = professionSearchQuery.toLowerCase().trim();
+    return (
+      p.title.toLowerCase().includes(q) ||
+      p.rubroName.toLowerCase().includes(q) ||
+      p.description.toLowerCase().includes(q) ||
+      (p.matricula && p.matricula.toLowerCase().includes(q))
+    );
+  });
 
   return (
     <div className="space-y-8 pb-12">
@@ -184,7 +263,7 @@ export const ProfileView: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenA
                   ? 'bg-blue-950 text-blue-300 border border-blue-800'
                   : 'bg-zinc-800 text-zinc-300'
               }`}>
-                {isPro ? '🛠️ Cuenta Dual (Cliente & Profesional)' : '👤 Perfil Cliente'}
+                {isPro ? `🛠️ Cuenta Dual (${professions.length} ${professions.length === 1 ? 'Rubro' : 'Rubros'})` : '👤 Perfil Cliente'}
               </span>
             </div>
           </div>
@@ -223,7 +302,7 @@ export const ProfileView: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenA
             <div>
               <h3 className="text-base font-extrabold text-white">¿Tenés matrícula u oficio certificado?</h3>
               <p className="text-xs text-zinc-300 mt-0.5">
-                Activá el modo profesional para enviar cotizaciones a solicitudes públicas y cobrar con la garantía de CONEXA.
+                Podés registrar más de una profesión, detallar tu experiencia extensamente y cargar un carrusel de fotos de tus trabajos.
               </p>
             </div>
           </div>
@@ -231,21 +310,101 @@ export const ProfileView: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenA
             onClick={() => setActiveView('verification')}
             className="px-5 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-extrabold text-xs shadow-lg shadow-sky-500/20 whitespace-nowrap cursor-pointer transition-all flex items-center gap-1.5"
           >
-            <span>Activar Modo Profesional</span>
+            <span>Verificar Matrícula & Rubros</span>
             <ArrowUpRight className="w-4 h-4" />
           </button>
         </div>
       )}
 
-      {/* Main Grid: Left Profile Form, Right Mercado Pago & Cobros */}
+      {/* SECTION: Mis Profesiones, Especialidades & Portafolios (Multi-Profession Manager) */}
+      <section className="bg-slate-900/90 rounded-3xl p-6 sm:p-8 border border-slate-800 shadow-xl space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+          <div>
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-950/80 border border-red-800/60 text-red-300 text-[11px] font-bold mb-1">
+              <Briefcase className="w-3.5 h-3.5" />
+              <span>Gestor Multi-Profesión</span>
+            </div>
+            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              Mis Profesiones, Especialidades & Carruseles de Trabajos
+            </h2>
+            <p className="text-xs text-zinc-400">
+              Agregá tantas profesiones como ejerzas con descripción completa, matrícula y galería fotográfica de trabajos reales.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleOpenAddProfession}
+            className="px-5 py-3 rounded-2xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold text-xs sm:text-sm shadow-lg shadow-red-600/30 border border-red-500/40 transition-all cursor-pointer flex items-center gap-2 self-start sm:self-auto shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Agregar Nueva Profesión</span>
+          </button>
+        </div>
+
+        {/* Filter bar if multiple professions */}
+        {professions.length > 1 && (
+          <div className="relative">
+            <Search className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={professionSearchQuery}
+              onChange={e => setProfessionSearchQuery(e.target.value)}
+              placeholder="Buscar entre tus profesiones por título, rubro o matrícula..."
+              className="w-full pl-10 pr-4 py-2.5 bg-zinc-950 border border-slate-800 rounded-xl text-xs sm:text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-red-500"
+            />
+          </div>
+        )}
+
+        {/* Professions List */}
+        {professions.length === 0 ? (
+          <div className="text-center py-12 px-4 rounded-3xl bg-zinc-950/60 border border-dashed border-slate-800 space-y-4">
+            <div className="w-16 h-16 rounded-3xl bg-slate-900 border border-slate-800 flex items-center justify-center text-red-400 mx-auto shadow-inner">
+              <Briefcase className="w-8 h-8" />
+            </div>
+            <div className="space-y-1 max-w-md mx-auto">
+              <h3 className="text-base font-black text-white">Todavía no agregaste profesiones a tu cuenta</h3>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Podés registrar más de un rubro (ej: Electricista y Aire Acondicionado o Plomero y Gasista) con descripciones extensas y fotos reales de tus trabajos para atraer más clientes.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleOpenAddProfession}
+              className="px-6 py-3 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs sm:text-sm shadow-md shadow-red-600/30 transition-all cursor-pointer inline-flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Registrar Mi Primera Profesión</span>
+            </button>
+          </div>
+        ) : filteredProfessions.length === 0 ? (
+          <div className="text-center py-8 text-zinc-400 text-xs">
+            No se encontraron profesiones con el término de búsqueda.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-6">
+            {filteredProfessions.map(prof => (
+              <ProfessionCard
+                key={prof.id}
+                profession={prof}
+                isOwner={true}
+                onEdit={handleOpenEditProfession}
+                onDelete={handleDeleteProfession}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Main Grid: Left Personal Form, Right Mercado Pago & Cobros */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         
-        {/* Left Column: Personal & Professional Profile */}
+        {/* Left Column: Personal Profile */}
         <div className="lg:col-span-7 space-y-6">
           <div className="bg-slate-900/80 rounded-3xl p-6 sm:p-8 border border-slate-800 shadow-xl space-y-6">
             <div className="flex items-center gap-2 pb-3 border-b border-slate-800">
               <UserIcon className="w-5 h-5 text-red-500" />
-              <h2 className="text-xl font-extrabold text-white">Datos Personales</h2>
+              <h2 className="text-xl font-extrabold text-white">Datos Personales de la Cuenta</h2>
             </div>
 
             {profileSuccessMsg && (
@@ -304,36 +463,34 @@ export const ProfileView: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenA
                 </div>
               </div>
 
-              {isPro && (
-                <div className="pt-2 border-t border-slate-800 space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-300 mb-1 flex items-center gap-1.5">
-                      <FileBadge className="w-4 h-4 text-blue-400" />
-                      <span>Matrícula o Certificación Profesional</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={matricula}
-                      onChange={e => setMatricula(e.target.value)}
-                      placeholder="Ej: COPITEC Mat. #84920 / Gasista 2da Cat."
-                      className="w-full px-3.5 py-2.5 bg-zinc-950 border border-slate-800 rounded-xl text-xs sm:text-sm text-white focus:outline-none focus:border-red-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-300 mb-1">
-                      Presentación / Especialidad Profesional
-                    </label>
-                    <textarea
-                      rows={3}
-                      value={bio}
-                      onChange={e => setBio(e.target.value)}
-                      placeholder="Resumen de experiencia, herramientas y especialidad..."
-                      className="w-full px-3.5 py-2.5 bg-zinc-950 border border-slate-800 rounded-xl text-xs sm:text-sm text-white focus:outline-none focus:border-red-500 resize-none"
-                    />
-                  </div>
+              <div className="pt-2 border-t border-slate-800 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-zinc-300 mb-1 flex items-center gap-1.5">
+                    <FileBadge className="w-4 h-4 text-blue-400" />
+                    <span>Matrícula o Registro Principal</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={matricula}
+                    onChange={e => setMatricula(e.target.value)}
+                    placeholder="Ej: COPITEC Mat. #84920 / Gasista 2da Cat."
+                    className="w-full px-3.5 py-2.5 bg-zinc-950 border border-slate-800 rounded-xl text-xs sm:text-sm text-white focus:outline-none focus:border-red-500"
+                  />
                 </div>
-              )}
+
+                <div>
+                  <label className="block text-xs font-bold text-zinc-300 mb-1">
+                    Bio General / Acerca de Mí
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={bio}
+                    onChange={e => setBio(e.target.value)}
+                    placeholder="Resumen general de tu trayectoria, valores y trayectoria profesional..."
+                    className="w-full px-3.5 py-2.5 bg-zinc-950 border border-slate-800 rounded-xl text-xs sm:text-sm text-white focus:outline-none focus:border-red-500 resize-none"
+                  />
+                </div>
+              </div>
 
               <div className="pt-2 flex justify-end">
                 <button
@@ -495,6 +652,18 @@ export const ProfileView: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenA
         </div>
 
       </div>
+
+      {/* Profession Modal for Add / Edit */}
+      <ProfessionModal
+        isOpen={isProfessionModalOpen}
+        onClose={() => {
+          setIsProfessionModalOpen(false);
+          setEditingProfession(null);
+        }}
+        onSave={handleSaveProfession}
+        initialProfession={editingProfession}
+        alreadyAddedRubroIds={professions.map(p => p.rubroId).filter(id => id !== editingProfession?.rubroId)}
+      />
 
       {/* Mercado Pago Interactive Connection / Authorization Modal */}
       {isMpModalOpen && (

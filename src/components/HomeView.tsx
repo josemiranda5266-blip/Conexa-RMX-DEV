@@ -18,10 +18,18 @@ import {
   Star,
   PlusCircle,
   FileCheck,
-  AlertCircle
+  AlertCircle,
+  Scale,
+  RotateCcw,
+  QrCode,
+  FileText,
+  Shield,
+  BookOpen
 } from 'lucide-react';
 import { CategoryInfo } from '../types';
 import { isUserCandidateProfessional } from '../domain/professionalEligibility';
+import { RevocationModal } from './RevocationModal';
+import { AfipDataFiscalModal } from './AfipDataFiscalModal';
 
 const ICON_MAP: Record<string, React.ReactNode> = {
   Zap: <Zap className="w-6 h-6 text-amber-500" />,
@@ -39,8 +47,15 @@ export const HomeView: React.FC<{
   onSelectCategory: (catId: string) => void;
   onOpenSubmitQuote: (requestId: string) => void;
 }> = ({ onOpenNewRequest, onSelectCategory, onOpenSubmitQuote }) => {
-  const { categories, requests, users, currentUser, setActiveView, setSelectedRequestId } = useApp();
+  const { categories, requests, users, currentUser, setActiveView, setSelectedRequestId, setLegalInitialTab } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
+  const [isRevocationOpen, setIsRevocationOpen] = useState(false);
+  const [isDataFiscalOpen, setIsDataFiscalOpen] = useState(false);
+
+  const openLegalTab = (tab: string) => {
+    setLegalInitialTab(tab);
+    setActiveView('legal');
+  };
 
   const verifiedPros = users.filter(isUserCandidateProfessional);
   const openRequests = requests.filter(r => r.status === 'PENDING' || r.status === 'QUOTES_RECEIVED').slice(0, 4);
@@ -320,6 +335,95 @@ export const HomeView: React.FC<{
         </div>
 
       </div>
+
+      {/* Argentine Legal Compliance Section */}
+      <section className="bg-slate-900/60 rounded-3xl p-6 sm:p-8 border border-slate-800/80 shadow-lg space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 text-amber-400 flex items-center justify-center">
+              <Scale className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-extrabold text-white">Transparencia & Marco Legal en Argentina</h3>
+              <p className="text-xs text-zinc-400">Protección del consumidor, custodia de fondos y privacidad de datos</p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsRevocationOpen(true)}
+              className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Botón de Arrepentimiento</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsDataFiscalOpen(true)}
+              className="px-3 py-2 rounded-xl bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 font-bold text-xs transition-all cursor-pointer flex items-center gap-1"
+            >
+              <QrCode className="w-3.5 h-3.5 text-sky-400" />
+              <span>Data Fiscal F.960/D</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Legal Link Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <button
+            type="button"
+            onClick={() => openLegalTab('terms')}
+            className="p-3.5 rounded-2xl bg-zinc-950 hover:bg-zinc-900 border border-slate-800 text-left transition-all cursor-pointer group"
+          >
+            <FileText className="w-4 h-4 text-red-500 mb-1.5" />
+            <div className="font-bold text-white group-hover:text-red-400">Términos y Condiciones</div>
+            <div className="text-[10px] text-zinc-500 mt-0.5">Locación de servicios & comisiones</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => openLegalTab('privacy')}
+            className="p-3.5 rounded-2xl bg-zinc-950 hover:bg-zinc-900 border border-slate-800 text-left transition-all cursor-pointer group"
+          >
+            <Shield className="w-4 h-4 text-emerald-400 mb-1.5" />
+            <div className="font-bold text-white group-hover:text-emerald-300">Protección de Datos</div>
+            <div className="text-[10px] text-zinc-500 mt-0.5">Ley 25.326 · Órgano de Control AAIP</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => openLegalTab('consumer')}
+            className="p-3.5 rounded-2xl bg-zinc-950 hover:bg-zinc-900 border border-slate-800 text-left transition-all cursor-pointer group"
+          >
+            <Scale className="w-4 h-4 text-amber-400 mb-1.5" />
+            <div className="font-bold text-white group-hover:text-amber-300">Defensa del Consumidor</div>
+            <div className="text-[10px] text-zinc-500 mt-0.5">Ley 24.240 · Ventanilla Única Federal</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => openLegalTab('complaints')}
+            className="p-3.5 rounded-2xl bg-zinc-950 hover:bg-zinc-900 border border-slate-800 text-left transition-all cursor-pointer group"
+          >
+            <BookOpen className="w-4 h-4 text-sky-400 mb-1.5" />
+            <div className="font-bold text-white group-hover:text-sky-300">Libro de Quejas Digital</div>
+            <div className="text-[10px] text-zinc-500 mt-0.5">Registro oficial de reclamos</div>
+          </button>
+        </div>
+      </section>
+
+      {/* Modals */}
+      <RevocationModal
+        isOpen={isRevocationOpen}
+        onClose={() => setIsRevocationOpen(false)}
+      />
+
+      <AfipDataFiscalModal
+        isOpen={isDataFiscalOpen}
+        onClose={() => setIsDataFiscalOpen(false)}
+      />
 
     </div>
   );

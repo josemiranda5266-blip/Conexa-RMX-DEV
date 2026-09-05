@@ -210,6 +210,14 @@ export const Header: React.FC<{
                           <span>Matrícula & Certificación</span>
                         </button>
                       )}
+
+                      <button
+                        onClick={() => handleSelectView('legal')}
+                        className="w-full text-left px-4 py-2.5 text-xs sm:text-sm text-zinc-300 hover:text-white hover:bg-slate-800/80 flex items-center gap-2.5 transition-colors cursor-pointer border-t border-slate-800/60"
+                      >
+                        <FileText className="w-4 h-4 text-amber-400" />
+                        <span>Centro Legal & Arrepentimiento</span>
+                      </button>
                     </div>
 
                     {/* Logout Button */}
@@ -304,6 +312,14 @@ export const Header: React.FC<{
               >
                 <UserIcon className="w-4 h-4 text-sky-400" />
                 <span>Mi Perfil & Mercado Pago</span>
+              </button>
+
+              <button
+                onClick={() => handleSelectView('legal')}
+                className="w-full py-2.5 px-3 rounded-xl bg-slate-900 text-xs font-bold text-amber-300 flex items-center gap-2 cursor-pointer border border-slate-800"
+              >
+                <FileText className="w-4 h-4 text-amber-400" />
+                <span>Centro Legal & Arrepentimiento</span>
               </button>
 
               {!currentUser.isProfessionalVerified && (

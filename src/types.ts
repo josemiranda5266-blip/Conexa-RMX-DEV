@@ -1,5 +1,21 @@
 export type UserRole = 'CLIENT' | 'PROFESSIONAL' | 'ADMIN';
 
+export interface ProfessionalSpecialty {
+  id: string;
+  rubroId: string;
+  rubroName: string;
+  categoryGroup?: string;
+  title: string;
+  matricula?: string;
+  experienceYears?: number;
+  description: string;
+  photos: string[];
+  coverageZone?: string;
+  hourlyRateArs?: number;
+  featured?: boolean;
+  createdAt?: string;
+}
+
 export interface User {
   id: string;
   uid?: string;
@@ -21,6 +37,7 @@ export interface User {
   reviewCount?: number;
   bio?: string;
   categories?: string[];
+  professions?: ProfessionalSpecialty[];
   mpConnected?: boolean;
   mpAlias?: string;
   mpCvu?: string;
@@ -145,4 +162,32 @@ export interface CategoryInfo {
   iconName: string;
   description: string;
   popular?: boolean;
+  categoryGroup?: string;
+  keywords?: string[];
+}
+
+export interface RevocationRequest {
+  id: string;
+  transactionId?: string;
+  serviceRequestId?: string;
+  clientEmail: string;
+  clientName: string;
+  reason: string;
+  trackingCode: string;
+  status: 'PROCESSED' | 'PENDING' | 'REJECTED';
+  createdAt: string;
+}
+
+export interface ComplaintTicket {
+  id: string;
+  ticketNumber: string;
+  fullName: string;
+  dniOrCuit: string;
+  email: string;
+  phone: string;
+  category: 'SERVICE_QUALITY' | 'BILLING' | 'PROFESSIONAL_BEHAVIOR' | 'PLATFORM_FUNCTIONALITY' | 'OTHER';
+  description: string;
+  requestedResolution: string;
+  status: 'RECEIVED' | 'IN_REVIEW' | 'RESOLVED';
+  createdAt: string;
 }

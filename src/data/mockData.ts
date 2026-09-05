@@ -1,15 +1,7 @@
 import { User, ServiceRequest, Quote, Transaction, Review, CategoryInfo, Conversation, Message } from '../types';
+import { ALL_RUBROS_CATALOG, PRESET_WORK_PHOTOS } from './rubrosData';
 
-export const INITIAL_CATEGORIES: CategoryInfo[] = [
-  { id: 'electricidad', name: 'Electricidad', iconName: 'Zap', description: 'Instalaciones, térmicas, cableados y urgencias 24hs.', popular: true },
-  { id: 'plomeria', name: 'Plomería y Gas', iconName: 'Wrench', description: 'Reparación de cañerías, pérdidas, griferías y gasistas matriculados.', popular: true },
-  { id: 'climatizacion', name: 'Aire Acondicionado & Clima', iconName: 'Snowflake', description: 'Instalación, carga de gas, service preventivo y calderas.', popular: true },
-  { id: 'cerrajeria', name: 'Cerrajería', iconName: 'Key', description: 'Aperturas de emergencia, cambio de combinaciones y cerraduras digitales.', popular: true },
-  { id: 'pintura', name: 'Pintura', iconName: 'Paintbrush', description: 'Interiores, exteriores, impermeabilización y trabajos en altura.', popular: false },
-  { id: 'albanileria', name: 'Albañilería y Refacciones', iconName: 'Hammer', description: 'Construcción en seco, revoques, colocación de pisos y cerámicos.', popular: false },
-  { id: 'carpinteria', name: 'Carpintería', iconName: 'SquareGantt', description: 'Muebles a medida, aberturas, decks y restauración de maderas.', popular: false },
-  { id: 'tecnologia', name: 'Soporte Técnico y Redes', iconName: 'Laptop', description: 'Cámaras de seguridad, cableado estructurado y domótica.', popular: false },
-];
+export const INITIAL_CATEGORIES: CategoryInfo[] = ALL_RUBROS_CATALOG;
 
 export const INITIAL_USERS: User[] = [
   {
@@ -38,8 +30,55 @@ export const INITIAL_USERS: User[] = [
     rating: 4.95,
     reviewCount: 38,
     completedJobs: 42,
-    bio: 'Electricista Matriculado e Ingeniero Electromecánico con más de 12 años de trayectoria. Especialista en tableros trifásicos, certificaciones DCI/Edenor/Edesur y detección rápida de cortocircuitos.',
-    categories: ['electricidad', 'climatizacion'],
+    bio: 'Electricista Matriculado e Ingeniero Electromecánico con más de 12 años de trayectoria. Especialista en tableros trifásicos, certificaciones DCI/Edenor/Edesur, climatización inverter y domótica inteligente.',
+    rubro: 'electricidad',
+    categories: ['electricidad', 'climatizacion', 'domotica', 'energia-solar'],
+    professions: [
+      {
+        id: 'prof-1-1',
+        rubroId: 'electricidad',
+        rubroName: 'Electricidad Matriculada & Redes',
+        categoryGroup: 'instalaciones',
+        title: 'Ingeniero Electricista & Certificaciones DCI',
+        matricula: 'COPITEC Mat. #84920 / CABA',
+        experienceYears: 12,
+        description: 'Especialista en ingeniería eléctrica domiciliaria e industrial. Realizo armado e instalación de tableros seccionales y principales con disyuntores diferenciales tipo superinmunizados, cálculo de balance de fases trifásicas, recableados ignífugos bajo norma IRAM 2183, detección de fugas y cortocircuitos con pinza amperimétrica True-RMS y emisión de certificados DCI oficiales para Edenor y Edesur con garantía formal.',
+        photos: PRESET_WORK_PHOTOS['electricidad'] || [
+          'https://images.unsplash.com/photo-1621905251189-08b45d6a269e?w=800&auto=format&fit=crop&q=80',
+          'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=800&auto=format&fit=crop&q=80'
+        ],
+        coverageZone: 'CABA, Vicente López, San Isidro, San Fernando',
+        featured: true
+      },
+      {
+        id: 'prof-1-2',
+        rubroId: 'climatizacion',
+        rubroName: 'Aire Acondicionado & Climatización',
+        categoryGroup: 'instalaciones',
+        title: 'Técnico Instalador Matriculado en Refrigeración (CACAAV)',
+        matricula: 'Matrícula CACAAV #11492',
+        experienceYears: 8,
+        description: 'Instalación y service integral de equipos de aire acondicionado split, multisplit e inverter con bomba de vacío de dos etapas, prueba de estanqueidad con nitrógeno a 400 PSI y pestañado con valona excéntrica. Carga de gas refrigerante R410A y R32 por balanza digital y limpieza antibacteriana por ultrasonido.',
+        photos: PRESET_WORK_PHOTOS['climatizacion'] || [
+          'https://images.unsplash.com/photo-1621905252507-b35492cc74b4?w=800&auto=format&fit=crop&q=80',
+          'https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=800&auto=format&fit=crop&q=80'
+        ],
+        coverageZone: 'CABA y GBA Norte'
+      },
+      {
+        id: 'prof-1-3',
+        rubroId: 'domotica',
+        rubroName: 'Domótica & Automatización de Hogar',
+        categoryGroup: 'mantenimiento',
+        title: 'Integrador Smart Home & Control por Voz',
+        experienceYears: 5,
+        description: 'Automatización integral residencial con dispositivos Sonoff, Tuya y Shelly integrados a Apple HomeKit, Alexa y Google Assistant. Programación de escenas para ahorro energético, persianas automáticas, cerraduras inteligentes y control de bombas.',
+        photos: PRESET_WORK_PHOTOS['cctv-seguridad'] || [
+          'https://images.unsplash.com/photo-1557597774-9d273605dfa9?w=800&auto=format&fit=crop&q=80'
+        ],
+        coverageZone: 'CABA y Zona Norte'
+      }
+    ],
     mpConnected: true,
     mpAlias: 'marcelo.electrico.mp',
     mpCvu: '0000003100084920194832',
@@ -59,8 +98,40 @@ export const INITIAL_USERS: User[] = [
     rating: 4.88,
     reviewCount: 26,
     completedJobs: 29,
-    bio: 'Gasista matriculado y plomero integral. Termofusión, bombas presurizadoras, detección no destructiva de fugas con cámara térmica y pruebas de hermeticidad.',
-    categories: ['plomeria'],
+    bio: 'Gasista matriculado ante ENARGAS y plomero integral con taller móvil. Termofusión de agua y gas, bombas presurizadoras Rowa, detección de filtraciones no invasiva y refacción de baños.',
+    rubro: 'plomeria',
+    categories: ['plomeria', 'gas', 'calderas'],
+    professions: [
+      {
+        id: 'prof-2-1',
+        rubroId: 'gas',
+        rubroName: 'Gasista Matriculado',
+        categoryGroup: 'instalaciones',
+        title: 'Gasista Matriculado 2da Categoría ENARGAS',
+        matricula: 'Metrogas / ENARGAS Mat. #19402',
+        experienceYears: 15,
+        description: 'Trámites de rehabilitación de servicio de gas, inspecciones previas, plano conforme a obra (Formulario 1022 / 3.5), confección de cañerías en Sigas Thermofusión y epoxi soldada, prueba de columna de agua con manómetro y colocación de rejillas de ventilación reglamentarias.',
+        photos: PRESET_WORK_PHOTOS['gas'] || [
+          'https://images.unsplash.com/photo-1585704032915-c3400ca199e7?w=800&auto=format&fit=crop&q=80'
+        ],
+        coverageZone: 'CABA (Belgrano, Nuñez, Colegiales, Palermo), Vicente López',
+        featured: true
+      },
+      {
+        id: 'prof-2-2',
+        rubroId: 'plomeria',
+        rubroName: 'Plomería & Redes Sanitarias',
+        categoryGroup: 'instalaciones',
+        title: 'Plomero Integral & Termofusión Sanitaria',
+        experienceYears: 16,
+        description: 'Renovación integral de cañerías en Saladillo / Acqua System termofusión, bajadas de tanque en polietileno tricapa, instalación de bombas presurizadoras ROWA Tango y SFL, limpieza de tanques de reserva con desinfección y destapaciones con máquina rotativa.',
+        photos: PRESET_WORK_PHOTOS['plomeria'] || [
+          'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=800&auto=format&fit=crop&q=80',
+          'https://images.unsplash.com/photo-1607472586893-edb57bdc0e39?w=800&auto=format&fit=crop&q=80'
+        ],
+        coverageZone: 'CABA y GBA Norte'
+      }
+    ],
     mpConnected: true,
     mpAlias: 'gonzalo.plomeria.mp',
     mpCvu: '0000003100019402882103',

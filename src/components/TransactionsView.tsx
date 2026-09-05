@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   DollarSign,
@@ -10,13 +10,19 @@ import {
   CreditCard,
   Building,
   Sparkles,
-  FileCheck
+  FileCheck,
+  RotateCcw,
+  Scale
 } from 'lucide-react';
+import { RevocationModal } from './RevocationModal';
 
 export const TransactionsView: React.FC<{
   onOpenReviewModal: (requestId: string, proId: string) => void;
 }> = ({ onOpenReviewModal }) => {
-  const { transactions, requests, currentUser, releasePayment, connectMercadoPago } = useApp();
+  const { transactions, requests, currentUser, releasePayment, connectMercadoPago, setLegalInitialTab, setActiveView } = useApp();
+  const [revocationModalOpen, setRevocationModalOpen] = useState(false);
+  const [selectedTxIdForRevocation, setSelectedTxIdForRevocation] = useState<string | undefined>();
+  const [selectedReqIdForRevocation, setSelectedReqIdForRevocation] = useState<string | undefined>();
 
   const totalHeld = transactions
     .filter(t => t.status === 'PAYMENT_HELD' || t.status === 'SERVICE_COMPLETED')
@@ -29,6 +35,12 @@ export const TransactionsView: React.FC<{
   const handleRelease = async (txId: string, reqId: string, proId: string) => {
     await releasePayment(txId);
     onOpenReviewModal(reqId, proId);
+  };
+
+  const handleOpenRevoke = (txId: string, reqId: string) => {
+    setSelectedTxIdForRevocation(txId);
+    setSelectedReqIdForRevocation(reqId);
+    setRevocationModalOpen(true);
   };
 
   return (
@@ -140,12 +152,23 @@ export const TransactionsView: React.FC<{
                     </div>
 
                     {currentUser.role === 'CLIENT' && (tx.status === 'PAYMENT_HELD' || tx.status === 'SERVICE_COMPLETED') && (
-                      <button
-                        onClick={() => handleRelease(tx.id, tx.serviceRequestId, tx.professionalId)}
-                        className="mt-2 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors cursor-pointer"
-                      >
-                        Liberar Fondos
-                      </button>
+                      <div className="mt-2 flex items-center gap-2">
+                        <button
+                          onClick={() => handleOpenRevoke(tx.id, tx.serviceRequestId)}
+                          className="px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-semibold text-[11px] transition-colors cursor-pointer flex items-center gap-1"
+                          title="Revocar contratación dentro del plazo legal de 10 días (Res. 271/2020)"
+                        >
+                          <RotateCcw className="w-3 h-3 text-amber-400" />
+                          <span>Arrepentimiento</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleRelease(tx.id, tx.serviceRequestId, tx.professionalId)}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors cursor-pointer"
+                        >
+                          Liberar Fondos
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -154,6 +177,18 @@ export const TransactionsView: React.FC<{
           </div>
         )}
       </div>
+
+      {/* Revocation Modal */}
+      <RevocationModal
+        isOpen={revocationModalOpen}
+        onClose={() => {
+          setRevocationModalOpen(false);
+          setSelectedTxIdForRevocation(undefined);
+          setSelectedReqIdForRevocation(undefined);
+        }}
+        preselectedTransactionId={selectedTxIdForRevocation}
+        preselectedRequestId={selectedReqIdForRevocation}
+      />
 
     </div>
   );

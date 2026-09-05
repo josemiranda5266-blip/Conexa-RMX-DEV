@@ -31,7 +31,8 @@ export type AppView =
   | 'messages'
   | 'transactions'
   | 'profile'
-  | 'verification';
+  | 'verification'
+  | 'legal';
 
 interface AppContextType {
   currentUser: User;
@@ -53,6 +54,8 @@ interface AppContextType {
   setSelectedRequestId: (id: string | null) => void;
   selectedConversationId: string | null;
   setSelectedConversationId: (id: string | null) => void;
+  legalInitialTab: string;
+  setLegalInitialTab: (tab: string) => void;
 
   createRequest: (data: Omit<ServiceRequest, 'id' | 'clientId' | 'clientName' | 'clientAvatar' | 'quotesCount' | 'status' | 'createdAt' | 'updatedAt'>) => Promise<ServiceRequest>;
   cancelRequest: (requestId: string) => Promise<boolean>;
@@ -67,6 +70,8 @@ interface AppContextType {
   acceptQuote: (quoteId: string, paymentMethod?: string) => Promise<{ quote: Quote; transaction: Transaction }>;
   completeJob: (requestId: string) => Promise<boolean>;
   releasePayment: (transactionId: string) => Promise<boolean>;
+  processRevocation: (data: { transactionId?: string; requestId?: string; reason: string; email: string; name: string }) => Promise<{ success: boolean; trackingCode: string; message: string }>;
+  requestAccountDeletion: (reason?: string) => Promise<boolean>;
   
   addReview: (reviewData: Omit<Review, 'id' | 'clientId' | 'clientName' | 'clientAvatar' | 'createdAt'>) => Promise<Review>;
   
@@ -122,6 +127,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [activeView, setActiveView] = useState<AppView>('home');
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>('conv-1');
+  const [legalInitialTab, setLegalInitialTab] = useState<string>('terms');
 
   // Listen to Firebase Auth state changes
   useEffect(() => {
@@ -149,6 +155,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               matricula: data.matricula || '',
               cuit: data.cuit || '',
               rubro: data.rubro || '',
+              categories: data.categories || [],
+              professions: data.professions || [],
               isProfessional: !!data.isProfessional || !!data.isProfessionalVerified,
               hasProfessionalProfile: !!data.hasProfessionalProfile || !!data.isProfessionalVerified,
               isProfessionalVerified: !!data.isProfessionalVerified,
@@ -547,6 +555,72 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return newMsg;
   };
 
+  // Botón de Arrepentimiento - Resolución 271/2020 Secretaría de Comercio Interior
+  const processRevocation = async (data: { transactionId?: string; requestId?: string; reason: string; email: string; name: string }) => {
+    const trackingCode = `ARREP-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    
+    // If a transaction was specified, update its status to REFUNDED
+    if (data.transactionId) {
+      setTransactions(prev => {
+        const updated = prev.map(t => t.id === data.transactionId ? { ...t, status: 'REFUNDED' as const } : t);
+        saveToStorage('transactions', updated);
+        return updated;
+      });
+    }
+
+    // If a request was associated, mark it as CANCELLED
+    if (data.requestId) {
+      setRequests(prev => {
+        const updated = prev.map(r => r.id === data.requestId ? { ...r, status: 'CANCELLED' as const } : r);
+        saveToStorage('requests', updated);
+        return updated;
+      });
+    }
+
+    // Save revocation record to localStorage
+    const existingRevocations = loadFromStorage<any[]>('revocations', []);
+    const newRevocation = {
+      id: `rev-${Date.now()}`,
+      trackingCode,
+      ...data,
+      status: 'PROCESSED',
+      createdAt: new Date().toISOString()
+    };
+    saveToStorage('revocations', [newRevocation, ...existingRevocations]);
+
+    return {
+      success: true,
+      trackingCode,
+      message: `Tu solicitud de arrepentimiento y revocación ha sido procesada con éxito bajo el Código de Trámite: ${trackingCode}. Se ha notificado al titular y se procederá al reintegro de los importes abonados.`
+    };
+  };
+
+  // Botón de Baja de Cuenta - Res. 316/2018 y Ley 25.326
+  const requestAccountDeletion = async (reason?: string) => {
+    try {
+      if (currentUser.id) {
+        // Clear local storage data for current user
+        const existingDeletions = loadFromStorage<any[]>('account_deletions', []);
+        saveToStorage('account_deletions', [
+          ...existingDeletions,
+          {
+            userId: currentUser.id,
+            email: currentUser.email,
+            name: currentUser.name,
+            reason: reason || 'Solicitud de baja voluntaria por el titular',
+            date: new Date().toISOString()
+          }
+        ]);
+        await logoutUser();
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Error deleting account:', err);
+      return false;
+    }
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -567,6 +641,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setSelectedRequestId,
         selectedConversationId,
         setSelectedConversationId,
+        legalInitialTab,
+        setLegalInitialTab,
         createRequest,
         cancelRequest,
         submitQuote,
@@ -579,6 +655,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         acceptQuote,
         completeJob,
         releasePayment,
+        processRevocation,
+        requestAccountDeletion,
         addReview,
         createConversation,
         sendMessage
