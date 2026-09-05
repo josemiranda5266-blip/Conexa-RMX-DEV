@@ -1,4 +1,4 @@
-import { getAdminDb } from '../firebaseAdmin.js';
+import { FieldValue } from 'firebase-admin/firestore';
 import { resolveSettlementTransition, type ProviderPaymentStatus } from '@super-app/shared-payments';
 import { MercadoPagoOAuthConnection } from './mercadoPagoOAuthTokenStore.js';
 import { fetchMercadoPagoPaymentWithConnection } from './mercadoPagoPayment.js';
@@ -72,9 +72,7 @@ export async function reconcileMercadoPagoPayment(
   if (resolved.data.providerPaymentId && String(resolved.data.providerPaymentId) !== String(paymentId)) return { status: 'IGNORED', reason: 'PAYMENT_ID_MISMATCH' };
 
   const collectorId = paymentMerchantId(payment);
-  if (collectorId && connection.externalUserId && collectorId !== String(connection.externalUserId)) {
-    return { status: 'IGNORED', reason: 'PAYMENT_MERCHANT_MISMATCH' };
-  }
+  if (collectorId && connection.externalUserId && collectorId !== String(connection.externalUserId)) return { status: 'IGNORED', reason: 'PAYMENT_MERCHANT_MISMATCH' };
 
   const db = getAdminDb();
   return db.runTransaction(async tx => {
@@ -97,7 +95,68 @@ export async function reconcileMercadoPagoPayment(
       ...(resolved.kind === 'NEXORA' ? { providerPaymentId: String(paymentId) } : { mercadoPagoPaymentId: String(paymentId) }),
     };
 
-    if (transition.paid) {
+    let orderWasSettled = false;
+
+    if (resolved.kind === 'NEXORA' && paymentStatus === 'approved') {
+      const orderId = String(current.orderId || '').trim();
+      if (!orderId) return { status: 'IGNORED', reason: 'ORDER_REFERENCE_MISSING' };
+      const orderRef = db.collection('orders').doc(orderId);
+      const orderSnap = await tx.get(orderRef);
+      if (!orderSnap.exists) return { status: 'IGNORED', reason: 'ORDER_NOT_FOUND' };
+      const order = orderSnap.data() || {};
+      if (String(order.paymentTransactionId || '') !== resolved.ref.id || String(order.buyerId || '') !== String(current.buyerId || '') || String(order.sellerId || '') !== String(current.merchantId || '')) {
+        return { status: 'IGNORED', reason: 'ORDER_PAYMENT_LINK_MISMATCH' };
+      }
+
+      const orderStatus = String(order.status || '').toUpperCase();
+      if (orderStatus === 'PENDING') {
+        const listingRefs = (Array.isArray(order.items) ? order.items : []).map((item: any) => db.collection('listings').doc(String(item.listingId)));
+        const listingSnaps = await Promise.all(listingRefs.map(ref => tx.get(ref)));
+        const reservationValid = listingSnaps.length === order.items?.length && listingSnaps.every((snap, index) => {
+          if (!snap.exists) return false;
+          const listing = snap.data() || {};
+          return String(listing.reservedByOrderId || '') === orderId
+            && Number(listing.reservedQuantity) === Number(order.items[index].quantity)
+            && listing.reservationExpiresAt
+            && Date.parse(String(listing.reservationExpiresAt)) > Date.parse(now);
+        });
+
+        update.status = 'PAID';
+        update.paidAt = current.paidAt || now;
+        tx.update(orderRef, reservationValid
+          ? { status: 'PAID', paidAt: current.paidAt || now, updatedAt: FieldValue.serverTimestamp() }
+          : { status: 'DISPUTED', disputeReason: 'PAYMENT_AFTER_INVENTORY_RESERVATION_EXPIRY', disputeAt: now, updatedAt: FieldValue.serverTimestamp() });
+
+        listingSnaps.forEach((snap, index) => {
+          if (!snap.exists) return;
+          const listing = snap.data() || {};
+          if (String(listing.reservedByOrderId || '') !== orderId) return;
+          const stock = Number.isInteger(listing.stock) && Number(listing.stock) >= 0 ? Number(listing.stock) : 0;
+          if (reservationValid) {
+            tx.update(listingRefs[index], {
+              status: stock === 0 ? 'Vendido' : 'Disponible',
+              reservedQuantity: 0,
+              reservedByOrderId: FieldValue.delete(),
+              reservationExpiresAt: FieldValue.delete(),
+              updatedAt: FieldValue.serverTimestamp(),
+            });
+          } else {
+            const restored = stock + Number(order.items[index].quantity);
+            tx.update(listingRefs[index], {
+              stock: restored,
+              status: restored > 0 ? 'Disponible' : listing.status,
+              reservedQuantity: 0,
+              reservedByOrderId: FieldValue.delete(),
+              reservationExpiresAt: FieldValue.delete(),
+              updatedAt: FieldValue.serverTimestamp(),
+            });
+          }
+        });
+        orderWasSettled = reservationValid;
+      }
+    }
+
+    if (transition.paid && !(resolved.kind === 'NEXORA' && currentStatus === 'PAID')) {
       update.status = 'PAID';
       update.paidAt = current.paidAt || now;
       if (resolved.kind === 'CONEXA') update.settlementStatus = current.settlementStatus || 'PENDING';
@@ -106,30 +165,37 @@ export async function reconcileMercadoPagoPayment(
     if (transition.refunded) update.refundedAt = current.refundedAt || now;
     if (transition.chargeback) update.chargebackAt = current.chargebackAt || now;
     if (transition.cancelled) update.cancelledAt = current.cancelledAt || now;
-    if (transition.changed) update.status = transition.status;
+    if (transition.changed && !orderWasSettled) update.status = transition.status;
 
     if (resolved.kind === 'NEXORA') {
       const orderId = String(current.orderId || '').trim();
-      if (orderId) {
+      if (orderId && (transition.refunded || transition.chargeback)) {
         const orderRef = db.collection('orders').doc(orderId);
         const orderSnap = await tx.get(orderRef);
         if (orderSnap.exists) {
           const order = orderSnap.data() || {};
           const orderStatus = String(order.status || '').toUpperCase();
           if (transition.chargeback && ['PENDING', 'PAID', 'COMPLETED'].includes(orderStatus)) {
-            tx.update(orderRef, {
-              status: 'DISPUTED',
-              disputeReason: 'MERCADO_PAGO_CHARGEBACK',
-              disputeAt: now,
-              updatedAt: now,
-            });
+            tx.update(orderRef, { status: 'DISPUTED', disputeReason: 'MERCADO_PAGO_CHARGEBACK', disputeAt: now, updatedAt: FieldValue.serverTimestamp() });
           } else if (transition.refunded && ['PENDING', 'PAID'].includes(orderStatus)) {
-            tx.update(orderRef, {
-              status: 'CANCELLED',
-              cancellationReason: 'MERCADO_PAGO_REFUND',
-              cancelledAt: now,
-              updatedAt: now,
+            const listingRefs = (Array.isArray(order.items) ? order.items : []).map((item: any) => db.collection('listings').doc(String(item.listingId)));
+            const listingSnaps = await Promise.all(listingRefs.map(ref => tx.get(ref)));
+            listingSnaps.forEach((snap, index) => {
+              if (!snap.exists) return;
+              const listing = snap.data() || {};
+              if (String(listing.reservedByOrderId || '') !== orderId) return;
+              const stock = Number.isInteger(listing.stock) && Number(listing.stock) >= 0 ? Number(listing.stock) : 0;
+              const restored = stock + Number(order.items[index].quantity);
+              tx.update(listingRefs[index], {
+                stock: restored,
+                status: restored > 0 ? 'Disponible' : listing.status,
+                reservedQuantity: 0,
+                reservedByOrderId: FieldValue.delete(),
+                reservationExpiresAt: FieldValue.delete(),
+                updatedAt: FieldValue.serverTimestamp(),
+              });
             });
+            tx.update(orderRef, { status: 'CANCELLED', cancellationReason: 'MERCADO_PAGO_REFUND', cancelledAt: now, updatedAt: FieldValue.serverTimestamp() });
           }
         }
       }
