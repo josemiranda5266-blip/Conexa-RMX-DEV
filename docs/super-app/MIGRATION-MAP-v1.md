@@ -61,6 +61,21 @@ walletTransactions/{id}
 
 Cada movimiento conserva `source: CONEXA | NEXORA | SYSTEM` y referencia de origen.
 
+### Flujo de pago Nexora
+
+La orden Nexora se crea como `PENDING` junto con `paymentTransactions/{id}` en `PAYMENT_PENDING`. El checkout de Mercado Pago es generado server-side y es idempotente. El webhook no confía en el payload del cliente: recupera el pago del proveedor, verifica referencia externa, comercio, monto e ID del pago y recién entonces permite `PAYMENT_PENDING -> PAID`.
+
+Las reversas también son estados financieros explícitos:
+
+```text
+PAYMENT_PENDING -> PAID
+PAYMENT_PENDING -> CANCELLED
+PAID            -> REFUNDED
+PAID            -> CHARGEBACK
+```
+
+Un reembolso de proveedor no se interpreta automáticamente como reversión de un servicio ya completado. En Nexora, un reembolso de una orden pendiente/pagada cancela la orden; un chargeback marca una orden activa o completada como `DISPUTED` para resolución posterior.
+
 ## Integración entre dominios
 
 Los dominios no importan lógica interna entre sí.
@@ -93,4 +108,4 @@ Cuando un servicio Conexa termina en `CLOSED` o `SETTLED`, el shell puede mostra
 
 ## Estado de esta fase
 
-La estructura del monorepo y los contratos compartidos iniciales ya están creados. La migración funcional de pantallas, rutas, persistencia Firestore y eventos debe hacerse por dominio, evitando un big-bang.
+La estructura del monorepo, los contratos compartidos iniciales y el flujo financiero base de Nexora ya están creados. La migración funcional de pantallas, rutas, persistencia Firestore y eventos debe hacerse por dominio, evitando un big-bang. La verificación automatizada de build/lint/tests queda deliberadamente para el cierre de la fase de correcciones.
