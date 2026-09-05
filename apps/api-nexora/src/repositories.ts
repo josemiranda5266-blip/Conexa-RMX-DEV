@@ -1,6 +1,6 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { getDb } from './firebaseAdmin.js';
-import type { Conversation, Listing, NexoraOrder, NexoraReview, Shop } from '@super-app/shared-types';
+import type { Conversation, Listing, Message, NexoraOrder, NexoraReview, Shop } from '@super-app/shared-types';
 
 const now = () => new Date().toISOString();
 const db = () => getDb();
@@ -71,30 +71,16 @@ export const orderRepository = {
       if (data.buyerId !== actorId && data.sellerId !== actorId) throw new Error('FORBIDDEN');
       if (data.status === 'COMPLETED') { completed = { id, ...data }; return; }
       if (!['PAID', 'PENDING'].includes(data.status)) throw new Error('INVALID_ORDER_STATE');
-
       const completedAt = now();
       completed = { ...data, id, status: 'COMPLETED', completedAt };
       tx.update(orderRef, { status: 'COMPLETED', completedAt, updatedAt: FieldValue.serverTimestamp() });
-
       if (data.requiresInstallation) {
         const outboxRef = db().collection('eventOutbox').doc();
         eventId = outboxRef.id;
         tx.create(outboxRef, {
-          id: outboxRef.id,
-          type: 'NEXORA_ORDER_COMPLETED',
-          occurredAt: completedAt,
-          producer: 'NEXORA',
-          payload: {
-            eventId: outboxRef.id,
-            type: 'NEXORA_ORDER_COMPLETED',
-            occurredAt: completedAt,
-            userId: data.buyerId,
-            orderId: id,
-            listingIds: data.items.map(i => i.listingId),
-            requiresInstallation: true
-          },
-          status: 'PENDING',
-          attempts: 0
+          id: outboxRef.id, type: 'NEXORA_ORDER_COMPLETED', occurredAt: completedAt, producer: 'NEXORA',
+          payload: { eventId: outboxRef.id, type: 'NEXORA_ORDER_COMPLETED', occurredAt: completedAt, userId: data.buyerId, orderId: id, listingIds: data.items.map(i => i.listingId), requiresInstallation: true },
+          status: 'PENDING', attempts: 0
         });
       }
     });
@@ -106,17 +92,14 @@ export const reviewRepository = {
   async create(input: Omit<NexoraReview, 'id'>, actorId: string): Promise<NexoraReview> {
     if (input.buyerId !== actorId) throw new Error('FORBIDDEN');
     if (!Number.isFinite(input.rating) || input.rating < 1 || input.rating > 5) throw new Error('INVALID_RATING');
-
     const orders = await db().collection('orders').where('buyerId', '==', actorId).where('sellerId', '==', input.sellerId).where('status', '==', 'COMPLETED').limit(20).get();
     const eligible = orders.docs.some(doc => {
       const order = doc.data() as NexoraOrder;
       return !input.listingId || order.items.some(item => item.listingId === input.listingId);
     });
     if (!eligible) throw new Error('PURCHASE_REQUIRED');
-
     const duplicate = await db().collection('nexoraReviews').where('buyerId', '==', actorId).where('sellerId', '==', input.sellerId).limit(50).get();
     if (duplicate.docs.some(doc => (doc.data() as NexoraReview).listingId === input.listingId)) throw new Error('DUPLICATE_REVIEW');
-
     const ref = db().collection('nexoraReviews').doc();
     const value = { ...input, date: input.date || now(), verifiedPurchase: true };
     await ref.create(value);
@@ -131,5 +114,46 @@ export const conversationRepository = {
       db().collection('conversations').where('sellerId', '==', userId).limit(100).get()
     ]);
     return [...new Map([...buyerSnap.docs, ...sellerSnap.docs].map(d => [d.id, { id: d.id, ...d.data() } as Conversation])).values()];
+  },
+  async create(input: Omit<Conversation, 'id'>, actorId: string): Promise<Conversation> {
+    if (input.buyerId !== actorId) throw new Error('FORBIDDEN');
+    if (input.buyerId === input.sellerId) throw new Error('INVALID_PARTICIPANTS');
+    const listing = await listingRepository.get(input.listingId);
+    if (!listing) throw new Error('LISTING_NOT_FOUND');
+    if (listing.sellerId !== input.sellerId) throw new Error('INVALID_SELLER');
+    const existing = await db().collection('conversations').where('listingId', '==', input.listingId).where('buyerId', '==', actorId).where('sellerId', '==', input.sellerId).limit(1).get();
+    if (!existing.empty) return { id: existing.docs[0].id, ...existing.docs[0].data() } as Conversation;
+    const timestamp = now();
+    const ref = db().collection('conversations').doc();
+    const value: Omit<Conversation, 'id'> = { ...input, stage: 'Consulta', lastMessageText: '', lastMessageTime: timestamp, unreadCountBuyer: 0, unreadCountSeller: 0 };
+    await ref.create(value);
+    return { id: ref.id, ...value };
+  },
+  async sendMessage(conversationId: string, actorId: string, text: string): Promise<Message> {
+    const clean = text.trim().slice(0, 4000);
+    if (!clean) throw new Error('INVALID_MESSAGE');
+    const conversationRef = db().collection('conversations').doc(conversationId);
+    const messageRef = db().collection('conversations').doc(conversationId).collection('messages').doc();
+    const timestamp = now();
+    let message!: Message;
+    await db().runTransaction(async tx => {
+      const snap = await tx.get(conversationRef);
+      if (!snap.exists) throw new Error('CONVERSATION_NOT_FOUND');
+      const conversation = snap.data() as Conversation;
+      if (conversation.buyerId !== actorId && conversation.sellerId !== actorId) throw new Error('FORBIDDEN');
+      message = { id: messageRef.id, conversationId, senderId: actorId, text: clean, timestamp, isRead: false };
+      tx.create(messageRef, message);
+      const unreadField = conversation.buyerId === actorId ? 'unreadCountSeller' : 'unreadCountBuyer';
+      tx.update(conversationRef, { lastMessageText: clean, lastMessageTime: timestamp, stage: 'En conversación', [unreadField]: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() });
+    });
+    return message;
+  },
+  async listMessages(conversationId: string, actorId: string, limit = 50): Promise<Message[]> {
+    const conversation = await db().collection('conversations').doc(conversationId).get();
+    if (!conversation.exists) throw new Error('CONVERSATION_NOT_FOUND');
+    const data = conversation.data() as Conversation;
+    if (data.buyerId !== actorId && data.sellerId !== actorId) throw new Error('FORBIDDEN');
+    const snap = await db().collection('conversations').doc(conversationId).collection('messages').orderBy('timestamp', 'asc').limit(safeLimit(limit)).get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as Message));
   }
 };
