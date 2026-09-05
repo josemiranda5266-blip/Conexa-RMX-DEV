@@ -9,13 +9,19 @@ export interface MPChargebackCase {
   raw: unknown;
 }
 
+export interface MPChargebackEvidenceFile {
+  filename: string;
+  content: Uint8Array | ArrayBuffer;
+  mimeType: 'application/pdf' | 'image/jpeg' | 'image/png';
+}
+
 async function requestJson(url: string, token: string, init: RequestInit = {}, attempts = 3): Promise<any> {
   let lastError: unknown;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
       const response = await fetch(url, {
         ...init,
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers || {}) },
+        headers: { Authorization: `Bearer ${token}`, ...(init.headers || {}) },
       });
       if (response.ok) return await response.json().catch(() => ({}));
       const detail = await response.text().catch(() => '');
@@ -46,20 +52,34 @@ function normalizeCase(raw: any, fallbackId: string): MPChargebackCase {
   };
 }
 
-export async function getChargebackFromMP(chargebackId: string, accessToken: string): Promise<MPChargebackCase> {
+export async function getChargebackFromMP(chargebackId: string, accessToken: string, callerId?: string): Promise<MPChargebackCase> {
   if (!chargebackId?.trim()) throw new Error('CHARGEBACK_ID_REQUIRED');
   if (!accessToken?.trim()) throw new Error('MP_ACCESS_TOKEN_REQUIRED');
-  const raw = await requestJson(`https://api.mercadopago.com/v1/chargebacks/${encodeURIComponent(chargebackId)}`, accessToken);
+  const headers: Record<string, string> = {};
+  if (callerId?.trim()) headers['X-Caller-Id'] = callerId.trim();
+  const raw = await requestJson(`https://api.mercadopago.com/v1/chargebacks/${encodeURIComponent(chargebackId)}`, accessToken, { headers });
   return normalizeCase(raw, chargebackId);
 }
 
-export async function submitEvidenceToMP(chargebackId: string, evidence: unknown, accessToken: string, idempotencyKey: string): Promise<unknown> {
+export async function submitEvidenceToMP(chargebackId: string, evidence: MPChargebackEvidenceFile[], accessToken: string, idempotencyKey: string, callerId?: string): Promise<unknown> {
   if (!chargebackId?.trim()) throw new Error('CHARGEBACK_ID_REQUIRED');
   if (!accessToken?.trim()) throw new Error('MP_ACCESS_TOKEN_REQUIRED');
   if (!idempotencyKey?.trim()) throw new Error('MP_IDEMPOTENCY_KEY_REQUIRED');
+  if (!Array.isArray(evidence) || evidence.length < 1 || evidence.length > 10) throw new Error('MP_EVIDENCE_COUNT_INVALID');
+
+  const form = new FormData();
+  for (const file of evidence) {
+    if (!file?.filename?.trim()) throw new Error('MP_EVIDENCE_FILENAME_INVALID');
+    if (!['application/pdf', 'image/jpeg', 'image/png'].includes(file.mimeType)) throw new Error('MP_EVIDENCE_MIME_INVALID');
+    const bytes = file.content instanceof ArrayBuffer ? new Uint8Array(file.content) : file.content;
+    form.append('file', new Blob([bytes], { type: file.mimeType }), file.filename.trim().slice(0, 180));
+  }
+
+  const headers: Record<string, string> = { 'X-Idempotency-Key': idempotencyKey.trim() };
+  if (callerId?.trim()) headers['X-Caller-Id'] = callerId.trim();
   return requestJson(`https://api.mercadopago.com/v1/chargebacks/${encodeURIComponent(chargebackId)}/evidence`, accessToken, {
     method: 'POST',
-    headers: { 'X-Idempotency-Key': idempotencyKey },
-    body: JSON.stringify(evidence),
+    headers,
+    body: form,
   });
 }
