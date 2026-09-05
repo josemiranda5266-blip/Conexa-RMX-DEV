@@ -1,18 +1,14 @@
 {
-  "name": "conexa-rmx",
+  "name": "conexa-nexora-super-app",
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "packageManager": "pnpm@10.0.0",
   "scripts": {
-    "dev": "bun server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "start": "node dist/server.cjs",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit",
-    "validate-env": "tsx scripts/validate-env.ts",
-    "test:persistence": "tsx scripts/test-persistence.ts",
-    "audit:auth": "tsx scripts/audit-auth-boundary.ts",
-    "harden:server-auth": "node scripts/harden-server-auth.mjs"
+    "dev": "pnpm --filter @super-app/web dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "build:legacy-conexa": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
