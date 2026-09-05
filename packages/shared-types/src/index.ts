@@ -15,14 +15,7 @@ export interface Listing {
   id: string; sellerId: string; sellerName: string; sellerAvatar?: string; sellerTrustLevel: TrustLevel; sellerStars: number;
   title: string; description: string; price: number; currency: 'ARS'; category: ProductCategory; condition: 'Nuevo' | 'Usado' | 'Reacondicionado'; images: string[];
   city: string; neighborhood?: string; distanceKm?: number; lat?: number; lng?: number; createdAt: string; updatedAt?: string; status: ProductStatus;
-  /** Stock is server-owned. Legacy listings without this field are treated as single-unit listings. */
-  stock?: number;
-  /** Quantity temporarily reserved by the pending order identified below. */
-  reservedQuantity?: number;
-  /** Pending order that owns the temporary reservation. */
-  reservedByOrderId?: string;
-  /** ISO timestamp after which the unpaid reservation can be reclaimed. */
-  reservationExpiresAt?: string;
+  stock?: number; reservedQuantity?: number; reservedByOrderId?: string; reservationExpiresAt?: string;
   qualityScore: number; viewsCount: number; favoritesCount: number; queriesCount: number; featured?: boolean;
   deliveryOption: 'Retiro en persona' | 'Entrega a domicilio' | 'Ambas opciones'; acceptedPaymentMethods: string[];
   suggestedPriceRange?: { min: number; max: number }; serviceProfession?: string; subServices?: ServicePackage[]; requiresInstallation?: boolean;
@@ -32,7 +25,8 @@ export type NexoraOrderStatus = 'PENDING' | 'PAID' | 'COMPLETED' | 'CANCELLED' |
 export interface NexoraOrderItem { listingId: string; quantity: number; unitPrice: number; }
 export interface NexoraOrder { id: string; buyerId: string; sellerId: string; items: NexoraOrderItem[]; totalAmount: number; currency: 'ARS'; status: NexoraOrderStatus; requiresInstallation: boolean; paymentTransactionId?: string; createdAt: string; completedAt?: string; }
 export type PaymentTransactionStatus = 'PAYMENT_PENDING' | 'PAID' | 'REFUNDED' | 'CHARGEBACK' | 'CANCELLED';
-export interface PaymentTransaction { id: string; domain: Domain; orderId: string; buyerId: string; merchantId: string; amountArs: number; currency: 'ARS'; status: PaymentTransactionStatus; provider: 'MERCADO_PAGO'; providerPaymentId?: string; preferenceId?: string; checkoutUrl?: string; paidAt?: string; createdAt: string; updatedAt?: string; refundedAt?: string; chargebackAt?: string; cancelledAt?: string; }
+export type RefundRequestStatus = 'NONE' | 'REQUESTED' | 'PROCESSING' | 'CONFIRMED' | 'FAILED';
+export interface PaymentTransaction { id: string; domain: Domain; orderId: string; buyerId: string; merchantId: string; amountArs: number; currency: 'ARS'; status: PaymentTransactionStatus; provider: 'MERCADO_PAGO'; providerPaymentId?: string; preferenceId?: string; checkoutUrl?: string; refundStatus?: RefundRequestStatus; refundAmountArs?: number; refundReason?: string; refundRequestedAt?: string; refundConfirmedAt?: string; refundProviderId?: string; paidAt?: string; createdAt: string; updatedAt?: string; refundedAt?: string; chargebackAt?: string; cancelledAt?: string; }
 export type EscrowStatus = 'PENDING' | 'HELD' | 'RELEASED' | 'DISPUTED' | 'REFUNDED';
 export interface EscrowPayment { id: string; orderId: string; listingId: string; amount: number; currency: 'ARS'; buyerId: string; sellerId: string; paymentMethod: 'CARD' | 'MERCADO_PAGO' | 'TRANSFER'; status: EscrowStatus; deliveryPinHash?: string; createdAt: string; autoReleaseAt: string; releasedAt?: string; disputeReason?: string; }
 export type NegotiationStage = 'Consulta' | 'En conversación' | 'Oferta realizada' | 'Oferta aceptada' | 'Encuentro programado' | 'Operación concretada' | 'Cancelada';
