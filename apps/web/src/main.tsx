@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Listing, RecentServiceSummary } from '@super-app/shared-types';
 import { loadNexoraReadModel } from './services';
+import { useAuth } from './hooks/useAuth';
 import './styles.css';
 
 const recentService: RecentServiceSummary = { id: 'example', status: 'CLOSED', title: 'Último servicio' };
@@ -40,9 +41,12 @@ function NexoraPreview() {
 }
 
 function App() {
+  const { user, loading: authLoading } = useAuth();
   const showNexoraOffer = recentService.status === 'CLOSED' || recentService.status === 'SETTLED';
   return <main className="shell">
-    <header><span className="eyebrow">SUPER APP</span><h1>Tu ecosistema en un solo lugar</h1><p>Conexa para servicios profesionales y Nexora para productos, compras y vendedores.</p></header>
+    <header><span className="eyebrow">SUPER APP</span><h1>Tu ecosistema en un solo lugar</h1><p>Conexa para servicios profesionales y Nexora para productos, compras y vendedores.</p>
+      <p aria-live="polite">{authLoading ? 'Verificando sesión…' : user ? `Sesión activa: ${user.email ?? user.uid}` : 'Sesión no iniciada'}</p>
+    </header>
     <section className="cards" aria-label="Módulos">
       <button type="button"><strong>Conexa</strong><span>Servicios profesionales, RADAR y seguimiento.</span></button>
       <button type="button"><strong>Nexora</strong><span>Marketplace, tiendas y compras seguras.</span></button>
