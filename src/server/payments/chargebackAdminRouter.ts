@@ -1,10 +1,14 @@
-import { Router, type Request, type Response } from 'express';
+import express, { Router, type Request, type Response } from 'express';
 import { getAdminDb } from '../firebaseAdmin.js';
 import { verifyAuthToken } from '../auth.js';
 import { decryptOAuthToken } from './mercadoPagoOAuthTokenStore.js';
 import { submitEvidenceToMP, type MPChargebackEvidenceFile } from '@super-app/shared-payments';
 
 export const chargebackAdminRouter = Router();
+// Base64 expands binary payloads by roughly one third, so allow enough JSON
+// envelope space for the documented 10 MB aggregate evidence limit. This parser
+// is scoped to the admin router and is mounted before the default 1 MB API parser.
+chargebackAdminRouter.use(express.json({ limit: '15mb' }));
 
 async function requireAdmin(req: Request, res: Response): Promise<string | null> {
   const auth = await verifyAuthToken(req);
@@ -58,9 +62,9 @@ chargebackAdminRouter.post('/api/admin/chargebacks/:id/evidence', async (req: Re
       const snap = await tx.get(ref);
       if (!snap.exists) throw new Error('CHARGEBACK_CASE_NOT_FOUND');
       const current = snap.data() || {};
-      const existing = Array.isArray(current.evidence) ? current.evidence : [];
-      const metadata = normalized.map(file => ({ filename: file.filename, mimeType: file.mimeType, size: file.content.byteLength, uploadedAt: new Date().toISOString() }));
-      tx.update(ref, { evidence: [...existing, ...metadata], updatedAt: new Date().toISOString() });
+      const existing = Array.isArray(current.evidenceDrafts) ? current.evidenceDrafts : [];
+      const metadata = normalized.map(file => ({ filename: file.filename, mimeType: file.mimeType, size: file.content.byteLength, stagedAt: new Date().toISOString() }));
+      tx.update(ref, { evidenceDrafts: [...existing, ...metadata], updatedAt: new Date().toISOString() });
     });
     return res.status(201).json({ success: true, files: normalized.map(file => ({ filename: file.filename, mimeType: file.mimeType, size: file.content.byteLength })) });
   } catch (error: any) {
@@ -86,6 +90,7 @@ chargebackAdminRouter.post('/api/admin/chargebacks/:id/submit-evidence', async (
     if (!encrypted) return res.status(409).json({ error: 'MERCADO_PAGO_CONNECTION_INVALID' });
     const evidence = decodeEvidenceFiles(req.body);
     if (evidence.length < 1 || evidence.length > 10) return res.status(400).json({ error: 'INVALID_EVIDENCE' });
+    if (evidence.some(file => !file.filename || file.content.byteLength === 0)) return res.status(400).json({ error: 'INVALID_EVIDENCE_FILE' });
     const totalBytes = evidence.reduce((sum, file) => sum + file.content.byteLength, 0);
     if (totalBytes > 10 * 1024 * 1024) return res.status(413).json({ error: 'EVIDENCE_TOTAL_SIZE_EXCEEDED' });
     const result = await submitEvidenceToMP(id, evidence, decryptOAuthToken(encrypted), `chargeback-evidence:${id}:${Date.now()}`, connection.externalUserId || connection.mpUserId);
