@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { getAdminDb } from './firebaseAdmin.js';
 import type { Review, ServiceRequest } from '../types.js';
-import { calculateUpdatedReputation } from './reputationService.js';
+import { calculateReputationAggregate } from './reputationAggregation.js';
 import { buildPublicProfessionalProfileDocument } from './publicProfessionalProfileProjection.js';
 import { buildRadarCandidateProjection } from './radar/radarCandidateProjection.js';
 import {
@@ -14,6 +14,7 @@ import {
 const REVIEWS_COLLECTION = 'reviews';
 const USERS_COLLECTION = 'users';
 const REQUESTS_COLLECTION = 'service_requests';
+const TRANSACTIONS_COLLECTION = 'transactions';
 const PUBLIC_PROFESSIONAL_PROFILES_COLLECTION = 'public_professional_profiles';
 const RADAR_CANDIDATES_COLLECTION = 'radar_candidates';
 
@@ -88,11 +89,13 @@ export async function saveProfessionalReview(
       createdAt,
     );
 
-    const { rating, reviewCount } = calculateUpdatedReputation(
-      professional.rating,
-      professional.reviewCount,
-      review.overallRating,
+    const reviewsSnap = await tx.get(
+      db.collection(REVIEWS_COLLECTION).where('professionalId', '==', normalized.professionalId),
     );
+    const existingReviews = reviewsSnap.docs.map(
+      (d: any) => d.data() as import('../types.js').Review,
+    );
+    const { rating, reviewCount } = calculateReputationAggregate([...existingReviews, review]);
     const reputationUpdate = { rating, reviewCount };
     const updatedProfessional = {
       id: normalized.professionalId,
@@ -101,6 +104,14 @@ export async function saveProfessionalReview(
     };
     const publicProfile = buildPublicProfessionalProfileDocument(updatedProfessional);
     const radarCandidate = buildRadarCandidateProjection(updatedProfessional as any);
+
+    const completedTransactionsSnap = await tx.get(
+      db.collection(TRANSACTIONS_COLLECTION)
+        .where('serviceRequestId', '==', normalized.serviceRequestId)
+        .where('status', '==', 'SERVICE_COMPLETED')
+        .limit(1),
+    );
+    const completedTransactionDoc = completedTransactionsSnap.docs[0];
 
     tx.create(reviewRef, review);
     tx.update(professionalRef, reputationUpdate);
@@ -113,6 +124,15 @@ export async function saveProfessionalReview(
       tx.set(radarCandidateRef, radarCandidate, { merge: true });
     } else {
       tx.delete(radarCandidateRef);
+    }
+
+    if (completedTransactionDoc) {
+      tx.update(completedTransactionDoc.ref, {
+        status: 'SETTLED',
+        reviewCompletedAt: createdAt,
+        settledAt: createdAt,
+        settlementStatus: 'SETTLED',
+      });
     }
 
     return { review, created: true };
