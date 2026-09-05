@@ -1,0 +1,206 @@
+import { FieldValue } from 'firebase-admin/firestore';
+import { reversalLedgerKey, reversalReason, resolveEscrowTransition, type MPChargebackCase } from '@super-app/shared-payments';
+import { getAdminDb } from '../firebaseAdmin.js';
+
+const CASES = 'chargebackCases';
+const PAYMENTS = 'paymentTransactions';
+const ORDERS = 'orders';
+const ESCROWS = 'escrows';
+const REVERSALS = 'financialReversals';
+
+type ChargebackStatus = 'OPENED' | 'UNDER_REVIEW' | 'RESOLVED_FAVORABLE' | 'RESOLVED_UNFAVORABLE' | 'EXPIRED';
+
+export interface ChargebackCaseRecord {
+  id: string;
+  paymentTransactionId: string;
+  providerPaymentId: string;
+  orderId?: string;
+  buyerId?: string;
+  sellerId?: string;
+  merchantId?: string;
+  amountArs: number;
+  currency: 'ARS';
+  status: ChargebackStatus;
+  coverageApplied?: boolean;
+  reason?: string;
+  responseDeadline?: string;
+  evidence: unknown[];
+  lastWebhookAt: string;
+  lastWebhookAction?: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+  resolutionReason?: string;
+}
+
+function normalizeStatus(value: unknown): ChargebackStatus {
+  const status = String(value || '').toUpperCase();
+  if (status === 'RESOLVED_FAVORABLE' || status === 'RESOLVED_UNFAVORABLE' || status === 'EXPIRED' || status === 'UNDER_REVIEW') return status;
+  return 'OPENED';
+}
+
+function normalizedCoverage(value: unknown): boolean | undefined {
+  if (value === true || value === false) return value;
+  return undefined;
+}
+
+export async function openOrUpdateChargebackCase(input: {
+  chargeback: MPChargebackCase;
+  paymentTransactionId: string;
+  merchantId?: string;
+  webhookAction?: string;
+  receivedAt?: string;
+}): Promise<ChargebackCaseRecord> {
+  const db = getAdminDb();
+  const now = input.receivedAt || new Date().toISOString();
+  const paymentRef = db.collection(PAYMENTS).doc(input.paymentTransactionId);
+  const caseRef = db.collection(CASES).doc(String(input.chargeback.id));
+
+  return db.runTransaction(async tx => {
+    const paymentSnap = await tx.get(paymentRef);
+    if (!paymentSnap.exists) throw new Error('PAYMENT_TRANSACTION_NOT_FOUND');
+    const payment = paymentSnap.data() || {};
+    if (String(payment.providerPaymentId || '') !== String(input.chargeback.paymentId || '')) {
+      throw new Error('CHARGEBACK_PAYMENT_MISMATCH');
+    }
+
+    const existingSnap = await tx.get(caseRef);
+    const existing = existingSnap.exists ? existingSnap.data() || {} : {};
+    const record: ChargebackCaseRecord = {
+      id: caseRef.id,
+      paymentTransactionId: paymentRef.id,
+      providerPaymentId: String(input.chargeback.paymentId),
+      orderId: payment.orderId ? String(payment.orderId) : undefined,
+      buyerId: payment.buyerId ? String(payment.buyerId) : undefined,
+      sellerId: payment.merchantId ? String(payment.merchantId) : undefined,
+      merchantId: input.merchantId || (payment.merchantId ? String(payment.merchantId) : undefined),
+      amountArs: Number(input.chargeback.amount),
+      currency: 'ARS',
+      status: normalizedCoverage(input.chargeback.coverageApplied) === undefined
+        ? (existingSnap.exists ? normalizeStatus(existing.status) : 'OPENED')
+        : normalizeStatus(existing.status),
+      coverageApplied: normalizedCoverage(input.chargeback.coverageApplied),
+      reason: input.chargeback.reason || (existing.reason ? String(existing.reason) : undefined),
+      responseDeadline: input.chargeback.responseDeadline || (existing.responseDeadline ? String(existing.responseDeadline) : undefined),
+      evidence: Array.isArray(existing.evidence) ? existing.evidence : [],
+      lastWebhookAt: now,
+      lastWebhookAction: input.webhookAction,
+      createdAt: existing.createdAt ? String(existing.createdAt) : now,
+      updatedAt: now,
+      resolvedAt: existing.resolvedAt ? String(existing.resolvedAt) : undefined,
+      resolutionReason: existing.resolutionReason ? String(existing.resolutionReason) : undefined,
+    };
+
+    tx.set(caseRef, record, { merge: true });
+    return record;
+  });
+}
+
+export async function resolveChargebackCase(
+  chargebackId: string,
+  coverageApplied: boolean,
+  resolutionReason: string,
+): Promise<{ status: 'RESOLVED_FAVORABLE' | 'RESOLVED_UNFAVORABLE'; paymentTransactionId: string }> {
+  if (!chargebackId?.trim()) throw new Error('CHARGEBACK_ID_REQUIRED');
+  if (coverageApplied !== true && coverageApplied !== false) throw new Error('COVERAGE_RESULT_REQUIRED');
+  const reason = resolutionReason.trim().slice(0, 1000);
+  if (!reason) throw new Error('RESOLUTION_REASON_REQUIRED');
+
+  const db = getAdminDb();
+  const caseRef = db.collection(CASES).doc(chargebackId.trim());
+
+  return db.runTransaction(async tx => {
+    const caseSnap = await tx.get(caseRef);
+    if (!caseSnap.exists) throw new Error('CHARGEBACK_CASE_NOT_FOUND');
+    const chargeback = caseSnap.data() || {};
+    const paymentId = String(chargeback.paymentTransactionId || '').trim();
+    const providerPaymentId = String(chargeback.providerPaymentId || '').trim();
+    if (!paymentId || !providerPaymentId) throw new Error('CHARGEBACK_PAYMENT_REFERENCE_MISSING');
+
+    const paymentRef = db.collection(PAYMENTS).doc(paymentId);
+    const paymentSnap = await tx.get(paymentRef);
+    if (!paymentSnap.exists) throw new Error('PAYMENT_TRANSACTION_NOT_FOUND');
+    const payment = paymentSnap.data() || {};
+    if (String(payment.providerPaymentId || '') !== providerPaymentId) throw new Error('CHARGEBACK_PAYMENT_MISMATCH');
+
+    const finalStatus: ChargebackStatus = coverageApplied ? 'RESOLVED_FAVORABLE' : 'RESOLVED_UNFAVORABLE';
+    const currentCaseStatus = normalizeStatus(chargeback.status);
+    if (currentCaseStatus === finalStatus && chargeback.coverageApplied === coverageApplied) {
+      return { status: finalStatus, paymentTransactionId: paymentId };
+    }
+
+    const now = new Date().toISOString();
+    const orderId = String(payment.orderId || chargeback.orderId || '').trim();
+    const orderRef = orderId ? db.collection(ORDERS).doc(orderId) : null;
+    const orderSnap = orderRef ? await tx.get(orderRef) : null;
+    const escrowRef = orderId ? db.collection(ESCROWS).doc(`escrow:${orderId}`) : null;
+    const escrowSnap = escrowRef ? await tx.get(escrowRef) : null;
+
+    if (coverageApplied) {
+      tx.update(paymentRef, {
+        status: 'PAID',
+        paymentStatus: 'approved',
+        chargebackResolvedAt: now,
+        chargebackResolution: 'FAVORABLE',
+        chargebackResolutionReason: reason,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      if (orderRef && orderSnap?.exists) {
+        const order = orderSnap.data() || {};
+        if (String(order.status || '').toUpperCase() === 'DISPUTED') {
+          tx.update(orderRef, { status: 'PAID', disputeResolvedAt: now, disputeResolution: 'CHARGEBACK_FAVORABLE', updatedAt: FieldValue.serverTimestamp() });
+        }
+      }
+      if (escrowRef && escrowSnap?.exists && String(escrowSnap.data()?.status) === 'DISPUTED') {
+        const transition = resolveEscrowTransition('DISPUTED', 'CHARGEBACK_FAVORABLE');
+        if (transition.changed) tx.update(escrowRef, { status: transition.status, releasedAt: now, releaseReason: 'ADMIN_RESOLUTION', updatedAt: now });
+      }
+    } else {
+      tx.update(paymentRef, {
+        status: 'CHARGEBACK',
+        paymentStatus: 'charged_back',
+        chargebackAt: payment.chargebackAt || now,
+        chargebackResolvedAt: now,
+        chargebackResolution: 'UNFAVORABLE',
+        chargebackResolutionReason: reason,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      if (orderRef && orderSnap?.exists) {
+        tx.update(orderRef, { status: 'CANCELLED', cancellationReason: 'MERCADO_PAGO_CHARGEBACK_LOST', cancelledAt: now, updatedAt: FieldValue.serverTimestamp() });
+      }
+      if (escrowRef && escrowSnap?.exists && ['HELD', 'DISPUTED'].includes(String(escrowSnap.data()?.status))) {
+        const transition = resolveEscrowTransition(String(escrowSnap.data()?.status) as any, 'CHARGEBACK_LOST');
+        if (transition.changed) tx.update(escrowRef, { status: transition.status, refundedAt: now, updatedAt: now });
+      }
+
+      const reversalRef = db.collection(REVERSALS).doc(reversalLedgerKey(providerPaymentId, 'CHARGEBACK'));
+      const reversalSnap = await tx.get(reversalRef);
+      if (!reversalSnap.exists) {
+        tx.create(reversalRef, {
+          id: reversalRef.id,
+          domain: 'NEXORA',
+          paymentTransactionId: paymentId,
+          providerPaymentId,
+          orderId,
+          kind: 'CHARGEBACK',
+          amountArs: Number(payment.amountArs || chargeback.amount || 0),
+          currency: 'ARS',
+          reason: reversalReason('CHARGEBACK', reason),
+          confirmedAt: now,
+          source: 'MERCADO_PAGO_CHARGEBACK_RESOLUTION',
+        });
+      }
+    }
+
+    tx.update(caseRef, {
+      status: finalStatus,
+      coverageApplied,
+      resolutionReason: reason,
+      resolvedAt: now,
+      updatedAt: now,
+      lastWebhookAt: chargeback.lastWebhookAt || now,
+    });
+
+    return { status: finalStatus, paymentTransactionId: paymentId };
+  });
+}
