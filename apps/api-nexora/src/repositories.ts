@@ -1,6 +1,6 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { getDb } from './firebaseAdmin.js';
-import type { Conversation, Listing, Message, NexoraOrder, NexoraReview, Shop } from '@super-app/shared-types';
+import type { Conversation, Listing, Message, NexoraOrder, NexoraReview, PaymentTransaction, Shop } from '@super-app/shared-types';
 
 const now = () => new Date().toISOString();
 const db = () => getDb();
@@ -54,42 +54,66 @@ export const orderRepository = {
     if (listingIds.some(id => !id) || new Set(listingIds).size !== listingIds.length) throw new Error('INVALID_ORDER_ITEMS');
     if (input.items.some(item => !Number.isInteger(item.quantity) || item.quantity <= 0 || item.quantity > 100)) throw new Error('INVALID_ORDER_ITEM');
 
-    const listings = await Promise.all(listingIds.map(id => listingRepository.get(id)));
-    if (listings.some(listing => !listing || listing.status !== 'Disponible')) throw new Error('LISTING_UNAVAILABLE');
-
-    const trustedListings = listings as Listing[];
-    const sellerId = trustedListings[0].sellerId;
-    if (!sellerId || sellerId === input.buyerId) throw new Error('INVALID_ORDER_PARTIES');
-    if (trustedListings.some(listing => listing.sellerId !== sellerId)) throw new Error('MIXED_SELLER_ORDER');
-
-    const trustedItems = input.items.map(item => {
-      const listing = trustedListings.find(candidate => candidate.id === item.listingId)!;
-      if (!Number.isFinite(listing.price) || listing.price <= 0) throw new Error('INVALID_LISTING_PRICE');
-      return { listingId: listing.id, quantity: item.quantity, unitPrice: listing.price };
-    });
-    const trustedTotal = Math.round(trustedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0) * 100) / 100;
-    if (!Number.isFinite(trustedTotal) || trustedTotal <= 0) throw new Error('INVALID_ORDER_AMOUNT');
-
-    // Installation is derived exclusively from trusted listing data. A client
-    // cannot force or suppress the Conexa cross-domain installation event.
-    const requiresInstallation = trustedListings.some(listing => listing.requiresInstallation === true);
-
-    const ref = db().collection('orders').doc();
+    const orderRef = db().collection('orders').doc();
+    const paymentRef = db().collection('paymentTransactions').doc();
     const createdAt = now();
-    const value: NexoraOrder = {
-      id: ref.id,
-      buyerId: input.buyerId,
-      sellerId,
-      items: trustedItems,
-      totalAmount: trustedTotal,
-      currency: 'ARS',
-      status: 'PENDING',
-      requiresInstallation,
-      createdAt
-    };
-    const firestoreValue = { ...value };
-    delete (firestoreValue as { id?: string }).id;
-    await ref.create(firestoreValue);
+    let value!: NexoraOrder;
+
+    await db().runTransaction(async tx => {
+      const listingRefs = listingIds.map(id => db().collection('listings').doc(id));
+      const listingSnapshots = await Promise.all(listingRefs.map(ref => tx.get(ref)));
+      if (listingSnapshots.some(snapshot => !snapshot.exists || snapshot.data()?.status !== 'Disponible')) {
+        throw new Error('LISTING_UNAVAILABLE');
+      }
+
+      const trustedListings = listingSnapshots.map((snapshot, index) => ({ id: listingIds[index], ...(snapshot.data() as Listing) })) as Listing[];
+      const sellerId = trustedListings[0].sellerId;
+      if (!sellerId || sellerId === input.buyerId) throw new Error('INVALID_ORDER_PARTIES');
+      if (trustedListings.some(listing => listing.sellerId !== sellerId)) throw new Error('MIXED_SELLER_ORDER');
+
+      const trustedItems = input.items.map(item => {
+        const listing = trustedListings.find(candidate => candidate.id === item.listingId)!;
+        if (!Number.isFinite(listing.price) || listing.price <= 0) throw new Error('INVALID_LISTING_PRICE');
+        return { listingId: listing.id, quantity: item.quantity, unitPrice: listing.price };
+      });
+      const trustedTotal = Math.round(trustedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0) * 100) / 100;
+      if (!Number.isFinite(trustedTotal) || trustedTotal <= 0) throw new Error('INVALID_ORDER_AMOUNT');
+
+      const requiresInstallation = trustedListings.some(listing => listing.requiresInstallation === true);
+      value = {
+        id: orderRef.id,
+        buyerId: input.buyerId,
+        sellerId,
+        items: trustedItems,
+        totalAmount: trustedTotal,
+        currency: 'ARS',
+        status: 'PENDING',
+        requiresInstallation,
+        paymentTransactionId: paymentRef.id,
+        createdAt
+      };
+
+      const payment: PaymentTransaction = {
+        id: paymentRef.id,
+        domain: 'NEXORA',
+        orderId: orderRef.id,
+        buyerId: input.buyerId,
+        merchantId: sellerId,
+        amountArs: trustedTotal,
+        currency: 'ARS',
+        status: 'PAYMENT_PENDING',
+        provider: 'MERCADO_PAGO',
+        createdAt
+      };
+
+      const firestoreOrder = { ...value };
+      delete (firestoreOrder as { id?: string }).id;
+      const firestorePayment = { ...payment };
+      delete (firestorePayment as { id?: string }).id;
+      tx.create(orderRef, firestoreOrder);
+      tx.create(paymentRef, firestorePayment);
+    });
+
     return value;
   },
   async complete(id: string, actorId: string): Promise<{ order: NexoraOrder; eventId?: string }> {
@@ -117,6 +141,45 @@ export const orderRepository = {
       }
     });
     return { order: completed, ...(eventId ? { eventId } : {}) };
+  }
+};
+
+export const paymentRepository = {
+  async get(id: string): Promise<PaymentTransaction | null> {
+    const d = await db().collection('paymentTransactions').doc(id).get();
+    return d.exists ? ({ id: d.id, ...d.data() } as PaymentTransaction) : null;
+  },
+  /**
+   * Trusted settlement hook. This is intentionally not exposed as an HTTP route:
+   * only a verified provider/webhook adapter may call it. The provider payment ID
+   * and amount must be matched to the server-owned transaction before settlement.
+   */
+  async settleFromVerifiedProvider(input: { paymentTransactionId: string; providerPaymentId: string; amountArs: number }): Promise<PaymentTransaction> {
+    if (!input.paymentTransactionId || !input.providerPaymentId) throw new Error('PAYMENT_REFERENCE_REQUIRED');
+    if (!Number.isFinite(input.amountArs) || input.amountArs <= 0) throw new Error('INVALID_PAYMENT_AMOUNT');
+    const ref = db().collection('paymentTransactions').doc(input.paymentTransactionId);
+    return db().runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new Error('PAYMENT_TRANSACTION_NOT_FOUND');
+      const current = snap.data() as PaymentTransaction;
+      const expected = Math.round(Number(current.amountArs) * 100) / 100;
+      const received = Math.round(input.amountArs * 100) / 100;
+      if (expected !== received) throw new Error('PAYMENT_AMOUNT_MISMATCH');
+      if (current.providerPaymentId && current.providerPaymentId !== input.providerPaymentId) throw new Error('PAYMENT_PROVIDER_ID_MISMATCH');
+      if (current.status === 'PAID') return { id: ref.id, ...current };
+      if (current.status !== 'PAYMENT_PENDING') throw new Error('PAYMENT_STATE_NOT_SETTLEABLE');
+
+      const paidAt = now();
+      tx.update(ref, { status: 'PAID', providerPaymentId: input.providerPaymentId, paidAt, updatedAt: FieldValue.serverTimestamp() });
+      const orderRef = db().collection('orders').doc(current.orderId);
+      const orderSnap = await tx.get(orderRef);
+      if (!orderSnap.exists) throw new Error('ORDER_NOT_FOUND');
+      const order = orderSnap.data() as NexoraOrder;
+      if (order.paymentTransactionId !== ref.id) throw new Error('ORDER_PAYMENT_LINK_MISMATCH');
+      if (order.status === 'PENDING') tx.update(orderRef, { status: 'PAID', paidAt, updatedAt: FieldValue.serverTimestamp() });
+      else if (order.status !== 'PAID') throw new Error('ORDER_STATE_NOT_SETTLEABLE');
+      return { ...current, id: ref.id, status: 'PAID', providerPaymentId: input.providerPaymentId, paidAt };
+    });
   }
 };
 
