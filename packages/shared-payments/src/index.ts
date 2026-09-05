@@ -1,3 +1,5 @@
+export * from './escrow.js';
+
 export type PaymentDomain = 'CONEXA' | 'NEXORA';
 export type ProviderPaymentStatus =
   | 'pending' | 'approved' | 'authorized' | 'in_process' | 'in_mediation'
