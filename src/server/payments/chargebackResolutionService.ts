@@ -8,7 +8,7 @@ const ORDERS = 'orders';
 const ESCROWS = 'escrows';
 const REVERSALS = 'financialReversals';
 
-type ChargebackStatus = 'OPENED' | 'UNDER_REVIEW' | 'RESOLVED_FAVORABLE' | 'RESOLVED_UNFAVORABLE' | 'EXPIRED';
+type ChargebackStatus = 'OPENED' | 'UNDER_REVIEW' | 'RESOLVED_FAVORABLE' | 'RESOLVED_UNFAVORABLE' | 'RESOLVED_BY_REFUND' | 'EXPIRED';
 
 export interface ChargebackCaseRecord {
   id: string;
@@ -35,10 +35,37 @@ export interface ChargebackCaseRecord {
 
 function normalizeStatus(value: unknown): ChargebackStatus {
   const status = String(value || '').toUpperCase();
-  if (status === 'RESOLVED_FAVORABLE' || status === 'RESOLVED_UNFAVORABLE' || status === 'EXPIRED' || status === 'UNDER_REVIEW') return status;
+  if (status === 'RESOLVED_FAVORABLE' || status === 'RESOLVED_UNFAVORABLE' || status === 'RESOLVED_BY_REFUND' || status === 'EXPIRED' || status === 'UNDER_REVIEW') return status;
   return 'OPENED';
 }
 function normalizedCoverage(value: unknown): boolean | undefined { if (value === true || value === false) return value; return undefined; }
+
+export async function absorbChargebackCasesForRefund(paymentTransactionId: string, resolvedAt = new Date().toISOString()): Promise<number> {
+  if (!paymentTransactionId?.trim()) throw new Error('PAYMENT_TRANSACTION_ID_REQUIRED');
+  const db = getAdminDb();
+  const paymentRef = db.collection(PAYMENTS).doc(paymentTransactionId.trim());
+  return db.runTransaction(async tx => {
+    const paymentSnap = await tx.get(paymentRef);
+    if (!paymentSnap.exists) throw new Error('PAYMENT_TRANSACTION_NOT_FOUND');
+    const payment = paymentSnap.data() || {};
+    if (String(payment.status || '').toUpperCase() !== 'REFUNDED') return 0;
+    const snapshot = await tx.get(db.collection(CASES).where('paymentTransactionId', '==', paymentRef.id));
+    let absorbed = 0;
+    snapshot.docs.forEach(caseSnap => {
+      const status = normalizeStatus(caseSnap.data()?.status);
+      if (!['OPENED', 'UNDER_REVIEW', 'EXPIRED'].includes(status)) return;
+      tx.update(caseSnap.ref, {
+        status: 'RESOLVED_BY_REFUND',
+        resolutionReason: 'REFUND_CONFIRMED_ABSORBED_CHARGEBACK',
+        resolvedAt,
+        updatedAt: resolvedAt,
+        lastWebhookAction: 'refund.absorbed_chargeback',
+      });
+      absorbed += 1;
+    });
+    return absorbed;
+  });
+}
 
 export async function openOrUpdateChargebackCase(input: { chargeback: MPChargebackCase; paymentTransactionId: string; merchantId?: string; webhookAction?: string; receivedAt?: string }): Promise<ChargebackCaseRecord> {
   const db = getAdminDb();
@@ -54,6 +81,7 @@ export async function openOrUpdateChargebackCase(input: { chargeback: MPChargeba
     const existing = existingSnap.exists ? existingSnap.data() || {} : {};
     const existingStatus = existingSnap.exists ? normalizeStatus(existing.status) : 'OPENED';
     const incomingCoverage = normalizedCoverage(input.chargeback.coverageApplied);
+    const paymentAlreadyRefunded = String(payment.status || '').toUpperCase() === 'REFUNDED' || String(payment.refundStatus || '').toUpperCase() === 'CONFIRMED';
     const record: ChargebackCaseRecord = {
       id: caseRef.id, paymentTransactionId: paymentRef.id, providerPaymentId: String(input.chargeback.paymentId),
       orderId: payment.orderId ? String(payment.orderId) : undefined, buyerId: payment.buyerId ? String(payment.buyerId) : undefined,
@@ -66,7 +94,11 @@ export async function openOrUpdateChargebackCase(input: { chargeback: MPChargeba
       createdAt: existing.createdAt ? String(existing.createdAt) : now, updatedAt: now,
       resolvedAt: existing.resolvedAt ? String(existing.resolvedAt) : undefined, resolutionReason: existing.resolutionReason ? String(existing.resolutionReason) : undefined,
     };
-    if (existingStatus === 'RESOLVED_FAVORABLE' || existingStatus === 'RESOLVED_UNFAVORABLE') {
+    if (paymentAlreadyRefunded && ['OPENED', 'UNDER_REVIEW', 'EXPIRED'].includes(existingStatus)) {
+      record.status = 'RESOLVED_BY_REFUND';
+      record.resolutionReason = 'REFUND_CONFIRMED_ABSORBED_CHARGEBACK';
+      record.resolvedAt = now;
+    } else if (existingStatus === 'RESOLVED_FAVORABLE' || existingStatus === 'RESOLVED_UNFAVORABLE' || existingStatus === 'RESOLVED_BY_REFUND') {
       record.status = existingStatus;
       record.coverageApplied = existing.coverageApplied === true || existing.coverageApplied === false ? existing.coverageApplied : incomingCoverage;
       record.resolvedAt = existing.resolvedAt ? String(existing.resolvedAt) : undefined;
@@ -98,12 +130,13 @@ export async function resolveChargebackCase(chargebackId: string, coverageApplie
     if (String(payment.providerPaymentId || '') !== providerPaymentId) throw new Error('CHARGEBACK_PAYMENT_MISMATCH');
     const finalStatus: ChargebackStatus = coverageApplied ? 'RESOLVED_FAVORABLE' : 'RESOLVED_UNFAVORABLE';
     const currentCaseStatus = normalizeStatus(chargeback.status);
+    if (currentCaseStatus === 'RESOLVED_BY_REFUND') throw new Error('CHARGEBACK_ALREADY_RESOLVED_BY_REFUND');
     if (currentCaseStatus === finalStatus && chargeback.coverageApplied === coverageApplied) return { status: finalStatus, paymentTransactionId: paymentId };
     if (currentCaseStatus === 'RESOLVED_FAVORABLE' || currentCaseStatus === 'RESOLVED_UNFAVORABLE') throw new Error('CHARGEBACK_ALREADY_RESOLVED_DIFFERENTLY');
     const paymentStatus = String(payment.status || '').toUpperCase();
     const refundStatus = String(payment.refundStatus || 'NONE').toUpperCase();
-    if (coverageApplied && ['REFUNDED', 'CANCELLED', 'CHARGEBACK'].includes(paymentStatus)) throw new Error('CHARGEBACK_RESOLUTION_CONFLICT_WITH_PAYMENT_STATE');
-    if (!coverageApplied && paymentStatus === 'REFUNDED') throw new Error('CHARGEBACK_RESOLUTION_CONFLICT_WITH_REFUND');
+    if (paymentStatus === 'REFUNDED' || refundStatus === 'CONFIRMED') throw new Error('CHARGEBACK_RESOLUTION_CONFLICT_WITH_REFUND');
+    if (coverageApplied && ['CANCELLED', 'CHARGEBACK'].includes(paymentStatus)) throw new Error('CHARGEBACK_RESOLUTION_CONFLICT_WITH_PAYMENT_STATE');
     if (['PROCESSING', 'REQUESTED'].includes(refundStatus)) throw new Error('CHARGEBACK_RESOLUTION_BLOCKED_BY_REFUND');
     const now = new Date().toISOString();
     const orderId = String(payment.orderId || chargeback.orderId || '').trim();
@@ -117,13 +150,7 @@ export async function resolveChargebackCase(chargebackId: string, coverageApplie
       const escrowStatus = escrowSnap?.exists ? String(escrowSnap.data()?.status || '').toUpperCase() : '';
       const wasAlreadySettled = orderStatus === 'DISPUTED' && escrowStatus === 'RELEASED';
       const activeDispute = orderStatus === 'DISPUTED' && escrowStatus === 'DISPUTED';
-      // A favorable outcome may follow a chargeback opened after fulfillment.
-      // In that case reconciliation marks the order DISPUTED but the escrow is
-      // already RELEASED and must remain released; requiring DISPUTED escrow
-      // would make the case impossible to resolve.
-      if ((!activeDispute && !wasAlreadySettled) || !orderSnap?.exists || !escrowSnap?.exists) {
-        throw new Error('CHARGEBACK_RESOLUTION_REQUIRES_DISPUTED_ORDER_ESCROW');
-      }
+      if ((!activeDispute && !wasAlreadySettled) || !orderSnap?.exists || !escrowSnap?.exists) throw new Error('CHARGEBACK_RESOLUTION_REQUIRES_DISPUTED_ORDER_ESCROW');
       tx.update(paymentRef, { status: 'PAID', paymentStatus: 'approved', chargebackResolvedAt: now, chargebackResolution: 'FAVORABLE', chargebackResolutionReason: reason, settlementStatus: 'SETTLED', settledAt: now, updatedAt: FieldValue.serverTimestamp() });
       const order = orderSnap.data() || {};
       tx.update(orderRef!, { status: 'COMPLETED', completedAt: order.completedAt || now, disputeResolvedAt: now, disputeResolution: 'CHARGEBACK_FAVORABLE', ...(wasAlreadySettled ? {} : { escrowReleasedAt: now }), updatedAt: FieldValue.serverTimestamp() });
@@ -138,28 +165,18 @@ export async function resolveChargebackCase(chargebackId: string, coverageApplie
     } else {
       const orderStatus = orderSnap?.exists ? String(orderSnap.data()?.status || '').toUpperCase() : '';
       const escrowStatus = escrowSnap?.exists ? String(escrowSnap.data()?.status || '').toUpperCase() : '';
-
       tx.update(paymentRef, { status: 'CHARGEBACK', paymentStatus: 'charged_back', chargebackAt: payment.chargebackAt || now, chargebackResolvedAt: now, chargebackResolution: 'UNFAVORABLE', chargebackResolutionReason: reason, updatedAt: FieldValue.serverTimestamp() });
-
       if (orderRef && orderSnap?.exists) {
         if (orderStatus === 'COMPLETED') {
-          tx.update(orderRef, {
-            chargebackResolution: 'UNFAVORABLE',
-            chargebackResolutionReason: reason,
-            chargebackLostAt: now,
-            financialStatus: 'CHARGEBACK',
-            updatedAt: FieldValue.serverTimestamp(),
-          });
+          tx.update(orderRef, { chargebackResolution: 'UNFAVORABLE', chargebackResolutionReason: reason, chargebackLostAt: now, financialStatus: 'CHARGEBACK', updatedAt: FieldValue.serverTimestamp() });
         } else {
           tx.update(orderRef, { status: 'CANCELLED', cancellationReason: 'MERCADO_PAGO_CHARGEBACK_LOST', cancelledAt: now, updatedAt: FieldValue.serverTimestamp() });
         }
       }
-
       if (escrowRef && escrowSnap?.exists && ['HELD', 'DISPUTED'].includes(escrowStatus)) {
         const transition = resolveEscrowTransition(escrowStatus as any, 'CHARGEBACK_LOST');
         if (transition.changed) tx.update(escrowRef, { status: transition.status, refundedAt: now, updatedAt: now });
       }
-
       const reversalRef = db.collection(REVERSALS).doc(reversalLedgerKey(providerPaymentId, 'CHARGEBACK'));
       const reversalSnap = await tx.get(reversalRef);
       if (!reversalSnap.exists) tx.create(reversalRef, { id: reversalRef.id, domain: 'NEXORA', paymentTransactionId: paymentId, providerPaymentId, orderId, kind: 'CHARGEBACK', amountArs: Number(payment.amountArs || chargeback.amount || 0), currency: 'ARS', reason: reversalReason('CHARGEBACK', reason), confirmedAt: now, source: 'MERCADO_PAGO_CHARGEBACK_RESOLUTION' });
