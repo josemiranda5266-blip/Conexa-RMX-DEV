@@ -62,32 +62,32 @@ export const SubmitQuoteModal: React.FC<{
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 relative my-8">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/80 backdrop-blur-md overflow-y-auto">
+      <div className="bg-slate-900 rounded-3xl max-w-xl w-full p-6 sm:p-8 shadow-2xl border border-slate-800 relative my-8">
         
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-6 right-6 p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+          className="absolute top-6 right-6 p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
 
         <div className="space-y-2 mb-6">
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 text-xs font-bold">
             <ShieldCheck className="w-3.5 h-3.5" />
             <span>Presupuesto Formal Protegido por CONEXA</span>
           </div>
-          <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">
+          <h2 className="text-2xl font-extrabold text-white tracking-tight">
             Enviar Cotización Profesional
           </h2>
-          <p className="text-xs text-slate-500">
-            Para la solicitud: <strong className="text-slate-800">{targetRequest.title}</strong>
+          <p className="text-xs text-zinc-400">
+            Para la solicitud: <strong className="text-white">{targetRequest.title}</strong>
           </p>
         </div>
 
         {error && (
-          <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2 mb-4">
+          <div className="p-3.5 rounded-xl bg-red-950/80 border border-red-800 text-red-200 text-xs flex items-center gap-2 mb-4">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{error}</span>
           </div>
@@ -97,90 +97,90 @@ export const SubmitQuoteModal: React.FC<{
           
           {/* Price */}
           <div>
-            <label className="block font-bold text-slate-700 mb-1.5">Monto Total de la Cotización (ARS $)</label>
+            <label className="block font-bold text-zinc-300 mb-1.5">Monto Total de la Cotización (ARS $)</label>
             <div className="relative">
-              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-extrabold text-slate-400 text-base">$</span>
+              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-extrabold text-zinc-500 text-base">$</span>
               <input
                 type="number"
                 placeholder="Ej: 85000"
                 value={priceArs}
                 onChange={e => setPriceArs(e.target.value)}
-                className="w-full pl-8 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-emerald-500 focus:bg-white text-slate-900 font-extrabold text-base"
+                className="w-full pl-8 pr-3.5 py-2.5 bg-zinc-950 border border-slate-800 rounded-xl focus:outline-none focus:border-red-500/60 text-white font-extrabold text-base"
               />
             </div>
-            <span className="text-[11px] text-slate-400 mt-1 block">Incluye mano de obra y cobertura por seguro CONEXA.</span>
+            <span className="text-[11px] text-zinc-400 mt-1 block">Incluye mano de obra y cobertura por seguro CONEXA.</span>
           </div>
 
           {/* Scope Description */}
           <div>
-            <label className="block font-bold text-slate-700 mb-1.5">Detalle del trabajo y metodología</label>
+            <label className="block font-bold text-zinc-300 mb-1.5">Detalle del trabajo y metodología</label>
             <textarea
               rows={3}
               placeholder="Explicá el diagnóstico previo, procedimiento técnico que vas a realizar, pruebas de seguridad..."
               value={description}
               onChange={e => setDescription(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-emerald-500 focus:bg-white text-slate-800 font-medium resize-none"
+              className="w-full px-3.5 py-2.5 bg-zinc-950 border border-slate-800 rounded-xl focus:outline-none focus:border-red-500/60 text-white font-medium resize-none placeholder-zinc-500"
             />
           </div>
 
           {/* Materials Included */}
           <div>
-            <label className="block font-bold text-slate-700 mb-1.5">Materiales e insumos incluidos</label>
+            <label className="block font-bold text-zinc-300 mb-1.5">Materiales e insumos incluidos</label>
             <input
               type="text"
               placeholder="Ej: Llaves térmicas Schneider 2x25A, peines de conexión ignífugos..."
               value={materialsIncluded}
               onChange={e => setMaterialsIncluded(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-emerald-500 focus:bg-white text-slate-800 font-medium"
+              className="w-full px-3.5 py-2.5 bg-zinc-950 border border-slate-800 rounded-xl focus:outline-none focus:border-red-500/60 text-white font-medium placeholder-zinc-500"
             />
           </div>
 
           {/* Duration & Availability */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block font-bold text-slate-700 mb-1.5">Tiempo estimado</label>
+              <label className="block font-bold text-zinc-300 mb-1.5">Tiempo estimado</label>
               <input
                 type="text"
                 value={estimatedTime}
                 onChange={e => setEstimatedTime(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-emerald-500 text-slate-800 font-medium"
+                className="w-full px-3.5 py-2.5 bg-zinc-950 border border-slate-800 rounded-xl focus:outline-none focus:border-red-500/60 text-white font-medium"
               />
             </div>
 
             <div>
-              <label className="block font-bold text-slate-700 mb-1.5">Disponibilidad para iniciar</label>
+              <label className="block font-bold text-zinc-300 mb-1.5">Disponibilidad para iniciar</label>
               <input
                 type="text"
                 value={availableStartDate}
                 onChange={e => setAvailableStartDate(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-emerald-500 text-slate-800 font-medium"
+                className="w-full px-3.5 py-2.5 bg-zinc-950 border border-slate-800 rounded-xl focus:outline-none focus:border-red-500/60 text-white font-medium"
               />
             </div>
           </div>
 
           {/* Warranty */}
           <div>
-            <label className="block font-bold text-slate-700 mb-1.5">Garantía ofrecida</label>
+            <label className="block font-bold text-zinc-300 mb-1.5">Garantía ofrecida</label>
             <input
               type="text"
               value={warrantyInfo}
               onChange={e => setWarrantyInfo(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-emerald-500 text-slate-800 font-medium"
+              className="w-full px-3.5 py-2.5 bg-zinc-950 border border-slate-800 rounded-xl focus:outline-none focus:border-red-500/60 text-white font-medium"
             />
           </div>
 
-          <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100">
+          <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-800">
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-2.5 rounded-xl text-slate-600 hover:bg-slate-100 font-semibold cursor-pointer"
+              className="px-5 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800 hover:text-white font-semibold cursor-pointer"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
+              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold shadow-md shadow-red-600/30 border border-red-500/40 transition-all cursor-pointer"
             >
               {isSubmitting ? 'Enviando...' : 'Enviar Cotización Formal'}
             </button>

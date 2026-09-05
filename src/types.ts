@@ -2,22 +2,32 @@ export type UserRole = 'CLIENT' | 'PROFESSIONAL' | 'ADMIN';
 
 export interface User {
   id: string;
+  uid?: string;
   name: string;
   email: string;
   role: UserRole;
   avatar?: string;
+  photoURL?: string;
   phone?: string;
   zone?: string;
   isProfessional?: boolean;
   hasProfessionalProfile?: boolean;
   isProfessionalVerified?: boolean;
+  pendingVerification?: boolean;
   matricula?: string;
+  cuit?: string;
+  rubro?: string;
   rating?: number;
   reviewCount?: number;
   bio?: string;
   categories?: string[];
   mpConnected?: boolean;
+  mpAlias?: string;
+  mpCvu?: string;
+  mpEmail?: string;
   completedJobs?: number;
+  createdAt?: any;
+  updatedAt?: any;
 }
 
 export type RequestStatus =

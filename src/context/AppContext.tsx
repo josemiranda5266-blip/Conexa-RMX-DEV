@@ -1,4 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
 import {
   User,
   ServiceRequest,
@@ -20,11 +23,21 @@ import {
   INITIAL_MESSAGES
 } from '../data/mockData';
 
+export type AppView =
+  | 'home'
+  | 'requests'
+  | 'professionals'
+  | 'quotes'
+  | 'messages'
+  | 'transactions'
+  | 'profile'
+  | 'verification';
+
 interface AppContextType {
   currentUser: User;
   users: User[];
+  isLoading: boolean;
   setCurrentUser: (user: User) => void;
-  switchRole: (role: 'CLIENT' | 'PROFESSIONAL' | 'ADMIN') => void;
   
   categories: CategoryInfo[];
   requests: ServiceRequest[];
@@ -34,8 +47,8 @@ interface AppContextType {
   conversations: Conversation[];
   messages: Message[];
   
-  activeView: 'home' | 'requests' | 'professionals' | 'quotes' | 'messages' | 'transactions' | 'audit' | 'profile';
-  setActiveView: (view: 'home' | 'requests' | 'professionals' | 'quotes' | 'messages' | 'transactions' | 'audit' | 'profile') => void;
+  activeView: AppView;
+  setActiveView: (view: AppView) => void;
   selectedRequestId: string | null;
   setSelectedRequestId: (id: string | null) => void;
   selectedConversationId: string | null;
@@ -46,6 +59,11 @@ interface AppContextType {
   
   submitQuote: (quoteData: Omit<Quote, 'id' | 'createdAt' | 'status'>) => Promise<Quote>;
   connectMercadoPago: () => Promise<boolean>;
+  saveMercadoPagoDetails: (details: { mpAlias: string; mpCvu: string; mpEmail: string }) => Promise<boolean>;
+  updateUserProfile: (updates: Partial<User>) => Promise<boolean>;
+  loginUser: (email: string) => Promise<User>;
+  registerUser: (userData: Omit<User, 'id'>) => Promise<User>;
+  logoutUser: () => Promise<void>;
   acceptQuote: (quoteId: string, paymentMethod?: string) => Promise<{ quote: Quote; transaction: Transaction }>;
   completeJob: (requestId: string) => Promise<boolean>;
   releasePayment: (transactionId: string) => Promise<boolean>;
@@ -77,13 +95,22 @@ function saveToStorage<T>(key: string, value: T) {
   }
 }
 
+const GUEST_USER: User = {
+  id: '',
+  name: 'Invitado',
+  email: '',
+  role: 'CLIENT',
+  avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+  isProfessionalVerified: false,
+  rating: 5.0,
+  reviewCount: 0
+};
+
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [users, setUsers] = useState<User[]>(() => loadFromStorage('users', INITIAL_USERS));
-  const [currentUser, setCurrentUser] = useState<User>(() => {
-    const savedUsers = loadFromStorage('users', INITIAL_USERS);
-    return savedUsers[0] || INITIAL_USERS[0];
-  });
-  
+  const [isLoading, setIsLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<User>(GUEST_USER);
+  const [users, setUsers] = useState<User[]>(INITIAL_USERS);
+
   const [categories] = useState<CategoryInfo[]>(INITIAL_CATEGORIES);
   const [requests, setRequests] = useState<ServiceRequest[]>(() => loadFromStorage('requests', INITIAL_REQUESTS));
   const [quotes, setQuotes] = useState<Quote[]>(() => loadFromStorage('quotes', INITIAL_QUOTES));
@@ -92,11 +119,95 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [conversations, setConversations] = useState<Conversation[]>(() => loadFromStorage('conversations', INITIAL_CONVERSATIONS));
   const [messages, setMessages] = useState<Message[]>(() => loadFromStorage('messages', INITIAL_MESSAGES));
   
-  const [activeView, setActiveView] = useState<'home' | 'requests' | 'professionals' | 'quotes' | 'messages' | 'transactions' | 'audit' | 'profile'>('home');
+  const [activeView, setActiveView] = useState<AppView>('home');
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>('conv-1');
 
-  useEffect(() => { saveToStorage('users', users); }, [users]);
+  // Listen to Firebase Auth state changes
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
+      setIsLoading(true);
+      if (firebaseUser) {
+        try {
+          const userDocRef = doc(db, 'users', firebaseUser.uid);
+          const userDocSnap = await getDoc(userDocRef);
+
+          let loadedUser: User;
+          if (userDocSnap.exists()) {
+            const data = userDocSnap.data();
+            loadedUser = {
+              id: firebaseUser.uid,
+              uid: firebaseUser.uid,
+              name: data.name || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuario',
+              email: firebaseUser.email || '',
+              role: data.role || 'CLIENT',
+              avatar: data.avatar || firebaseUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+              photoURL: firebaseUser.photoURL || data.avatar,
+              phone: data.phone || '',
+              zone: data.zone || '',
+              bio: data.bio || '',
+              matricula: data.matricula || '',
+              cuit: data.cuit || '',
+              rubro: data.rubro || '',
+              isProfessional: !!data.isProfessional || !!data.isProfessionalVerified,
+              hasProfessionalProfile: !!data.hasProfessionalProfile || !!data.isProfessionalVerified,
+              isProfessionalVerified: !!data.isProfessionalVerified,
+              pendingVerification: !!data.pendingVerification,
+              mpConnected: !!data.mpConnected,
+              mpAlias: data.mpAlias || '',
+              mpCvu: data.mpCvu || '',
+              mpEmail: data.mpEmail || firebaseUser.email || '',
+              rating: data.rating || 5.0,
+              reviewCount: data.reviewCount || 0,
+              completedJobs: data.completedJobs || 0
+            };
+          } else {
+            loadedUser = {
+              id: firebaseUser.uid,
+              uid: firebaseUser.uid,
+              name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuario',
+              email: firebaseUser.email || '',
+              role: 'CLIENT',
+              avatar: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+              isProfessionalVerified: false,
+              rating: 5.0,
+              reviewCount: 0
+            };
+            await setDoc(userDocRef, {
+              ...loadedUser,
+              createdAt: serverTimestamp()
+            }, { merge: true });
+          }
+
+          setCurrentUser(loadedUser);
+          setUsers(prev => {
+            const exists = prev.some(u => u.id === loadedUser.id);
+            if (exists) {
+              return prev.map(u => u.id === loadedUser.id ? loadedUser : u);
+            }
+            return [loadedUser, ...prev];
+          });
+        } catch (err) {
+          console.error('Error fetching user document:', err);
+          const fallbackUser: User = {
+            id: firebaseUser.uid,
+            name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuario',
+            email: firebaseUser.email || '',
+            role: 'CLIENT',
+            avatar: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+            isProfessionalVerified: false
+          };
+          setCurrentUser(fallbackUser);
+        }
+      } else {
+        setCurrentUser(GUEST_USER);
+      }
+      setIsLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   useEffect(() => { saveToStorage('requests', requests); }, [requests]);
   useEffect(() => { saveToStorage('quotes', quotes); }, [quotes]);
   useEffect(() => { saveToStorage('transactions', transactions); }, [transactions]);
@@ -104,18 +215,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => { saveToStorage('conversations', conversations); }, [conversations]);
   useEffect(() => { saveToStorage('messages', messages); }, [messages]);
 
-  const switchRole = (role: 'CLIENT' | 'PROFESSIONAL' | 'ADMIN') => {
-    const targetUser = users.find(u => u.role === role) || users[0];
-    setCurrentUser(targetUser);
-  };
-
   const createRequest = async (data: Omit<ServiceRequest, 'id' | 'clientId' | 'clientName' | 'clientAvatar' | 'quotesCount' | 'status' | 'createdAt' | 'updatedAt'>) => {
     const newId = `req-${Date.now()}`;
     const newReq: ServiceRequest = {
       ...data,
       id: newId,
-      clientId: currentUser.id,
-      clientName: currentUser.name,
+      clientId: currentUser.id || `guest-${Date.now()}`,
+      clientName: currentUser.name || 'Cliente',
       clientAvatar: currentUser.avatar,
       quotesCount: 0,
       status: 'PENDING',
@@ -123,7 +229,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       updatedAt: new Date().toISOString()
     };
     
-    // Attempt backend sync
     try {
       await fetch('/api/requests', {
         method: 'POST',
@@ -131,7 +236,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         body: JSON.stringify(newReq)
       });
     } catch {
-      // In-memory / client fallback
+      // In-memory fallback
     }
 
     setRequests(prev => [newReq, ...prev]);
@@ -144,7 +249,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const submitQuote = async (quoteData: Omit<Quote, 'id' | 'createdAt' | 'status'>) => {
-    if (!currentUser) throw new Error('Debés iniciar sesión como profesional.');
+    if (!currentUser.email) throw new Error('Debés iniciar sesión para enviar una cotización.');
     
     try {
       const response = await fetch('/api/quotes/submit', {
@@ -155,8 +260,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           professionalId: currentUser.id,
           professionalName: currentUser.name,
           professionalAvatar: currentUser.avatar,
-          professionalRating: currentUser.rating,
-          professionalVerified: currentUser.isProfessionalVerified
+          professionalRating: currentUser.rating || 5.0,
+          professionalVerified: currentUser.isProfessionalVerified ?? true
         })
       });
       const data = await response.json().catch(() => ({}));
@@ -199,9 +304,108 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const connectMercadoPago = async () => {
-    setUsers(prev => prev.map(u => u.id === currentUser.id ? { ...u, mpConnected: true } : u));
-    setCurrentUser(prev => ({ ...prev, mpConnected: true }));
+    if (!currentUser.id) return false;
+    const updated = { ...currentUser, mpConnected: true };
+    setCurrentUser(updated);
+    if (currentUser.id) {
+      try {
+        await updateDoc(doc(db, 'users', currentUser.id), {
+          mpConnected: true,
+          updatedAt: serverTimestamp()
+        });
+      } catch (e) {
+        console.error('Firestore update error:', e);
+      }
+    }
     return true;
+  };
+
+  const saveMercadoPagoDetails = async (details: { mpAlias: string; mpCvu: string; mpEmail: string }) => {
+    const updatedUser: User = {
+      ...currentUser,
+      mpConnected: true,
+      mpAlias: details.mpAlias,
+      mpCvu: details.mpCvu,
+      mpEmail: details.mpEmail
+    };
+    setCurrentUser(updatedUser);
+    setUsers(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
+
+    if (currentUser.id) {
+      try {
+        await updateDoc(doc(db, 'users', currentUser.id), {
+          mpConnected: true,
+          mpAlias: details.mpAlias,
+          mpCvu: details.mpCvu,
+          mpEmail: details.mpEmail,
+          updatedAt: serverTimestamp()
+        });
+      } catch (err) {
+        console.error('Firestore MP details update error:', err);
+      }
+    }
+    return true;
+  };
+
+  const updateUserProfile = async (updates: Partial<User>) => {
+    const updatedUser: User = { ...currentUser, ...updates };
+    setCurrentUser(updatedUser);
+    setUsers(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
+
+    if (currentUser.id) {
+      try {
+        await updateDoc(doc(db, 'users', currentUser.id), {
+          ...updates,
+          updatedAt: serverTimestamp()
+        });
+      } catch (err) {
+        console.error('Firestore update user error:', err);
+      }
+    }
+    return true;
+  };
+
+  const loginUser = async (email: string): Promise<User> => {
+    const found = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    if (found) {
+      setCurrentUser(found);
+      return found;
+    }
+    const newUser: User = {
+      id: `user-${Date.now()}`,
+      name: email.split('@')[0],
+      email,
+      role: 'CLIENT',
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+      isProfessionalVerified: false,
+      rating: 5.0,
+      reviewCount: 0
+    };
+    setUsers(prev => [...prev, newUser]);
+    setCurrentUser(newUser);
+    return newUser;
+  };
+
+  const registerUser = async (userData: Omit<User, 'id'>): Promise<User> => {
+    const newUser: User = {
+      ...userData,
+      id: `user-${Date.now()}`,
+      rating: userData.rating || 5.0,
+      reviewCount: userData.reviewCount || 0,
+      mpConnected: userData.mpConnected ?? false
+    };
+    setUsers(prev => [...prev, newUser]);
+    setCurrentUser(newUser);
+    return newUser;
+  };
+
+  const logoutUser = async () => {
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+    setCurrentUser(GUEST_USER);
   };
 
   const acceptQuote = async (quoteId: string, paymentMethod = 'Mercado Pago (Tarjeta de Crédito)') => {
@@ -216,7 +420,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       id: `tx-${Date.now()}`,
       serviceRequestId: quote.requestId,
       quoteId: quote.id,
-      clientId: currentUser.id,
+      clientId: currentUser.id || 'guest',
       professionalId: quote.professionalId,
       amountArs: quote.priceArs,
       platformFeeArs: platformFee,
@@ -237,7 +441,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const completeJob = async (requestId: string) => {
-    if (!currentUser) throw new Error('Debés iniciar sesión para completar el trabajo.');
+    if (!currentUser.email) throw new Error('Debés iniciar sesión para completar el trabajo.');
     
     try {
       const response = await fetch('/api/jobs/complete', {
@@ -276,8 +480,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const newRev: Review = {
       ...reviewData,
       id: `rev-${Date.now()}`,
-      clientId: currentUser.id,
-      clientName: currentUser.name,
+      clientId: currentUser.id || 'guest',
+      clientName: currentUser.name || 'Cliente',
       clientAvatar: currentUser.avatar,
       createdAt: new Date().toISOString()
     };
@@ -300,8 +504,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const createConversation = (targetUserId: string, requestId?: string): string => {
+    const currentId = currentUser.id || 'guest';
     const existing = conversations.find(c =>
-      c.participantIds.includes(currentUser.id) &&
+      c.participantIds.includes(currentId) &&
       c.participantIds.includes(targetUserId) &&
       (!requestId || c.serviceRequestId === requestId)
     );
@@ -311,7 +516,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const newConv: Conversation = {
       id: newConvId,
       serviceRequestId: requestId,
-      participantIds: [currentUser.id, targetUserId],
+      participantIds: [currentId, targetUserId],
       lastMessage: 'Conversación iniciada',
       lastMessageAt: new Date().toISOString(),
       unreadCount: 0
@@ -324,8 +529,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const newMsg: Message = {
       id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       conversationId,
-      senderId: currentUser.id,
-      senderName: currentUser.name,
+      senderId: currentUser.id || 'guest',
+      senderName: currentUser.name || 'Usuario',
       text,
       type,
       quoteData,
@@ -347,8 +552,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       value={{
         currentUser,
         users,
+        isLoading,
         setCurrentUser,
-        switchRole,
         categories,
         requests,
         quotes,
@@ -366,6 +571,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         cancelRequest,
         submitQuote,
         connectMercadoPago,
+        saveMercadoPagoDetails,
+        updateUserProfile,
+        loginUser,
+        registerUser,
+        logoutUser,
         acceptQuote,
         completeJob,
         releasePayment,

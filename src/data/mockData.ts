@@ -41,6 +41,9 @@ export const INITIAL_USERS: User[] = [
     bio: 'Electricista Matriculado e Ingeniero Electromecánico con más de 12 años de trayectoria. Especialista en tableros trifásicos, certificaciones DCI/Edenor/Edesur y detección rápida de cortocircuitos.',
     categories: ['electricidad', 'climatizacion'],
     mpConnected: true,
+    mpAlias: 'marcelo.electrico.mp',
+    mpCvu: '0000003100084920194832',
+    mpEmail: 'marcelo.rossi.electrico@conexa.com.ar'
   },
   {
     id: 'user-pro-2',
@@ -59,6 +62,9 @@ export const INITIAL_USERS: User[] = [
     bio: 'Gasista matriculado y plomero integral. Termofusión, bombas presurizadoras, detección no destructiva de fugas con cámara térmica y pruebas de hermeticidad.',
     categories: ['plomeria'],
     mpConnected: true,
+    mpAlias: 'gonzalo.plomeria.mp',
+    mpCvu: '0000003100019402882103',
+    mpEmail: 'gonzalo.plomeria@conexa.com.ar'
   },
   {
     id: 'user-admin-1',

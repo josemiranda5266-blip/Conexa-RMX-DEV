@@ -6,24 +6,28 @@ import { RequestsView } from './components/RequestsView';
 import { ProfessionalsView } from './components/ProfessionalsView';
 import { ChatView } from './components/ChatView';
 import { TransactionsView } from './components/TransactionsView';
-import { AuditView } from './components/AuditView';
+import { ProfessionalVerificationView } from './components/ProfessionalVerificationView';
 import { NewRequestModal } from './components/NewRequestModal';
 import { SubmitQuoteModal } from './components/SubmitQuoteModal';
 import { EscrowPaymentModal } from './components/EscrowPaymentModal';
 import { ReviewModal } from './components/ReviewModal';
+import { ProfileView } from './components/ProfileView';
+import { AuthModal } from './components/AuthModal';
 import { Quote } from './types';
-import { ShieldCheck, Heart } from 'lucide-react';
+import { ShieldCheck, Loader2 } from 'lucide-react';
 
 const MainContent: React.FC = () => {
-  const { activeView, setActiveView } = useApp();
+  const { activeView, setActiveView, isLoading } = useApp();
 
   // Modals state
   const [isNewRequestOpen, setIsNewRequestOpen] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [submitQuoteRequestId, setSubmitQuoteRequestId] = useState<string | null>(null);
   const [escrowQuote, setEscrowQuote] = useState<Quote | null>(null);
   const [reviewModalData, setReviewModalData] = useState<{ requestId: string; proId: string } | null>(null);
 
   const handleOpenNewRequest = () => setIsNewRequestOpen(true);
+  const handleOpenAuthModal = () => setIsAuthOpen(true);
   const handleOpenSubmitQuote = (requestId: string) => setSubmitQuoteRequestId(requestId);
   const handleOpenEscrow = (quote: Quote) => setEscrowQuote(quote);
   const handleOpenReview = (requestId: string, proId: string) => setReviewModalData({ requestId, proId });
@@ -32,11 +36,28 @@ const MainContent: React.FC = () => {
     setActiveView('requests');
   };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6 text-center space-y-4">
+        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-red-600 to-red-700 flex items-center justify-center text-white shadow-xl shadow-red-600/30 animate-pulse">
+          <Loader2 className="w-6 h-6 animate-spin text-white" />
+        </div>
+        <div className="space-y-1">
+          <h2 className="text-base font-bold text-white tracking-tight">Cargando CONEXA RMX</h2>
+          <p className="text-xs text-zinc-400">Verificando sesión segura...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800">
+    <div className="min-h-screen flex flex-col bg-zinc-950 text-zinc-100">
       
       {/* Top Navigation Header */}
-      <Header onOpenNewRequest={handleOpenNewRequest} />
+      <Header
+        onOpenNewRequest={handleOpenNewRequest}
+        onOpenAuthModal={handleOpenAuthModal}
+      />
 
       {/* Main View Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6">
@@ -69,26 +90,30 @@ const MainContent: React.FC = () => {
           <TransactionsView onOpenReviewModal={handleOpenReview} />
         )}
 
-        {activeView === 'audit' && (
-          <AuditView />
+        {activeView === 'profile' && (
+          <ProfileView onOpenAuthModal={handleOpenAuthModal} />
+        )}
+
+        {activeView === 'verification' && (
+          <ProfessionalVerificationView onOpenAuthModal={handleOpenAuthModal} />
         )}
       </main>
 
       {/* Footer */}
-      <footer className="mt-auto border-t border-slate-200 bg-white py-6 text-xs text-slate-500">
+      <footer className="mt-auto border-t border-zinc-800/80 bg-zinc-900/50 py-6 text-xs text-zinc-400">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <span className="font-extrabold text-slate-800 tracking-tight">CONEXA RMX</span>
+            <span className="font-extrabold text-white tracking-tight">CONEXA RMX</span>
             <span>— Plataforma Argentina de Servicios & Garantía Escrow</span>
           </div>
 
-          <div className="flex items-center gap-4 text-slate-400">
-            <span className="flex items-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+          <div className="flex items-center gap-4 text-zinc-400">
+            <span className="flex items-center gap-1 text-zinc-300">
+              <ShieldCheck className="w-3.5 h-3.5 text-red-500" />
               100% Pagos Protegidos
             </span>
             <span>·</span>
-            <span>Versión 2026.1 Unified Core</span>
+            <span>Autenticación Unificada Firebase & Dual-Profile</span>
           </div>
         </div>
       </footer>
@@ -116,6 +141,11 @@ const MainContent: React.FC = () => {
         requestId={reviewModalData?.requestId || null}
         professionalId={reviewModalData?.proId || null}
         onClose={() => setReviewModalData(null)}
+      />
+
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
       />
 
     </div>

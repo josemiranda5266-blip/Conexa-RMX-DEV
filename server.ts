@@ -2,13 +2,17 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import path from 'path';
 import crypto from 'crypto';
-import admin from 'firebase-admin';
+import { initializeApp, getApps } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import firebaseConfig from './firebase-applet-config.json';
 import { createServer as createViteServer } from 'vite';
 import { isUserCandidateProfessional } from './src/domain/professionalEligibility';
 
-if (!admin.apps.length) {
+if (!getApps().length) {
   try {
-    admin.initializeApp();
+    initializeApp({
+      projectId: firebaseConfig.projectId || 'smurfy-shelter-kt8c4'
+    });
   } catch (e) {
     // Admin initialized without explicit credentials
   }
@@ -110,18 +114,21 @@ const rateLimiter = (req: Request, res: Response, next: NextFunction) => {
 };
 
 // Helper: Verify auth token or extract caller context
-const verifyAuthToken = async (req: Request) => {
+export const verifyAuthToken = async (req: Request) => {
   const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return { isAuthenticated: false, userId: null, role: null, token: null };
+  }
 
+  const token = authHeader.substring(7).trim();
   if (!token) {
     return { isAuthenticated: false, userId: null, role: null, token: null };
   }
 
-  // 1. Attempt real Firebase Admin token verification
+  // 1. Primary verification using Firebase Admin SDK verifyIdToken
   try {
-    if (admin.apps.length) {
-      const decodedToken = await admin.auth().verifyIdToken(token);
+    if (getApps().length) {
+      const decodedToken = await getAuth().verifyIdToken(token);
       if (decodedToken && decodedToken.uid) {
         const foundUser = dbState.users.find(u => u.id === decodedToken.uid);
         return {
@@ -133,12 +140,12 @@ const verifyAuthToken = async (req: Request) => {
       }
     }
   } catch (err) {
-    // If Firebase Admin fails or is unconfigured, proceed to development token check if enabled
+    // ID token verification failed
   }
 
-  // 2. Controlled Development / Demo mode token check (e.g. Bearer demo-user-pro-1)
-  if (process.env.NODE_ENV !== 'production') {
-    const knownUser = dbState.users.find(u => u.id === token || `user-${token}` === u.id);
+  // 2. Explicit Demo / Test mode fallback ONLY in non-production when explicitly enabled via env
+  if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_DEMO_AUTH === 'true') {
+    const knownUser = dbState.users.find(u => u.id === token);
     if (knownUser) {
       return {
         isAuthenticated: true,
@@ -327,8 +334,13 @@ app.post('/api/payments/create_preference', (req: Request, res: Response) => {
 
 // Global Error Handler Middleware
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-  console.error('Server error:', err);
-  res.status(500).json({ success: false, error: 'INTERNAL_SERVER_ERROR', message: err?.message });
+  console.error('Server error:', err?.status || 500);
+  const isProd = process.env.NODE_ENV === 'production';
+  res.status(500).json({
+    success: false,
+    error: 'INTERNAL_SERVER_ERROR',
+    ...(isProd ? {} : { message: 'An internal server error occurred' })
+  });
 });
 
 async function startServer() {
@@ -351,4 +363,6 @@ async function startServer() {
   });
 }
 
-startServer();
+if (process.env.NODE_ENV !== 'test') {
+  startServer();
+}

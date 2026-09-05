@@ -96,8 +96,8 @@ export const RequestsView: React.FC<{
       {/* Top Header & Actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Solicitudes de Trabajo</h1>
-          <p className="text-sm text-slate-500">
+          <h1 className="text-2xl font-extrabold text-white tracking-tight">Solicitudes de Trabajo</h1>
+          <p className="text-sm text-zinc-400">
             {currentUser.role === 'CLIENT'
               ? 'Gestioná tus pedidos de presupuesto y seguí el avance de tus obras.'
               : 'Explorá requerimientos de clientes, cotizá y gestioná tus órdenes activas.'}
@@ -107,7 +107,7 @@ export const RequestsView: React.FC<{
         {currentUser.role === 'CLIENT' && (
           <button
             onClick={onOpenNewRequest}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-semibold text-sm shadow-sm transition-all cursor-pointer"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold text-sm shadow-md shadow-red-600/30 border border-red-500/50 transition-all cursor-pointer"
           >
             <PlusCircle className="w-4 h-4" />
             <span>Nueva Solicitud</span>
@@ -116,23 +116,23 @@ export const RequestsView: React.FC<{
       </div>
 
       {/* Filters Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
+      <div className="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 shadow-md flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[280px]">
           <div className="relative flex-1 min-w-[200px]">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder="Buscar por título, zona o palabras clave..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-sky-500 focus:bg-white transition-all"
+              className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-zinc-950 border border-slate-800 rounded-xl focus:outline-none focus:border-red-500/60 focus:bg-zinc-900 text-white transition-all"
             />
           </div>
 
           <select
             value={categoryFilter}
             onChange={e => setCategoryFilter(e.target.value)}
-            className="px-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-sky-500 text-slate-700 cursor-pointer"
+            className="px-3 py-2 text-xs sm:text-sm bg-zinc-950 border border-slate-800 rounded-xl focus:outline-none focus:border-red-500/60 text-zinc-200 cursor-pointer"
           >
             <option value="ALL">Todos los rubros</option>
             {categories.map(c => (
@@ -153,10 +153,10 @@ export const RequestsView: React.FC<{
             <button
               key={tab.id}
               onClick={() => setStatusFilter(tab.id)}
-              className={`px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition-colors cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg font-bold whitespace-nowrap transition-colors cursor-pointer ${
                 statusFilter === tab.id
-                  ? 'bg-slate-900 text-white font-bold'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  ? 'bg-gradient-to-r from-red-600 to-red-700 text-white shadow-xs border border-red-500/40'
+                  : 'bg-zinc-950 text-zinc-400 hover:text-white border border-slate-800'
               }`}
             >
               {tab.label}
@@ -171,10 +171,10 @@ export const RequestsView: React.FC<{
         {/* Requests List Column */}
         <div className="lg:col-span-5 space-y-3">
           {filteredRequests.length === 0 ? (
-            <div className="p-8 bg-white rounded-2xl border border-slate-200 text-center space-y-3">
-              <FileText className="w-10 h-10 text-slate-300 mx-auto" />
-              <div className="font-semibold text-slate-800 text-sm">No se encontraron solicitudes</div>
-              <p className="text-xs text-slate-500">Probá ajustando los filtros de búsqueda o creá una nueva solicitud.</p>
+            <div className="p-8 bg-slate-900/80 rounded-2xl border border-slate-800 text-center space-y-3">
+              <FileText className="w-10 h-10 text-zinc-600 mx-auto" />
+              <div className="font-semibold text-white text-sm">No se encontraron solicitudes</div>
+              <p className="text-xs text-zinc-400">Probá ajustando los filtros de búsqueda o creá una nueva solicitud.</p>
             </div>
           ) : (
             filteredRequests.map(req => {
@@ -185,20 +185,20 @@ export const RequestsView: React.FC<{
                   onClick={() => setSelectedRequestId(req.id)}
                   className={`p-4 rounded-2xl border transition-all cursor-pointer text-left ${
                     isSelected
-                      ? 'bg-sky-50/70 border-sky-400 ring-1 ring-sky-400 shadow-sm'
-                      : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-xs'
+                      ? 'bg-gradient-to-br from-slate-900 to-blue-950 border-red-500/80 ring-1 ring-red-500/50 shadow-md'
+                      : 'bg-slate-900/70 border-slate-800 hover:border-slate-700 hover:bg-slate-900/90'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2 mb-2">
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 capitalize">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-zinc-950 text-zinc-300 border border-zinc-800 capitalize">
                       {req.category}
                     </span>
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      req.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-800' :
-                      req.status === 'REVIEW_PENDING' ? 'bg-purple-100 text-purple-800' :
-                      req.status === 'PROFESSIONAL_SELECTED' ? 'bg-blue-100 text-blue-800' :
-                      req.status === 'QUOTES_RECEIVED' ? 'bg-amber-100 text-amber-800' :
-                      'bg-slate-100 text-slate-600'
+                      req.status === 'COMPLETED' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' :
+                      req.status === 'REVIEW_PENDING' ? 'bg-purple-950 text-purple-300 border border-purple-800' :
+                      req.status === 'PROFESSIONAL_SELECTED' ? 'bg-blue-950 text-blue-300 border border-blue-800' :
+                      req.status === 'QUOTES_RECEIVED' ? 'bg-amber-950 text-amber-300 border border-amber-800' :
+                      'bg-zinc-950 text-zinc-400 border border-zinc-800'
                     }`}>
                       {req.status === 'COMPLETED' ? 'Finalizado' :
                        req.status === 'REVIEW_PENDING' ? 'Revisión Pendiente' :
@@ -208,16 +208,16 @@ export const RequestsView: React.FC<{
                     </span>
                   </div>
 
-                  <h3 className="font-bold text-slate-900 text-sm leading-snug line-clamp-1">{req.title}</h3>
-                  <p className="text-xs text-slate-500 mt-1 line-clamp-2">{req.description}</p>
+                  <h3 className="font-bold text-white text-sm leading-snug line-clamp-1">{req.title}</h3>
+                  <p className="text-xs text-zinc-400 mt-1 line-clamp-2">{req.description}</p>
 
-                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-500">
+                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-800 text-[11px] text-zinc-400">
                     <span className="flex items-center gap-1">
-                      <MapPin className="w-3 h-3 text-slate-400" />
+                      <MapPin className="w-3 h-3 text-zinc-400" />
                       {req.zone}
                     </span>
                     {req.budgetArs ? (
-                      <span className="font-semibold text-slate-800">${req.budgetArs.toLocaleString('es-AR')}</span>
+                      <span className="font-bold text-white">${req.budgetArs.toLocaleString('es-AR')}</span>
                     ) : (
                       <span>A convenir</span>
                     )}
@@ -231,39 +231,39 @@ export const RequestsView: React.FC<{
         {/* Selected Request Full Detail & Quotes Column */}
         <div className="lg:col-span-7">
           {selectedRequest ? (
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-6 shadow-xs">
+            <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-6 space-y-6 shadow-md">
               
               {/* Header & Status */}
-              <div className="space-y-3 pb-4 border-b border-slate-100">
+              <div className="space-y-3 pb-4 border-b border-slate-800">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-sky-100 text-sky-800 capitalize">
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-red-950 text-red-400 border border-red-800/60 capitalize">
                     {selectedRequest.category}
                   </span>
                   <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
-                    selectedRequest.urgency === 'EMERGENCY' ? 'bg-red-100 text-red-800' :
-                    selectedRequest.urgency === 'HIGH' ? 'bg-amber-100 text-amber-800' :
-                    'bg-slate-100 text-slate-700'
+                    selectedRequest.urgency === 'EMERGENCY' ? 'bg-red-950 text-red-300 border border-red-800' :
+                    selectedRequest.urgency === 'HIGH' ? 'bg-amber-950 text-amber-300 border border-amber-800' :
+                    'bg-zinc-950 text-zinc-400 border border-zinc-800'
                   }`}>
                     Prioridad: {selectedRequest.urgency}
                   </span>
                 </div>
 
-                <h2 className="text-xl font-extrabold text-slate-900 leading-snug">
+                <h2 className="text-xl font-extrabold text-white leading-snug">
                   {selectedRequest.title}
                 </h2>
 
-                <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
+                <div className="flex flex-wrap items-center gap-4 text-xs text-zinc-400">
                   <span className="flex items-center gap-1.5 font-medium">
-                    <MapPin className="w-4 h-4 text-slate-400" />
+                    <MapPin className="w-4 h-4 text-zinc-400" />
                     {selectedRequest.zone} {selectedRequest.address ? `(${selectedRequest.address})` : ''}
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <Clock className="w-4 h-4 text-slate-400" />
+                    <Clock className="w-4 h-4 text-zinc-400" />
                     Publicado hace unas horas
                   </span>
                   {selectedRequest.budgetArs && (
-                    <span className="flex items-center gap-1.5 font-bold text-slate-800">
-                      <DollarSign className="w-4 h-4 text-emerald-600" />
+                    <span className="flex items-center gap-1.5 font-bold text-white">
+                      <DollarSign className="w-4 h-4 text-emerald-400" />
                       Presupuesto estimado: ${selectedRequest.budgetArs.toLocaleString('es-AR')}
                     </span>
                   )}
@@ -272,23 +272,23 @@ export const RequestsView: React.FC<{
 
               {/* Description */}
               <div className="space-y-2">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Descripción de la necesidad</h4>
-                <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-4 rounded-xl border border-slate-100">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400">Descripción de la necesidad</h4>
+                <p className="text-sm text-zinc-200 leading-relaxed bg-zinc-950 p-4 rounded-xl border border-slate-800">
                   {selectedRequest.description}
                 </p>
               </div>
 
               {/* Action Banner according to status */}
               {selectedRequest.status === 'PROFESSIONAL_SELECTED' && associatedTx && (
-                <div className="p-4 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-900 space-y-3">
+                <div className="p-4 rounded-xl bg-gradient-to-r from-blue-950 to-slate-900 border border-blue-800 text-xs text-blue-200 space-y-3">
                   <div className="flex items-center justify-between">
-                    <div className="font-bold flex items-center gap-1.5">
-                      <ShieldCheck className="w-4 h-4 text-blue-700" />
+                    <div className="font-bold flex items-center gap-1.5 text-white">
+                      <ShieldCheck className="w-4 h-4 text-blue-400" />
                       <span>Trabajo en progreso — Fondos en Garantía Escrow CONEXA</span>
                     </div>
-                    <span className="font-extrabold text-blue-800">${associatedTx.amountArs.toLocaleString('es-AR')}</span>
+                    <span className="font-extrabold text-blue-300">${associatedTx.amountArs.toLocaleString('es-AR')}</span>
                   </div>
-                  <p className="text-blue-700">
+                  <p className="text-zinc-300">
                     Los fondos están retenidos. Cuando el profesional complete el trabajo, podrás verificar el resultado y liberar el pago.
                   </p>
                   
@@ -296,7 +296,7 @@ export const RequestsView: React.FC<{
                     <button
                       disabled={isProcessing}
                       onClick={() => handleCompleteJob(selectedRequest.id)}
-                      className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors cursor-pointer"
+                      className="px-4 py-2 rounded-lg bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold text-xs transition-all cursor-pointer border border-red-500/40"
                     >
                       {isProcessing ? 'Procesando...' : 'Marcar Trabajo como Finalizado'}
                     </button>
@@ -305,22 +305,22 @@ export const RequestsView: React.FC<{
               )}
 
               {selectedRequest.status === 'REVIEW_PENDING' && associatedTx && (
-                <div className="p-4 rounded-xl bg-purple-50 border border-purple-200 text-xs text-purple-900 space-y-3">
+                <div className="p-4 rounded-xl bg-gradient-to-r from-purple-950 to-slate-900 border border-purple-800 text-xs text-purple-200 space-y-3">
                   <div className="flex items-center justify-between">
-                    <div className="font-bold flex items-center gap-1.5">
-                      <CheckCircle2 className="w-4 h-4 text-purple-700" />
+                    <div className="font-bold flex items-center gap-1.5 text-white">
+                      <CheckCircle2 className="w-4 h-4 text-purple-400" />
                       <span>¡El profesional finalizó la tarea!</span>
                     </div>
-                    <span className="font-bold text-purple-900">${associatedTx.amountArs.toLocaleString('es-AR')}</span>
+                    <span className="font-bold text-purple-300">${associatedTx.amountArs.toLocaleString('es-AR')}</span>
                   </div>
-                  <p className="text-purple-700">
+                  <p className="text-zinc-300">
                     Revisá la calidad del trabajo. Al presionar el botón liberarás los fondos retenidos al profesional y podrás dejarle una reseña pública.
                   </p>
                   {currentUser.role === 'CLIENT' && (
                     <button
                       disabled={isProcessing}
                       onClick={() => handleReleasePayment(associatedTx.id, selectedRequest.id, associatedTx.professionalId)}
-                      className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition-colors cursor-pointer"
+                      className="px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white font-bold text-xs transition-all cursor-pointer"
                     >
                       {isProcessing ? 'Liberando...' : 'Liberar Pago & Dejar Calificación'}
                     </button>
@@ -331,14 +331,14 @@ export const RequestsView: React.FC<{
               {/* Quotes Section */}
               <div className="space-y-4 pt-2">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-base font-bold text-slate-900">
+                  <h3 className="text-base font-bold text-white">
                     Cotizaciones Recibidas ({requestQuotes.length})
                   </h3>
 
                   {isUserCandidateProfessional(currentUser) && (selectedRequest.status === 'PENDING' || selectedRequest.status === 'QUOTES_RECEIVED') ? (
                     <button
                       onClick={() => onOpenSubmitQuote(selectedRequest.id)}
-                      className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
+                      className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
                     >
                       Enviar Cotización Formal
                     </button>
@@ -346,12 +346,12 @@ export const RequestsView: React.FC<{
                 </div>
 
                 {requestQuotes.length === 0 ? (
-                  <div className="p-6 rounded-xl border border-dashed border-slate-300 text-center space-y-2">
-                    <p className="text-xs text-slate-500">Aún no hay cotizaciones para esta solicitud.</p>
+                  <div className="p-6 rounded-xl border border-dashed border-slate-800 text-center space-y-2 bg-zinc-950/60">
+                    <p className="text-xs text-zinc-400">Aún no hay cotizaciones para esta solicitud.</p>
                     {isUserCandidateProfessional(currentUser) && (
                       <button
                         onClick={() => onOpenSubmitQuote(selectedRequest.id)}
-                        className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 cursor-pointer"
+                        className="px-4 py-2 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-500 cursor-pointer"
                       >
                         Sé el primero en cotizar
                       </button>
@@ -364,28 +364,28 @@ export const RequestsView: React.FC<{
                         key={quote.id}
                         className={`p-5 rounded-2xl border transition-all ${
                           quote.status === 'ACCEPTED'
-                            ? 'bg-emerald-50/70 border-emerald-300'
-                            : 'bg-white border-slate-200'
+                            ? 'bg-gradient-to-br from-slate-900 to-blue-950 border-red-500/80'
+                            : 'bg-zinc-950/80 border-slate-800'
                         }`}
                       >
                         {/* Quote Header */}
-                        <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-100">
+                        <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-800">
                           <div className="flex items-center gap-3">
                             <img
                               src={quote.professionalAvatar || 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=100'}
                               alt={quote.professionalName}
-                              className="w-10 h-10 rounded-xl object-cover border border-slate-200"
+                              className="w-10 h-10 rounded-xl object-cover border border-slate-800"
                             />
                             <div>
                               <div className="flex items-center gap-1.5">
-                                <h4 className="font-bold text-slate-900 text-sm">{quote.professionalName}</h4>
+                                <h4 className="font-bold text-white text-sm">{quote.professionalName}</h4>
                                 {quote.professionalVerified && (
-                                  <UserCheck className="w-3.5 h-3.5 text-sky-600" />
+                                  <UserCheck className="w-3.5 h-3.5 text-red-400" />
                                 )}
                               </div>
-                              <div className="flex items-center gap-2 text-xs text-slate-500">
-                                <span className="flex items-center gap-0.5 text-amber-600 font-bold">
-                                  <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
+                              <div className="flex items-center gap-2 text-xs text-zinc-400">
+                                <span className="flex items-center gap-0.5 text-amber-400 font-bold">
+                                  <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
                                   {quote.professionalRating || 5.0}
                                 </span>
                               </div>
@@ -393,46 +393,46 @@ export const RequestsView: React.FC<{
                           </div>
 
                           <div className="text-right">
-                            <div className="text-xs text-slate-500">Monto total ARS</div>
-                            <div className="font-extrabold text-slate-900 text-lg">
+                            <div className="text-xs text-zinc-400">Monto total ARS</div>
+                            <div className="font-extrabold text-white text-lg">
                               ${quote.priceArs.toLocaleString('es-AR')}
                             </div>
                           </div>
                         </div>
 
                         {/* Quote Body */}
-                        <div className="py-3 text-xs text-slate-700 space-y-2">
-                          <p className="font-medium text-slate-800">{quote.description}</p>
+                        <div className="py-3 text-xs text-zinc-300 space-y-2">
+                          <p className="font-medium text-white">{quote.description}</p>
                           
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] bg-slate-900/90 p-2.5 rounded-lg border border-slate-800">
                             {quote.materialsIncluded && (
                               <div>
-                                <span className="font-semibold text-slate-800">Materiales:</span> {quote.materialsIncluded}
+                                <span className="font-semibold text-zinc-200">Materiales:</span> {quote.materialsIncluded}
                               </div>
                             )}
                             {quote.estimatedTime && (
                               <div>
-                                <span className="font-semibold text-slate-800">Tiempo estimado:</span> {quote.estimatedTime}
+                                <span className="font-semibold text-zinc-200">Tiempo estimado:</span> {quote.estimatedTime}
                               </div>
                             )}
                             {quote.availableStartDate && (
                               <div>
-                                <span className="font-semibold text-slate-800">Inicio disponible:</span> {quote.availableStartDate}
+                                <span className="font-semibold text-zinc-200">Inicio disponible:</span> {quote.availableStartDate}
                               </div>
                             )}
                             {quote.warrantyInfo && (
                               <div>
-                                <span className="font-semibold text-slate-800">Garantía:</span> {quote.warrantyInfo}
+                                <span className="font-semibold text-zinc-200">Garantía:</span> {quote.warrantyInfo}
                               </div>
                             )}
                           </div>
                         </div>
 
                         {/* Quote Footer Actions */}
-                        <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                        <div className="flex items-center justify-between pt-3 border-t border-slate-800">
                           <button
                             onClick={() => handleStartChat(quote.professionalId, selectedRequest.id)}
-                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-sky-700 hover:text-sky-800 cursor-pointer"
+                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-400 hover:text-red-300 cursor-pointer"
                           >
                             <MessageSquare className="w-3.5 h-3.5" />
                             <span>Chatear con el profesional</span>
@@ -441,7 +441,7 @@ export const RequestsView: React.FC<{
                           {currentUser.role === 'CLIENT' && quote.status === 'PENDING' && selectedRequest.status !== 'COMPLETED' && (
                             <button
                               onClick={() => onOpenEscrowModal(quote)}
-                              className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                              className="px-4 py-2 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold text-xs shadow-md shadow-red-600/30 transition-all cursor-pointer flex items-center gap-1.5"
                             >
                               <ShieldCheck className="w-4 h-4" />
                               <span>Aceptar y Custodiar Pago</span>
@@ -449,7 +449,7 @@ export const RequestsView: React.FC<{
                           )}
 
                           {quote.status === 'ACCEPTED' && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 text-xs font-bold">
                               <CheckCircle2 className="w-3.5 h-3.5" />
                               <span>Presupuesto Aceptado</span>
                             </span>
@@ -463,7 +463,7 @@ export const RequestsView: React.FC<{
 
             </div>
           ) : (
-            <div className="h-full flex items-center justify-center p-12 bg-white rounded-2xl border border-slate-200 text-slate-400 text-sm">
+            <div className="h-full flex items-center justify-center p-12 bg-slate-900/80 rounded-2xl border border-slate-800 text-zinc-400 text-sm">
               Seleccioná una solicitud para ver detalles y cotizaciones
             </div>
           )}
