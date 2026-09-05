@@ -27,7 +27,7 @@ service cloud.firestore {
           'isBlocked', 'isFeatured', 'isProSubscriber', 'isDemoData'
         ]);
       }
-      allow read: if isSignedIn();
+      allow read: if isOwner(userId) || isAdmin();
       allow create: if isOwner(userId)
         && hasNoPrivateProfileFields()
         && hasNoClientManagedTrustFieldsOnCreate()
