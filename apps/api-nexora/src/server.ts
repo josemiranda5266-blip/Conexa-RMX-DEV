@@ -3,6 +3,8 @@ import { requireAuth, type AuthenticatedRequest } from './auth.js';
 import { conversationRepository, listingRepository, orderRepository, reviewRepository, shopRepository } from './repositories.js';
 import { prepareNexoraCheckout } from './paymentCheckout.js';
 import { requestNexoraRefund } from './refundService.js';
+import { confirmDelivery } from './escrowService.js';
+import { escrowRouter, startEscrowAutoReleaseWorker } from './escrowRoutes.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -61,6 +63,15 @@ app.post('/api/orders/:id/request-refund', requireAuth, async (req: Authenticate
     return res.status(500).json({ error: 'Unable to request refund' });
   }
 });
+
+app.use(escrowRouter);
+
+// Delivery confirmation is the canonical completion path: it releases the escrow control state.
+app.post('/api/orders/:id/complete', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try { return res.json({ success: true, escrow: await confirmDelivery(req.params.id, req.userId!) }); }
+  catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'ESCROW_NOT_FOUND') return res.status(404).json({ error: code }); if (code === 'FORBIDDEN') return res.status(403).json({ error: code }); if (code === 'ORDER_NOT_READY_FOR_RELEASE') return res.status(409).json({ error: code }); return res.status(500).json({ error: 'Unable to complete order' }); }
+});
+
 app.post('/api/orders/:id/cancel', requireAuth, async (req: AuthenticatedRequest, res) => {
   try { return res.json(await orderRepository.cancel(req.params.id, req.userId!)); }
   catch (error) {
@@ -71,12 +82,12 @@ app.post('/api/orders/:id/cancel', requireAuth, async (req: AuthenticatedRequest
     return res.status(500).json({ error: 'Unable to cancel order' });
   }
 });
-app.post('/api/orders/:id/complete', requireAuth, async (req: AuthenticatedRequest, res) => { try { return res.json(await orderRepository.complete(req.params.id, req.userId!)); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'ORDER_NOT_FOUND') return res.status(404).json({ error: 'Order not found' }); if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' }); if (['INVALID_ORDER_STATE', 'LISTING_RESERVATION_MISMATCH'].includes(code)) return res.status(409).json({ error: 'Order cannot be completed from its current state' }); return res.status(500).json({ error: 'Unable to complete order' }); } });
 app.post('/api/reviews', requireAuth, async (req: AuthenticatedRequest, res) => { try { const body = req.body as Record<string, unknown>; if (body.buyerId && body.buyerId !== req.userId) return res.status(403).json({ error: 'buyerId must match authenticated user' }); const rating = Number(body.rating); if (typeof body.sellerId !== 'string' || !Number.isFinite(rating) || rating < 1 || rating > 5 || typeof body.comment !== 'string') return res.status(400).json({ error: 'Invalid review' }); const review = await reviewRepository.create({ buyerId: req.userId!, sellerId: body.sellerId, listingId: typeof body.listingId === 'string' ? body.listingId : undefined, rating, comment: body.comment.trim().slice(0, 2000), date: new Date().toISOString() }, req.userId!); return res.status(201).json(review); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'PURCHASE_REQUIRED') return res.status(409).json({ error: 'A completed purchase is required to review this seller' }); if (code === 'DUPLICATE_REVIEW') return res.status(409).json({ error: 'Review already exists' }); if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' }); return res.status(500).json({ error: 'Unable to create review' }); } });
 app.get('/api/conversations', requireAuth, async (req: AuthenticatedRequest, res) => { try { res.json(await conversationRepository.listForUser(req.userId!)); } catch { res.status(500).json({ error: 'Unable to load conversations' }); } });
 app.post('/api/conversations', requireAuth, async (req: AuthenticatedRequest, res) => { try { const body = req.body as Record<string, unknown>; if (typeof body.listingId !== 'string' || typeof body.sellerId !== 'string') return res.status(400).json({ error: 'Invalid conversation' }); const conversation = await conversationRepository.create({ listingId: body.listingId, buyerId: req.userId!, sellerId: body.sellerId, stage: 'Consulta', lastMessageText: '', lastMessageTime: new Date().toISOString(), unreadCountBuyer: 0, unreadCountSeller: 0 }, req.userId!); return res.status(201).json(conversation); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'FORBIDDEN' || code === 'INVALID_PARTICIPANTS' || code === 'INVALID_SELLER') return res.status(403).json({ error: 'Invalid conversation participants' }); if (code === 'LISTING_NOT_FOUND') return res.status(404).json({ error: 'Listing not found' }); return res.status(500).json({ error: 'Unable to create conversation' }); } });
 app.get('/api/conversations/:id/messages', requireAuth, async (req: AuthenticatedRequest, res) => { try { res.json(await conversationRepository.listMessages(req.params.id, req.userId!, parseLimit(req.query.limit))); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'CONVERSATION_NOT_FOUND') return res.status(404).json({ error: 'Conversation not found' }); if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' }); return res.status(500).json({ error: 'Unable to load messages' }); } });
 app.post('/api/conversations/:id/messages', requireAuth, async (req: AuthenticatedRequest, res) => { try { const body = req.body as Record<string, unknown>; if (typeof body.text !== 'string') return res.status(400).json({ error: 'Message text is required' }); return res.status(201).json(await conversationRepository.sendMessage(req.params.id, req.userId!, body.text)); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'CONVERSATION_NOT_FOUND') return res.status(404).json({ error: 'Conversation not found' }); if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' }); if (code === 'INVALID_MESSAGE') return res.status(400).json({ error: 'Message text is required' }); return res.status(500).json({ error: 'Unable to send message' }); } });
-app.post('/api/orders/completed-event', requireAuth, (_req, res) => res.status(410).json({ error: 'Use /api/orders/:id/complete' }));
+app.post('/api/orders/completed-event', requireAuth, (_req, res) => res.status(410).json({ error: 'Use /api/orders/:id/confirm-delivery' }));
+
 export { app };
-if (process.env.NODE_ENV !== 'test') { const port = Number(process.env.PORT ?? 4102); app.listen(port, () => console.log(`Nexora API listening on ${port}`)); }
+if (process.env.NODE_ENV !== 'test') { startEscrowAutoReleaseWorker(); const port = Number(process.env.PORT ?? 4102); app.listen(port, () => console.log(`Nexora API listening on ${port}`)); }
