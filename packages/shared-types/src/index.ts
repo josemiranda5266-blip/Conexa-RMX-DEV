@@ -1,12 +1,10 @@
 export type Domain = 'CONEXA' | 'NEXORA';
 export type ServiceTerminalStatus = 'CLOSED' | 'SETTLED';
-
 export interface CanonicalUser { id: string; email?: string; name?: string; isBlocked?: boolean; hasConexaProfile?: boolean; hasNexoraProfile?: boolean; }
 export interface RecentServiceSummary { id: string; status: string; title?: string; completedAt?: string; }
 export interface CrossSellOffer { id: string; sourceDomain: Domain; targetDomain: Domain; discountPercent: number; message: string; expiresAt?: string; }
 export interface NexoraOrderCompletedEvent { eventId: string; type: 'NEXORA_ORDER_COMPLETED'; occurredAt: string; userId: string; orderId: string; listingIds: string[]; requiresInstallation: boolean; }
 export interface ConexaInstallationLead { sourceEventId: string; userId: string; orderId: string; serviceType: 'INSTALLATION'; status: 'NEW'; }
-
 export type TrustLevel = 'Bronce' | 'Plata' | 'Oro' | 'Platino';
 export type ProductStatus = 'Disponible' | 'Reservado' | 'Vendido' | 'Pausado';
 export type ProductCategory = 'Tecnología' | 'Vehículos' | 'Hogar' | 'Servicios' | 'Moda' | 'Deportes' | 'Mascotas' | 'Inmuebles' | 'Herramientas';
@@ -19,7 +17,7 @@ export type NexoraOrderStatus = 'PENDING' | 'PAID' | 'COMPLETED' | 'CANCELLED' |
 export interface NexoraOrderItem { listingId: string; quantity: number; unitPrice: number; }
 export interface NexoraOrder { id: string; buyerId: string; sellerId: string; items: NexoraOrderItem[]; totalAmount: number; currency: 'ARS'; status: NexoraOrderStatus; requiresInstallation: boolean; paymentTransactionId?: string; createdAt: string; completedAt?: string; }
 export type PaymentTransactionStatus = 'PAYMENT_PENDING' | 'PAID' | 'REFUNDED' | 'CHARGEBACK' | 'CANCELLED';
-export interface PaymentTransaction { id: string; domain: Domain; orderId: string; buyerId: string; merchantId: string; amountArs: number; currency: 'ARS'; status: PaymentTransactionStatus; provider: 'MERCADO_PAGO'; providerPaymentId?: string; paidAt?: string; createdAt: string; updatedAt?: string; }
+export interface PaymentTransaction { id: string; domain: Domain; orderId: string; buyerId: string; merchantId: string; amountArs: number; currency: 'ARS'; status: PaymentTransactionStatus; provider: 'MERCADO_PAGO'; providerPaymentId?: string; preferenceId?: string; checkoutUrl?: string; paidAt?: string; createdAt: string; updatedAt?: string; }
 export type EscrowStatus = 'PENDING' | 'HELD' | 'RELEASED' | 'DISPUTED' | 'REFUNDED';
 export interface EscrowPayment { id: string; orderId: string; listingId: string; amount: number; currency: 'ARS'; buyerId: string; sellerId: string; paymentMethod: 'CARD' | 'MERCADO_PAGO' | 'TRANSFER'; status: EscrowStatus; deliveryPinHash?: string; createdAt: string; autoReleaseAt: string; releasedAt?: string; disputeReason?: string; }
 export type NegotiationStage = 'Consulta' | 'En conversación' | 'Oferta realizada' | 'Oferta aceptada' | 'Encuentro programado' | 'Operación concretada' | 'Cancelada';
