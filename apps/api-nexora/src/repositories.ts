@@ -47,16 +47,42 @@ export const orderRepository = {
     return [...new Map([...buyerSnap.docs, ...sellerSnap.docs].map(d => [d.id, { id: d.id, ...d.data() } as NexoraOrder])).values()];
   },
   async create(input: Omit<NexoraOrder, 'id'>): Promise<NexoraOrder> {
-    if (input.buyerId === input.sellerId) throw new Error('INVALID_ORDER_PARTIES');
+    if (!input.buyerId) throw new Error('INVALID_BUYER');
     if (!Array.isArray(input.items) || input.items.length === 0) throw new Error('INVALID_ORDER_ITEMS');
-    if (!Number.isFinite(input.totalAmount) || input.totalAmount <= 0) throw new Error('INVALID_ORDER_AMOUNT');
-    for (const item of input.items) {
-      if (!item.listingId || !Number.isInteger(item.quantity) || item.quantity <= 0 || !Number.isFinite(item.unitPrice) || item.unitPrice <= 0) {
-        throw new Error('INVALID_ORDER_ITEM');
-      }
-    }
+
+    const listingIds = input.items.map(item => item.listingId);
+    if (listingIds.some(id => !id) || new Set(listingIds).size !== listingIds.length) throw new Error('INVALID_ORDER_ITEMS');
+
+    const listings = await Promise.all(listingIds.map(id => listingRepository.get(id)));
+    if (listings.some(listing => !listing || listing.status !== 'Disponible')) throw new Error('LISTING_UNAVAILABLE');
+
+    const trustedListings = listings as Listing[];
+    const sellerId = trustedListings[0].sellerId;
+    if (!sellerId || sellerId === input.buyerId) throw new Error('INVALID_ORDER_PARTIES');
+    if (trustedListings.some(listing => listing.sellerId !== sellerId)) throw new Error('MIXED_SELLER_ORDER');
+
+    const trustedItems = input.items.map(item => {
+      const listing = trustedListings.find(candidate => candidate.id === item.listingId)!;
+      if (!Number.isInteger(item.quantity) || item.quantity <= 0) throw new Error('INVALID_ORDER_ITEM');
+      if (!Number.isFinite(listing.price) || listing.price <= 0) throw new Error('INVALID_LISTING_PRICE');
+      return { listingId: listing.id, quantity: item.quantity, unitPrice: listing.price };
+    });
+    const trustedTotal = trustedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+    if (!Number.isFinite(trustedTotal) || trustedTotal <= 0) throw new Error('INVALID_ORDER_AMOUNT');
+
     const ref = db().collection('orders').doc();
-    const value = { ...input, createdAt: input.createdAt || now() };
+    const createdAt = now();
+    const value = {
+      ...input,
+      buyerId: input.buyerId,
+      sellerId,
+      items: trustedItems,
+      totalAmount: trustedTotal,
+      currency: 'ARS' as const,
+      status: 'PENDING' as const,
+      createdAt
+    };
+    delete (value as Partial<NexoraOrder> & { requiresInstallation?: boolean }).requiresInstallation;
     await ref.create(value);
     return { id: ref.id, ...value } as NexoraOrder;
   },
@@ -70,8 +96,6 @@ export const orderRepository = {
       const data = snap.data() as NexoraOrder;
       if (data.buyerId !== actorId && data.sellerId !== actorId) throw new Error('FORBIDDEN');
       if (data.status === 'COMPLETED') { completed = { id, ...data }; return; }
-      // Completion is a post-payment transition. PENDING orders must first be
-      // moved to PAID by a trusted payment integration/webhook.
       if (data.status !== 'PAID') throw new Error('INVALID_ORDER_STATE');
       const completedAt = now();
       completed = { ...data, id, status: 'COMPLETED', completedAt };
