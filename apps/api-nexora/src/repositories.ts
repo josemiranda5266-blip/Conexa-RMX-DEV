@@ -3,13 +3,34 @@ import { getDb } from './firebaseAdmin.js';
 import type { Conversation, Listing, Message, NexoraOrder, NexoraReview, PaymentTransaction, Shop } from '@super-app/shared-types';
 
 const now = () => new Date().toISOString();
+const RESERVATION_MINUTES = 15;
 const db = () => getDb();
 const safeLimit = (value: number) => Math.min(Math.max(Number.isFinite(value) ? Math.floor(value) : 50, 1), 100);
+
+function inventoryForListing(listing: Listing, at: string) {
+  let stock = Number.isInteger(listing.stock) && Number(listing.stock) >= 0 ? Number(listing.stock) : 1;
+  let status = listing.status;
+  const expiresAt = listing.reservationExpiresAt ? Date.parse(listing.reservationExpiresAt) : NaN;
+  const reservedQuantity = Number.isInteger(listing.reservedQuantity) && Number(listing.reservedQuantity) > 0 ? Number(listing.reservedQuantity) : 0;
+
+  if (status === 'Reservado' && reservedQuantity > 0 && Number.isFinite(expiresAt) && expiresAt <= Date.parse(at)) {
+    stock += reservedQuantity;
+    status = stock > 0 ? 'Disponible' : 'Vendido';
+  }
+
+  return { stock, status, reservedQuantity: status === 'Reservado' ? reservedQuantity : 0 };
+}
+
+function reservationExpiry(from: string): string {
+  return new Date(Date.parse(from) + RESERVATION_MINUTES * 60_000).toISOString();
+}
 
 export const listingRepository = {
   async list(limit = 50): Promise<Listing[]> {
     const snap = await db().collection('listings').where('status', '==', 'Disponible').limit(safeLimit(limit)).get();
-    return snap.docs.map(d => ({ id: d.id, ...d.data() } as Listing));
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data() } as Listing))
+      .filter(listing => (Number.isInteger(listing.stock) ? Number(listing.stock) > 0 : true));
   },
   async get(id: string): Promise<Listing | null> {
     const d = await db().collection('listings').doc(id).get();
@@ -17,7 +38,7 @@ export const listingRepository = {
   },
   async create(input: Omit<Listing, 'id'>): Promise<Listing> {
     const ref = db().collection('listings').doc();
-    const value = { ...input, createdAt: input.createdAt || now() };
+    const value = { ...input, stock: Number.isInteger(input.stock) && Number(input.stock) >= 0 ? input.stock : 1, createdAt: input.createdAt || now() };
     await ref.create(value);
     return { id: ref.id, ...value } as Listing;
   }
@@ -62,22 +83,47 @@ export const orderRepository = {
     await db().runTransaction(async tx => {
       const listingRefs = listingIds.map(id => db().collection('listings').doc(id));
       const listingSnapshots = await Promise.all(listingRefs.map(ref => tx.get(ref)));
-      if (listingSnapshots.some(snapshot => !snapshot.exists || snapshot.data()?.status !== 'Disponible')) {
-        throw new Error('LISTING_UNAVAILABLE');
-      }
+      if (listingSnapshots.some(snapshot => !snapshot.exists)) throw new Error('LISTING_UNAVAILABLE');
 
       const trustedListings = listingSnapshots.map((snapshot, index) => ({ id: listingIds[index], ...(snapshot.data() as Listing) })) as Listing[];
+      const inventory = trustedListings.map(listing => inventoryForListing(listing, createdAt));
+      if (inventory.some(item => item.status === 'Pausado' || item.status === 'Vendido' || item.stock <= 0)) throw new Error('LISTING_UNAVAILABLE');
+
       const sellerId = trustedListings[0].sellerId;
       if (!sellerId || sellerId === input.buyerId) throw new Error('INVALID_ORDER_PARTIES');
       if (trustedListings.some(listing => listing.sellerId !== sellerId)) throw new Error('MIXED_SELLER_ORDER');
 
       const trustedItems = input.items.map(item => {
-        const listing = trustedListings.find(candidate => candidate.id === item.listingId)!;
+        const index = listingIds.indexOf(item.listingId);
+        const listing = trustedListings[index];
+        const state = inventory[index];
         if (!Number.isFinite(listing.price) || listing.price <= 0) throw new Error('INVALID_LISTING_PRICE');
+        if (item.quantity > state.stock) throw new Error('INSUFFICIENT_STOCK');
         return { listingId: listing.id, quantity: item.quantity, unitPrice: listing.price };
       });
       const trustedTotal = Math.round(trustedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0) * 100) / 100;
       if (!Number.isFinite(trustedTotal) || trustedTotal <= 0) throw new Error('INVALID_ORDER_AMOUNT');
+
+      trustedListings.forEach((listing, index) => {
+        const item = trustedItems[index];
+        const state = inventory[index];
+        const remaining = state.stock - item.quantity;
+        const exhausted = remaining === 0;
+        const listingRef = listingRefs[index];
+        const update: Record<string, unknown> = {
+          stock: remaining,
+          status: exhausted ? 'Reservado' : 'Disponible',
+          updatedAt: FieldValue.serverTimestamp(),
+        };
+        if (exhausted) {
+          update.reservedQuantity = item.quantity;
+          update.reservationExpiresAt = reservationExpiry(createdAt);
+        } else {
+          update.reservedQuantity = 0;
+          update.reservationExpiresAt = FieldValue.delete();
+        }
+        tx.update(listingRef, update);
+      });
 
       const requiresInstallation = trustedListings.some(listing => listing.requiresInstallation === true);
       value = {
@@ -116,6 +162,48 @@ export const orderRepository = {
 
     return value;
   },
+  async cancel(id: string, actorId: string): Promise<NexoraOrder> {
+    const orderRef = db().collection('orders').doc(id);
+    let cancelled!: NexoraOrder;
+    await db().runTransaction(async tx => {
+      const snap = await tx.get(orderRef);
+      if (!snap.exists) throw new Error('ORDER_NOT_FOUND');
+      const data = snap.data() as NexoraOrder;
+      if (data.buyerId !== actorId && data.sellerId !== actorId) throw new Error('FORBIDDEN');
+      if (data.status === 'CANCELLED') { cancelled = { id, ...data }; return; }
+      if (data.status !== 'PENDING') throw new Error('INVALID_ORDER_STATE');
+
+      const listingRefs = data.items.map(item => db().collection('listings').doc(item.listingId));
+      const listings = await Promise.all(listingRefs.map(ref => tx.get(ref)));
+      const cancelledAt = now();
+      listings.forEach((snap, index) => {
+        if (!snap.exists) return;
+        const listing = snap.data() as Listing;
+        const currentStock = Number.isInteger(listing.stock) && Number(listing.stock) >= 0 ? Number(listing.stock) : 0;
+        const restoredStock = currentStock + data.items[index].quantity;
+        tx.update(listingRefs[index], {
+          stock: restoredStock,
+          status: restoredStock > 0 ? 'Disponible' : listing.status,
+          reservedQuantity: 0,
+          reservationExpiresAt: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      });
+
+      const paymentId = String(data.paymentTransactionId || '').trim();
+      if (paymentId) {
+        const paymentRef = db().collection('paymentTransactions').doc(paymentId);
+        const paymentSnap = await tx.get(paymentRef);
+        if (paymentSnap.exists && String(paymentSnap.data()?.status || '').toUpperCase() === 'PAYMENT_PENDING') {
+          tx.update(paymentRef, { status: 'CANCELLED', cancelledAt, updatedAt: FieldValue.serverTimestamp() });
+        }
+      }
+
+      cancelled = { ...data, id, status: 'CANCELLED' };
+      tx.update(orderRef, { status: 'CANCELLED', cancelledAt, updatedAt: FieldValue.serverTimestamp() });
+    });
+    return cancelled;
+  },
   async complete(id: string, actorId: string): Promise<{ order: NexoraOrder; eventId?: string }> {
     const orderRef = db().collection('orders').doc(id);
     let completed!: NexoraOrder;
@@ -127,7 +215,22 @@ export const orderRepository = {
       if (data.buyerId !== actorId && data.sellerId !== actorId) throw new Error('FORBIDDEN');
       if (data.status === 'COMPLETED') { completed = { id, ...data }; return; }
       if (data.status !== 'PAID') throw new Error('INVALID_ORDER_STATE');
+
       const completedAt = now();
+      const listingRefs = data.items.map(item => db().collection('listings').doc(item.listingId));
+      const listings = await Promise.all(listingRefs.map(ref => tx.get(ref)));
+      listings.forEach((listingSnap, index) => {
+        if (!listingSnap.exists) return;
+        const listing = listingSnap.data() as Listing;
+        const stock = Number.isInteger(listing.stock) && Number(listing.stock) >= 0 ? Number(listing.stock) : 0;
+        tx.update(listingRefs[index], {
+          status: stock === 0 ? 'Vendido' : 'Disponible',
+          reservedQuantity: 0,
+          reservationExpiresAt: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      });
+
       completed = { ...data, id, status: 'COMPLETED', completedAt };
       tx.update(orderRef, { status: 'COMPLETED', completedAt, updatedAt: FieldValue.serverTimestamp() });
       if (data.requiresInstallation) {
@@ -149,37 +252,9 @@ export const paymentRepository = {
     const d = await db().collection('paymentTransactions').doc(id).get();
     return d.exists ? ({ id: d.id, ...d.data() } as PaymentTransaction) : null;
   },
-  /**
-   * Trusted settlement hook. This is intentionally not exposed as an HTTP route:
-   * only a verified provider/webhook adapter may call it. The provider payment ID
-   * and amount must be matched to the server-owned transaction before settlement.
-   */
-  async settleFromVerifiedProvider(input: { paymentTransactionId: string; providerPaymentId: string; amountArs: number }): Promise<PaymentTransaction> {
-    if (!input.paymentTransactionId || !input.providerPaymentId) throw new Error('PAYMENT_REFERENCE_REQUIRED');
-    if (!Number.isFinite(input.amountArs) || input.amountArs <= 0) throw new Error('INVALID_PAYMENT_AMOUNT');
-    const ref = db().collection('paymentTransactions').doc(input.paymentTransactionId);
-    return db().runTransaction(async tx => {
-      const snap = await tx.get(ref);
-      if (!snap.exists) throw new Error('PAYMENT_TRANSACTION_NOT_FOUND');
-      const current = snap.data() as PaymentTransaction;
-      const expected = Math.round(Number(current.amountArs) * 100) / 100;
-      const received = Math.round(input.amountArs * 100) / 100;
-      if (expected !== received) throw new Error('PAYMENT_AMOUNT_MISMATCH');
-      if (current.providerPaymentId && current.providerPaymentId !== input.providerPaymentId) throw new Error('PAYMENT_PROVIDER_ID_MISMATCH');
-      if (current.status === 'PAID') return { id: ref.id, ...current };
-      if (current.status !== 'PAYMENT_PENDING') throw new Error('PAYMENT_STATE_NOT_SETTLEABLE');
-
-      const paidAt = now();
-      tx.update(ref, { status: 'PAID', providerPaymentId: input.providerPaymentId, paidAt, updatedAt: FieldValue.serverTimestamp() });
-      const orderRef = db().collection('orders').doc(current.orderId);
-      const orderSnap = await tx.get(orderRef);
-      if (!orderSnap.exists) throw new Error('ORDER_NOT_FOUND');
-      const order = orderSnap.data() as NexoraOrder;
-      if (order.paymentTransactionId !== ref.id) throw new Error('ORDER_PAYMENT_LINK_MISMATCH');
-      if (order.status === 'PENDING') tx.update(orderRef, { status: 'PAID', paidAt, updatedAt: FieldValue.serverTimestamp() });
-      else if (order.status !== 'PAID') throw new Error('ORDER_STATE_NOT_SETTLEABLE');
-      return { ...current, id: ref.id, status: 'PAID', providerPaymentId: input.providerPaymentId, paidAt };
-    });
+  /** @deprecated Provider settlement is canonicalized in the Mercado Pago reconciliation adapter. */
+  async settleFromVerifiedProvider(_input: { paymentTransactionId: string; providerPaymentId: string; amountArs: number }): Promise<PaymentTransaction> {
+    throw new Error('USE_MERCADO_PAGO_RECONCILIATION');
   }
 };
 
