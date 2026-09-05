@@ -21,6 +21,16 @@ async function authenticatedRequest<T>(path: string, init?: RequestInit): Promis
   return request<T>(path, init);
 }
 
+export interface CreateNexoraOrderItem {
+  listingId: string;
+  quantity: number;
+}
+
+export interface CreateNexoraOrderRequest {
+  items: CreateNexoraOrderItem[];
+  requiresInstallation?: boolean;
+}
+
 export const nexoraApi = {
   listListings(limit = 50) { return request<Listing[]>(`/listings?limit=${Math.min(Math.max(limit, 1), 100)}`); },
   getListing(id: string) { return request<Listing>(`/listings/${encodeURIComponent(id)}`); },
@@ -28,7 +38,7 @@ export const nexoraApi = {
   getShop(id: string) { return request<Shop>(`/shops/${encodeURIComponent(id)}`); },
   listOrders() { return authenticatedRequest<NexoraOrder[]>('/orders'); },
   getOrder(id: string) { return authenticatedRequest<NexoraOrder>(`/orders/${encodeURIComponent(id)}`); },
-  createOrder(input: Omit<NexoraOrder, 'id' | 'createdAt' | 'status'>) { return authenticatedRequest<NexoraOrder>('/orders', { method: 'POST', body: JSON.stringify(input) }); },
+  createOrder(input: CreateNexoraOrderRequest) { return authenticatedRequest<NexoraOrder>('/orders', { method: 'POST', body: JSON.stringify(input) }); },
   completeOrder(id: string) { return authenticatedRequest<{ order: NexoraOrder; eventId?: string }>(`/orders/${encodeURIComponent(id)}/complete`, { method: 'POST' }); },
   createReview(input: Omit<NexoraReview, 'id' | 'date'>) { return authenticatedRequest<NexoraReview>('/reviews', { method: 'POST', body: JSON.stringify(input) }); },
   listConversations() { return authenticatedRequest<Conversation[]>('/conversations'); },
