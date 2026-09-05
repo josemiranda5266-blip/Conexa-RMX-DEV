@@ -21,9 +21,34 @@ export async function processNexoraOrderCompleted(limit = 20): Promise<number> {
         const data = current.data() || {};
         const event = data.payload as NexoraOrderCompletedEvent;
         if (!event?.orderId || !event?.userId) throw new Error('INVALID_EVENT');
+
+        const orderRef = firestore.collection('orders').doc(event.orderId);
+        const order = await tx.get(orderRef);
+        if (!order.exists) throw new Error('ORDER_NOT_FOUND');
+        const orderData = order.data() || {};
+        if (String(orderData.status || '').toUpperCase() !== 'COMPLETED') {
+          tx.update(eventDoc.ref, {
+            status: 'PUBLISHED',
+            processedAt: new Date().toISOString(),
+            attempts: (data.attempts ?? 0) + 1,
+            lastError: 'EVENT_STALE_ORDER_NOT_COMPLETED',
+          });
+          return true;
+        }
+        if (String(orderData.buyerId || '') !== event.userId) throw new Error('EVENT_ORDER_USER_MISMATCH');
+        if (event.requiresInstallation !== true || orderData.requiresInstallation !== true) {
+          tx.update(eventDoc.ref, {
+            status: 'PUBLISHED',
+            processedAt: new Date().toISOString(),
+            attempts: (data.attempts ?? 0) + 1,
+            lastError: 'EVENT_NOT_REQUIRING_INSTALLATION',
+          });
+          return true;
+        }
+
         const leadRef = firestore.collection('installationLeads').doc(event.orderId);
         const lead = await tx.get(leadRef);
-        if (!lead.exists && event.requiresInstallation) {
+        if (!lead.exists) {
           tx.create(leadRef, { sourceEventId: event.eventId, userId: event.userId, orderId: event.orderId, serviceType: 'INSTALLATION', status: 'NEW', createdAt: new Date().toISOString() });
         }
         tx.update(eventDoc.ref, { status: 'PUBLISHED', processedAt: new Date().toISOString(), attempts: (data.attempts ?? 0) + 1, lastError: null });
