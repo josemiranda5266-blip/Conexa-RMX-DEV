@@ -2,6 +2,7 @@ import express from 'express';
 import { requireAuth, type AuthenticatedRequest } from './auth.js';
 import { conversationRepository, listingRepository, orderRepository, reviewRepository, shopRepository } from './repositories.js';
 import { prepareNexoraCheckout } from './paymentCheckout.js';
+import { requestNexoraRefund } from './refundService.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -40,6 +41,24 @@ app.post('/api/orders/:id/pay', requireAuth, async (req: AuthenticatedRequest, r
     if (['PAYMENT_TRANSACTION_MISSING', 'PAYMENT_TRANSACTION_NOT_FOUND', 'PAYMENT_ORDER_MISMATCH'].includes(code)) return res.status(500).json({ error: code });
     if (code.startsWith('MERCADO_PAGO_') || code.startsWith('MP_CHECKOUT_') || code === 'APP_URL_REQUIRED') return res.status(502).json({ error: code });
     return res.status(500).json({ error: 'Unable to create payment checkout' });
+  }
+});
+app.post('/api/orders/:id/request-refund', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const body = req.body as Record<string, unknown>;
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+    if (!reason) return res.status(400).json({ error: 'REFUND_REASON_REQUIRED' });
+    if (reason.length > 500) return res.status(400).json({ error: 'REFUND_REASON_TOO_LONG' });
+    const result = await requestNexoraRefund(req.params.id, req.userId!, reason);
+    return res.status(202).json({ success: true, ...result });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'UNKNOWN';
+    if (code === 'ORDER_NOT_FOUND') return res.status(404).json({ error: 'Order not found' });
+    if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' });
+    if (['ORDER_NOT_REFUNDABLE', 'PAYMENT_NOT_REFUNDABLE', 'ALREADY_REFUNDED'].includes(code)) return res.status(409).json({ error: code });
+    if (['PAYMENT_TRANSACTION_MISSING', 'PAYMENT_TRANSACTION_NOT_FOUND', 'PAYMENT_ORDER_MISMATCH', 'PROVIDER_PAYMENT_ID_MISSING', 'ONLY_FULL_REFUND_SUPPORTED'].includes(code)) return res.status(500).json({ error: code });
+    if (code.startsWith('MP_REFUND_') || code.startsWith('MERCADO_PAGO_')) return res.status(502).json({ error: code });
+    return res.status(500).json({ error: 'Unable to request refund' });
   }
 });
 app.post('/api/orders/:id/cancel', requireAuth, async (req: AuthenticatedRequest, res) => {
