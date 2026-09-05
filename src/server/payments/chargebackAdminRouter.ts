@@ -6,9 +6,10 @@ import { submitEvidenceToMP, type MPChargebackEvidenceFile } from '@super-app/sh
 
 export const chargebackAdminRouter = Router();
 // Base64 expands binary payloads by roughly one third, so allow enough JSON
-// envelope space for the documented 10 MB aggregate evidence limit. This parser
-// is scoped to the admin router and is mounted before the default 1 MB API parser.
-chargebackAdminRouter.use(express.json({ limit: '15mb' }));
+// envelope space for the documented 10 MB aggregate evidence limit. The parser
+// is attached only to evidence POST routes; normal admin/API requests retain the
+// default 1 MB body limit.
+const evidenceJsonParser = express.json({ limit: '15mb' });
 
 async function requireAdmin(req: Request, res: Response): Promise<string | null> {
   const auth = await verifyAuthToken(req);
@@ -47,7 +48,7 @@ function decodeEvidenceFiles(body: any): MPChargebackEvidenceFile[] {
   }));
 }
 
-chargebackAdminRouter.post('/api/admin/chargebacks/:id/evidence', async (req: Request, res: Response) => {
+chargebackAdminRouter.post('/api/admin/chargebacks/:id/evidence', evidenceJsonParser, async (req: Request, res: Response) => {
   if (!await requireAdmin(req, res)) return;
   const id = String(req.params.id || '').trim();
   const normalized = decodeEvidenceFiles(req.body);
@@ -72,7 +73,7 @@ chargebackAdminRouter.post('/api/admin/chargebacks/:id/evidence', async (req: Re
   }
 });
 
-chargebackAdminRouter.post('/api/admin/chargebacks/:id/submit-evidence', async (req: Request, res: Response) => {
+chargebackAdminRouter.post('/api/admin/chargebacks/:id/submit-evidence', evidenceJsonParser, async (req: Request, res: Response) => {
   if (!await requireAdmin(req, res)) return;
   const id = String(req.params.id || '').trim();
   if (!id) return res.status(400).json({ error: 'CHARGEBACK_ID_REQUIRED' });
