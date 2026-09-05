@@ -1,6 +1,6 @@
 import express from 'express';
 import { requireAuth, type AuthenticatedRequest } from './auth.js';
-import { conversationRepository, listingRepository, orderRepository, reviewRepository } from './repositories.js';
+import { conversationRepository, listingRepository, orderRepository, reviewRepository, shopRepository } from './repositories.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -23,25 +23,49 @@ app.post('/api/orders', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const body = req.body as Record<string, unknown>;
     if (body.buyerId && body.buyerId !== req.userId) return res.status(403).json({ error: 'buyerId must match authenticated user' });
-    if (!Array.isArray(body.items) || body.items.length === 0) return res.status(400).json({ error: 'Invalid order items' });
-    const items = body.items.map(item => {
+    if (!Array.isArray(body.items) || body.items.length === 0 || body.items.length > 50) return res.status(400).json({ error: 'Invalid order items' });
+
+    const requestedItems = body.items.map(item => {
       const value = item as Record<string, unknown>;
       return { listingId: value.listingId, quantity: value.quantity };
     });
-    if (items.some(item => typeof item.listingId !== 'string' || !Number.isInteger(item.quantity) || item.quantity <= 0)) {
+    if (requestedItems.some(item => typeof item.listingId !== 'string' || !item.listingId || !Number.isInteger(item.quantity) || item.quantity <= 0 || item.quantity > 100)) {
       return res.status(400).json({ error: 'Invalid order items' });
     }
+
+    const listingIds = requestedItems.map(item => item.listingId as string);
+    if (new Set(listingIds).size !== listingIds.length) return res.status(400).json({ error: 'Duplicate order item' });
+    const listings = await Promise.all(listingIds.map(id => listingRepository.get(id)));
+    if (listings.some(listing => !listing)) return res.status(404).json({ error: 'Listing not found' });
+    const validListings = listings as NonNullable<typeof listings[number]>[];
+    if (validListings.some(listing => listing.status !== 'Disponible')) return res.status(409).json({ error: 'Listing not available' });
+    const sellerId = validListings[0].sellerId;
+    if (!sellerId || sellerId === req.userId) return res.status(400).json({ error: 'Invalid order parties' });
+    if (validListings.some(listing => listing.sellerId !== sellerId)) return res.status(409).json({ error: 'Multiple sellers are not supported in one order' });
+
+    // Price, seller and total are server-authoritative. Client values for these fields are ignored.
+    const trustedItems = validListings.map((listing, index) => ({
+      listingId: listing.id,
+      quantity: requestedItems[index].quantity as number,
+      unitPrice: listing.price
+    }));
+    const trustedTotal = Math.round(trustedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0) * 100) / 100;
+    if (!Number.isFinite(trustedTotal) || trustedTotal <= 0) return res.status(400).json({ error: 'Invalid order amount' });
+
     const order = await orderRepository.create({
       buyerId: req.userId!,
-      items,
-      requiresInstallation: body.requiresInstallation === true
+      sellerId,
+      items: trustedItems,
+      totalAmount: trustedTotal,
+      currency: 'ARS',
+      status: 'PENDING',
+      requiresInstallation: body.requiresInstallation === true,
+      createdAt: new Date().toISOString()
     });
     return res.status(201).json(order);
   } catch (error) {
     const code = error instanceof Error ? error.message : 'UNKNOWN';
-    if (code === 'INVALID_ORDER_BUYER' || code === 'INVALID_ORDER_ITEMS' || code === 'INVALID_ORDER_ITEM' || code === 'DUPLICATE_ORDER_ITEM' || code === 'INVALID_ORDER_PARTIES' || code === 'INVALID_ORDER_AMOUNT') return res.status(400).json({ error: code });
-    if (code === 'LISTING_NOT_AVAILABLE' || code === 'MULTIPLE_SELLERS_NOT_SUPPORTED') return res.status(409).json({ error: code });
-    if (code.startsWith('LISTING_NOT_FOUND')) return res.status(404).json({ error: 'Listing not found' });
+    if (code.startsWith('INVALID_ORDER') || code === 'DUPLICATE_ORDER_ITEM') return res.status(400).json({ error: code });
     return res.status(500).json({ error: 'Unable to create order' });
   }
 });
