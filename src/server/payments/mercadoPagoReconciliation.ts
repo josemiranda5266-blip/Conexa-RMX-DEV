@@ -3,6 +3,7 @@ import { resolveSettlementTransition, reversalLedgerKey, reversalReason, type Pr
 import { getAdminDb } from '../firebaseAdmin.js';
 import { MercadoPagoOAuthConnection } from './mercadoPagoOAuthTokenStore.js';
 import { fetchMercadoPagoPaymentWithConnection } from './mercadoPagoPayment.js';
+import { createHeldEscrowInTransaction } from '../../../apps/api-nexora/src/escrowService.js';
 
 const TRANSACTION_COLLECTION = 'transactions';
 const NEXORA_PAYMENT_COLLECTION = 'paymentTransactions';
@@ -110,6 +111,15 @@ export async function reconcileMercadoPagoPayment(paymentId: string, connection:
           }
         });
         orderWasSettled = reservationValid;
+        if (reservationValid) {
+          const escrowRef = db.collection('escrows').doc(`escrow:${orderId}`);
+          const escrowSnap = await tx.get(escrowRef);
+          if (!escrowSnap.exists) createHeldEscrowInTransaction(tx, { orderId, paymentTransactionId: resolved.ref.id, buyerId: String(current.buyerId), sellerId: String(current.merchantId), amountArs: expectedAmount, providerPaymentId: String(paymentId) }, now);
+        }
+      } else if (orderStatus === 'PAID') {
+        const escrowRef = db.collection('escrows').doc(`escrow:${orderId}`);
+        const escrowSnap = await tx.get(escrowRef);
+        if (!escrowSnap.exists) createHeldEscrowInTransaction(tx, { orderId, paymentTransactionId: resolved.ref.id, buyerId: String(current.buyerId), sellerId: String(current.merchantId), amountArs: expectedAmount, providerPaymentId: String(paymentId) }, now);
       }
     }
 
@@ -133,6 +143,9 @@ export async function reconcileMercadoPagoPayment(paymentId: string, connection:
           const orderStatus = String(order.status || '').toUpperCase();
           if (transition.chargeback && ['PENDING', 'PAID', 'COMPLETED'].includes(orderStatus)) {
             tx.update(orderRef, { status: 'DISPUTED', disputeReason: 'MERCADO_PAGO_CHARGEBACK', disputeAt: now, updatedAt: FieldValue.serverTimestamp() });
+            const escrowRef = db.collection('escrows').doc(`escrow:${orderId}`);
+            const escrowSnap = await tx.get(escrowRef);
+            if (escrowSnap.exists && String(escrowSnap.data()?.status) === 'HELD') tx.update(escrowRef, { status: 'DISPUTED', disputedAt: now, disputeReason: 'MERCADO_PAGO_CHARGEBACK', updatedAt: now });
           } else if (transition.refunded && ['PENDING', 'PAID'].includes(orderStatus)) {
             const items = Array.isArray(order.items) ? order.items : [];
             const listingRefs = items.map((item: any) => db.collection('listings').doc(String(item.listingId)));
@@ -146,6 +159,9 @@ export async function reconcileMercadoPagoPayment(paymentId: string, connection:
               tx.update(listingRefs[index], { stock: restored, status: restored > 0 ? 'Disponible' : listing.status, reservedQuantity: 0, reservedByOrderId: FieldValue.delete(), reservationExpiresAt: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() });
             });
             tx.update(orderRef, { status: 'CANCELLED', cancellationReason: 'MERCADO_PAGO_REFUND', cancelledAt: now, updatedAt: FieldValue.serverTimestamp() });
+            const escrowRef = db.collection('escrows').doc(`escrow:${orderId}`);
+            const escrowSnap = await tx.get(escrowRef);
+            if (escrowSnap.exists && ['PENDING', 'HELD', 'DISPUTED'].includes(String(escrowSnap.data()?.status))) tx.update(escrowRef, { status: 'REFUNDED', refundedAt: now, updatedAt: now });
           }
         }
       }
