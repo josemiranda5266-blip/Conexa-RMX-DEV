@@ -4,10 +4,11 @@ import type { Conversation, Listing, NexoraOrder, NexoraReview, Shop } from '@su
 
 const now = () => new Date().toISOString();
 const db = () => getDb();
+const safeLimit = (value: number) => Math.min(Math.max(Number.isFinite(value) ? Math.floor(value) : 50, 1), 100);
 
 export const listingRepository = {
   async list(limit = 50): Promise<Listing[]> {
-    const snap = await db().collection('listings').where('status', '==', 'Disponible').limit(Math.min(limit, 100)).get();
+    const snap = await db().collection('listings').where('status', '==', 'Disponible').limit(safeLimit(limit)).get();
     return snap.docs.map(d => ({ id: d.id, ...d.data() } as Listing));
   },
   async get(id: string): Promise<Listing | null> {
@@ -24,7 +25,7 @@ export const listingRepository = {
 
 export const shopRepository = {
   async list(limit = 50): Promise<Shop[]> {
-    const snap = await db().collection('shops').limit(Math.min(limit, 100)).get();
+    const snap = await db().collection('shops').limit(safeLimit(limit)).get();
     return snap.docs.map(d => ({ id: d.id, ...d.data() } as Shop));
   },
   async get(id: string): Promise<Shop | null> {
@@ -39,19 +40,30 @@ export const orderRepository = {
     return d.exists ? ({ id: d.id, ...d.data() } as NexoraOrder) : null;
   },
   async listForUser(userId: string): Promise<NexoraOrder[]> {
-    const snap = await db().collection('orders').where('buyerId', '==', userId).limit(100).get();
-    return snap.docs.map(d => ({ id: d.id, ...d.data() } as NexoraOrder));
+    const [buyerSnap, sellerSnap] = await Promise.all([
+      db().collection('orders').where('buyerId', '==', userId).limit(100).get(),
+      db().collection('orders').where('sellerId', '==', userId).limit(100).get()
+    ]);
+    return [...new Map([...buyerSnap.docs, ...sellerSnap.docs].map(d => [d.id, { id: d.id, ...d.data() } as NexoraOrder])).values()];
   },
   async create(input: Omit<NexoraOrder, 'id'>): Promise<NexoraOrder> {
+    if (input.buyerId === input.sellerId) throw new Error('INVALID_ORDER_PARTIES');
+    if (!Array.isArray(input.items) || input.items.length === 0) throw new Error('INVALID_ORDER_ITEMS');
+    if (!Number.isFinite(input.totalAmount) || input.totalAmount <= 0) throw new Error('INVALID_ORDER_AMOUNT');
+    for (const item of input.items) {
+      if (!item.listingId || !Number.isInteger(item.quantity) || item.quantity <= 0 || !Number.isFinite(item.unitPrice) || item.unitPrice <= 0) {
+        throw new Error('INVALID_ORDER_ITEM');
+      }
+    }
     const ref = db().collection('orders').doc();
     const value = { ...input, createdAt: input.createdAt || now() };
     await ref.create(value);
     return { id: ref.id, ...value } as NexoraOrder;
   },
-  async complete(id: string, actorId: string): Promise<{ order: NexoraOrder; eventId: string }> {
+  async complete(id: string, actorId: string): Promise<{ order: NexoraOrder; eventId?: string }> {
     const orderRef = db().collection('orders').doc(id);
-    const outboxRef = db().collection('eventOutbox').doc();
     let completed!: NexoraOrder;
+    let eventId: string | undefined;
     await db().runTransaction(async tx => {
       const snap = await tx.get(orderRef);
       if (!snap.exists) throw new Error('ORDER_NOT_FOUND');
@@ -59,27 +71,54 @@ export const orderRepository = {
       if (data.buyerId !== actorId && data.sellerId !== actorId) throw new Error('FORBIDDEN');
       if (data.status === 'COMPLETED') { completed = { id, ...data }; return; }
       if (!['PAID', 'PENDING'].includes(data.status)) throw new Error('INVALID_ORDER_STATE');
+
       const completedAt = now();
       completed = { ...data, id, status: 'COMPLETED', completedAt };
       tx.update(orderRef, { status: 'COMPLETED', completedAt, updatedAt: FieldValue.serverTimestamp() });
-      tx.create(outboxRef, {
-        id: outboxRef.id,
-        type: 'NEXORA_ORDER_COMPLETED',
-        occurredAt: completedAt,
-        producer: 'NEXORA',
-        payload: { eventId: outboxRef.id, type: 'NEXORA_ORDER_COMPLETED', occurredAt: completedAt, userId: data.buyerId, orderId: id, listingIds: data.items.map(i => i.listingId), requiresInstallation: data.requiresInstallation },
-        status: 'PENDING', attempts: 0
-      });
+
+      if (data.requiresInstallation) {
+        const outboxRef = db().collection('eventOutbox').doc();
+        eventId = outboxRef.id;
+        tx.create(outboxRef, {
+          id: outboxRef.id,
+          type: 'NEXORA_ORDER_COMPLETED',
+          occurredAt: completedAt,
+          producer: 'NEXORA',
+          payload: {
+            eventId: outboxRef.id,
+            type: 'NEXORA_ORDER_COMPLETED',
+            occurredAt: completedAt,
+            userId: data.buyerId,
+            orderId: id,
+            listingIds: data.items.map(i => i.listingId),
+            requiresInstallation: true
+          },
+          status: 'PENDING',
+          attempts: 0
+        });
+      }
     });
-    return { order: completed, eventId: outboxRef.id };
+    return { order: completed, ...(eventId ? { eventId } : {}) };
   }
 };
 
 export const reviewRepository = {
-  async create(input: Omit<NexoraReview, 'id'>): Promise<NexoraReview> {
+  async create(input: Omit<NexoraReview, 'id'>, actorId: string): Promise<NexoraReview> {
+    if (input.buyerId !== actorId) throw new Error('FORBIDDEN');
     if (!Number.isFinite(input.rating) || input.rating < 1 || input.rating > 5) throw new Error('INVALID_RATING');
+
+    const orders = await db().collection('orders').where('buyerId', '==', actorId).where('sellerId', '==', input.sellerId).where('status', '==', 'COMPLETED').limit(20).get();
+    const eligible = orders.docs.some(doc => {
+      const order = doc.data() as NexoraOrder;
+      return !input.listingId || order.items.some(item => item.listingId === input.listingId);
+    });
+    if (!eligible) throw new Error('PURCHASE_REQUIRED');
+
+    const duplicate = await db().collection('nexoraReviews').where('buyerId', '==', actorId).where('sellerId', '==', input.sellerId).limit(50).get();
+    if (duplicate.docs.some(doc => (doc.data() as NexoraReview).listingId === input.listingId)) throw new Error('DUPLICATE_REVIEW');
+
     const ref = db().collection('nexoraReviews').doc();
-    const value = { ...input, date: input.date || now() };
+    const value = { ...input, date: input.date || now(), verifiedPurchase: true };
     await ref.create(value);
     return { id: ref.id, ...value } as NexoraReview;
   }
@@ -87,10 +126,10 @@ export const reviewRepository = {
 
 export const conversationRepository = {
   async listForUser(userId: string): Promise<Conversation[]> {
-    const snap = await db().collection('conversations').where('buyerId', '==', userId).limit(100).get();
-    const buyer = snap.docs.map(d => ({ id: d.id, ...d.data() } as Conversation));
-    const sellerSnap = await db().collection('conversations').where('sellerId', '==', userId).limit(100).get();
-    const seller = sellerSnap.docs.map(d => ({ id: d.id, ...d.data() } as Conversation));
-    return [...new Map([...buyer, ...seller].map(x => [x.id, x])).values()];
+    const [buyerSnap, sellerSnap] = await Promise.all([
+      db().collection('conversations').where('buyerId', '==', userId).limit(100).get(),
+      db().collection('conversations').where('sellerId', '==', userId).limit(100).get()
+    ]);
+    return [...new Map([...buyerSnap.docs, ...sellerSnap.docs].map(d => [d.id, { id: d.id, ...d.data() } as Conversation])).values()];
   }
 };
