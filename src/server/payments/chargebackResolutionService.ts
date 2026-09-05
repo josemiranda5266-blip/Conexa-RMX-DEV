@@ -134,8 +134,10 @@ export async function resolveChargebackCase(
     if (currentCaseStatus === 'RESOLVED_FAVORABLE' || currentCaseStatus === 'RESOLVED_UNFAVORABLE') throw new Error('CHARGEBACK_ALREADY_RESOLVED_DIFFERENTLY');
 
     const paymentStatus = String(payment.status || '').toUpperCase();
+    const refundStatus = String(payment.refundStatus || 'NONE').toUpperCase();
     if (coverageApplied && ['REFUNDED', 'CANCELLED', 'CHARGEBACK'].includes(paymentStatus)) throw new Error('CHARGEBACK_RESOLUTION_CONFLICT_WITH_PAYMENT_STATE');
     if (!coverageApplied && paymentStatus === 'REFUNDED') throw new Error('CHARGEBACK_RESOLUTION_CONFLICT_WITH_REFUND');
+    if (['PROCESSING', 'REQUESTED'].includes(refundStatus)) throw new Error('CHARGEBACK_RESOLUTION_BLOCKED_BY_REFUND');
 
     const now = new Date().toISOString();
     const orderId = String(payment.orderId || chargeback.orderId || '').trim();
