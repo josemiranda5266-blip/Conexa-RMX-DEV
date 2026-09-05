@@ -17,9 +17,11 @@ export interface Listing {
   city: string; neighborhood?: string; distanceKm?: number; lat?: number; lng?: number; createdAt: string; updatedAt?: string; status: ProductStatus;
   /** Stock is server-owned. Legacy listings without this field are treated as single-unit listings. */
   stock?: number;
-  /** Quantity temporarily reserved by an unpaid order. */
+  /** Quantity temporarily reserved by the pending order identified below. */
   reservedQuantity?: number;
-  /** ISO timestamp after which an unpaid reservation can be reclaimed. */
+  /** Pending order that owns the temporary reservation. */
+  reservedByOrderId?: string;
+  /** ISO timestamp after which the unpaid reservation can be reclaimed. */
   reservationExpiresAt?: string;
   qualityScore: number; viewsCount: number; favoritesCount: number; queriesCount: number; featured?: boolean;
   deliveryOption: 'Retiro en persona' | 'Entrega a domicilio' | 'Ambas opciones'; acceptedPaymentMethods: string[];
