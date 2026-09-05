@@ -92,10 +92,16 @@ export async function reconcileMercadoPagoPayment(paymentId: string, connection:
     if ((current.mercadoPagoPaymentId && String(current.mercadoPagoPaymentId) !== String(paymentId)) || (current.providerPaymentId && String(current.providerPaymentId) !== String(paymentId))) return { status: 'IGNORED', reason: 'PAYMENT_ID_CHANGED' };
 
     const transition = resolveSettlementTransition(resolved.kind, currentStatus, paymentStatus);
+    // A provider chargeback notification is an event that starts/updates the
+    // dispute workflow, not proof of the final financial outcome. The explicit
+    // chargeback case resolver is the only component allowed to finalize
+    // CHARGEBACK and create the irreversible financial reversal.
+    const chargebackPendingResolution = paymentStatus === 'charged_back' || paymentStatus === 'chargedback';
     const update: Record<string, unknown> = {
       paymentStatus,
       paymentUpdatedAt: now,
       ...(resolved.kind === 'NEXORA' ? { providerPaymentId: String(paymentId) } : { mercadoPagoPaymentId: String(paymentId) }),
+      ...(chargebackPendingResolution ? { chargebackNoticeAt: current.chargebackNoticeAt || now, chargebackPendingResolution: true } : {}),
     };
     let orderWasSettled = false;
 
@@ -151,19 +157,21 @@ export async function reconcileMercadoPagoPayment(paymentId: string, connection:
       if (resolved.kind === 'CONEXA') update.settlementStatus = current.settlementStatus || 'PENDING';
     }
     if (transition.refunded) update.refundedAt = current.refundedAt || now;
-    if (transition.chargeback) update.chargebackAt = current.chargebackAt || now;
     if (transition.cancelled) update.cancelledAt = current.cancelledAt || now;
-    if (transition.changed && !orderWasSettled) update.status = transition.status;
+    // Never finalize CHARGEBACK from a provider status alone. Resolution is
+    // performed by chargebackResolutionService after the dispute outcome is
+    // known, preventing a favorable case from being made impossible to settle.
+    if (transition.changed && !transition.chargeback && !orderWasSettled) update.status = transition.status;
 
     if (resolved.kind === 'NEXORA') {
       const orderId = String(current.orderId || '').trim();
-      if (orderId && (transition.refunded || transition.chargeback)) {
+      if (orderId && (chargebackPendingResolution || transition.refunded)) {
         const orderRef = db.collection('orders').doc(orderId);
         const orderSnap = await tx.get(orderRef);
         if (orderSnap.exists) {
           const order = orderSnap.data() || {};
           const orderStatus = String(order.status || '').toUpperCase();
-          if (transition.chargeback && ['PENDING', 'PAID', 'COMPLETED'].includes(orderStatus)) {
+          if (chargebackPendingResolution && ['PENDING', 'PAID', 'COMPLETED'].includes(orderStatus)) {
             tx.update(orderRef, { status: 'DISPUTED', disputeReason: 'MERCADO_PAGO_CHARGEBACK', disputeAt: now, updatedAt: FieldValue.serverTimestamp() });
             const escrowRef = db.collection(ESCROW_COLLECTION).doc(`escrow:${orderId}`);
             const escrowSnap = await tx.get(escrowRef);
@@ -189,25 +197,24 @@ export async function reconcileMercadoPagoPayment(paymentId: string, connection:
       }
     }
 
-    if (transition.refunded || transition.chargeback) {
-      const kind = transition.chargeback ? 'CHARGEBACK' : 'REFUND';
-      const reversalRef = db.collection('financialReversals').doc(reversalLedgerKey(String(paymentId), kind));
+    // External provider reversals are only recorded after a definitive
+    // transition. A chargeback notification remains a dispute signal.
+    if (transition.refunded) {
+      const reversalRef = db.collection('financialReversals').doc(reversalLedgerKey(String(paymentId), 'REFUND'));
       const reversalSnap = await tx.get(reversalRef);
-      if (!reversalSnap.exists) {
-        tx.create(reversalRef, {
-          id: reversalRef.id,
-          domain: resolved.kind,
-          paymentTransactionId: resolved.ref.id,
-          providerPaymentId: String(paymentId),
-          orderId: String(current.orderId || ''),
-          kind,
-          amountArs: expectedAmount,
-          currency: 'ARS',
-          reason: reversalReason(kind, payment?.status_detail),
-          confirmedAt: now,
-          source: 'MERCADO_PAGO_WEBHOOK',
-        });
-      }
+      if (!reversalSnap.exists) tx.create(reversalRef, {
+        id: reversalRef.id,
+        domain: resolved.kind,
+        paymentTransactionId: resolved.ref.id,
+        providerPaymentId: String(paymentId),
+        orderId: String(current.orderId || ''),
+        kind: 'REFUND',
+        amountArs: expectedAmount,
+        currency: 'ARS',
+        reason: reversalReason('REFUND', payment?.status_detail),
+        confirmedAt: now,
+        source: 'MERCADO_PAGO_WEBHOOK',
+      });
     }
 
     tx.update(resolved.ref, update);
