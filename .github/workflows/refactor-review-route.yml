@@ -1,0 +1,63 @@
+name: Apply review route refactor
+
+on:
+  push:
+    branches:
+      - integration/conexa-unified
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    if: github.event.head_commit.message != 'refactor(reviews): delegate route to review handler'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: integration/conexa-unified
+          fetch-depth: 0
+
+      - name: Patch server.ts
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('server.ts')
+          text = path.read_text(encoding='utf-8')
+
+          import_line = 'import { handleProfessionalReviewSave } from "./src/server/reviewRoute.js";'
+          auth_line = 'import { verifyUserAuthToken } from "./src/server/auth.js";'
+          if import_line not in text:
+              if auth_line not in text:
+                  raise SystemExit('AUTH_IMPORT_ANCHOR_NOT_FOUND')
+              text = text.replace(auth_line, auth_line + '\n' + import_line, 1)
+
+          pattern = re.compile(
+              r'\n  // Review creation and reputation aggregation are authoritative on the backend\.'
+              r'.*?'
+              r'\n  // Backward-compatible close endpoint\.',
+              re.DOTALL,
+          )
+          matches = pattern.findall(text)
+          if len(matches) != 1:
+              raise SystemExit(f'LEGACY_REVIEW_BLOCK_MATCH_COUNT={len(matches)}')
+
+          replacement = '\n  app.post("/api/reviews/create", rateLimiter, handleProfessionalReviewSave);\n\n  // Backward-compatible close endpoint.'
+          text = pattern.sub(replacement, text, count=1)
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit server.ts and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/refactor-review-route.yml
+          git add server.ts
+          git diff --cached --check
+          git commit -m "refactor(reviews): delegate route to review handler"
+          git push origin HEAD:integration/conexa-unified
