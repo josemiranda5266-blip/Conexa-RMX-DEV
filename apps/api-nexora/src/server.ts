@@ -25,8 +25,8 @@ app.post('/api/orders', requireAuth, async (req: AuthenticatedRequest, res) => {
     return res.status(201).json(order);
   } catch (error) {
     const code = error instanceof Error ? error.message : 'UNKNOWN';
-    if (['INVALID_BUYER', 'INVALID_ORDER_ITEMS', 'INVALID_ORDER_ITEM', 'INVALID_ORDER_PARTIES', 'INVALID_LISTING_PRICE', 'INVALID_ORDER_AMOUNT'].includes(code)) return res.status(400).json({ error: code });
-    if (code === 'LISTING_UNAVAILABLE' || code === 'MIXED_SELLER_ORDER') return res.status(409).json({ error: code });
+    if (['INVALID_BUYER', 'INVALID_ORDER_ITEMS', 'INVALID_ORDER_ITEM', 'INVALID_ORDER_PARTIES', 'INVALID_LISTING_PRICE', 'INVALID_ORDER_AMOUNT', 'INSUFFICIENT_STOCK'].includes(code)) return res.status(400).json({ error: code });
+    if (['LISTING_UNAVAILABLE', 'MIXED_SELLER_ORDER'].includes(code)) return res.status(409).json({ error: code });
     return res.status(500).json({ error: 'Unable to create order' });
   }
 });
@@ -36,13 +36,23 @@ app.post('/api/orders/:id/pay', requireAuth, async (req: AuthenticatedRequest, r
     const code = error instanceof Error ? error.message : 'UNKNOWN';
     if (code === 'ORDER_NOT_FOUND') return res.status(404).json({ error: 'Order not found' });
     if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' });
-    if (['ORDER_NOT_PAYABLE', 'PAYMENT_NOT_PENDING'].includes(code)) return res.status(409).json({ error: code });
+    if (['ORDER_NOT_PAYABLE', 'PAYMENT_NOT_PENDING', 'ORDER_RESERVATION_EXPIRED'].includes(code)) return res.status(409).json({ error: code });
     if (['PAYMENT_TRANSACTION_MISSING', 'PAYMENT_TRANSACTION_NOT_FOUND', 'PAYMENT_ORDER_MISMATCH'].includes(code)) return res.status(500).json({ error: code });
     if (code.startsWith('MERCADO_PAGO_') || code.startsWith('MP_CHECKOUT_') || code === 'APP_URL_REQUIRED') return res.status(502).json({ error: code });
     return res.status(500).json({ error: 'Unable to create payment checkout' });
   }
 });
-app.post('/api/orders/:id/complete', requireAuth, async (req: AuthenticatedRequest, res) => { try { return res.json(await orderRepository.complete(req.params.id, req.userId!)); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'ORDER_NOT_FOUND') return res.status(404).json({ error: 'Order not found' }); if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' }); if (code === 'INVALID_ORDER_STATE') return res.status(409).json({ error: 'Order cannot be completed from its current state' }); return res.status(500).json({ error: 'Unable to complete order' }); } });
+app.post('/api/orders/:id/cancel', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try { return res.json(await orderRepository.cancel(req.params.id, req.userId!)); }
+  catch (error) {
+    const code = error instanceof Error ? error.message : 'UNKNOWN';
+    if (code === 'ORDER_NOT_FOUND') return res.status(404).json({ error: 'Order not found' });
+    if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' });
+    if (code === 'INVALID_ORDER_STATE') return res.status(409).json({ error: 'Only pending orders can be cancelled' });
+    return res.status(500).json({ error: 'Unable to cancel order' });
+  }
+});
+app.post('/api/orders/:id/complete', requireAuth, async (req: AuthenticatedRequest, res) => { try { return res.json(await orderRepository.complete(req.params.id, req.userId!)); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'ORDER_NOT_FOUND') return res.status(404).json({ error: 'Order not found' }); if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' }); if (['INVALID_ORDER_STATE', 'LISTING_RESERVATION_MISMATCH'].includes(code)) return res.status(409).json({ error: 'Order cannot be completed from its current state' }); return res.status(500).json({ error: 'Unable to complete order' }); } });
 app.post('/api/reviews', requireAuth, async (req: AuthenticatedRequest, res) => { try { const body = req.body as Record<string, unknown>; if (body.buyerId && body.buyerId !== req.userId) return res.status(403).json({ error: 'buyerId must match authenticated user' }); const rating = Number(body.rating); if (typeof body.sellerId !== 'string' || !Number.isFinite(rating) || rating < 1 || rating > 5 || typeof body.comment !== 'string') return res.status(400).json({ error: 'Invalid review' }); const review = await reviewRepository.create({ buyerId: req.userId!, sellerId: body.sellerId, listingId: typeof body.listingId === 'string' ? body.listingId : undefined, rating, comment: body.comment.trim().slice(0, 2000), date: new Date().toISOString() }, req.userId!); return res.status(201).json(review); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'PURCHASE_REQUIRED') return res.status(409).json({ error: 'A completed purchase is required to review this seller' }); if (code === 'DUPLICATE_REVIEW') return res.status(409).json({ error: 'Review already exists' }); if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' }); return res.status(500).json({ error: 'Unable to create review' }); } });
 app.get('/api/conversations', requireAuth, async (req: AuthenticatedRequest, res) => { try { res.json(await conversationRepository.listForUser(req.userId!)); } catch { res.status(500).json({ error: 'Unable to load conversations' }); } });
 app.post('/api/conversations', requireAuth, async (req: AuthenticatedRequest, res) => { try { const body = req.body as Record<string, unknown>; if (typeof body.listingId !== 'string' || typeof body.sellerId !== 'string') return res.status(400).json({ error: 'Invalid conversation' }); const conversation = await conversationRepository.create({ listingId: body.listingId, buyerId: req.userId!, sellerId: body.sellerId, stage: 'Consulta', lastMessageText: '', lastMessageTime: new Date().toISOString(), unreadCountBuyer: 0, unreadCountSeller: 0 }, req.userId!); return res.status(201).json(conversation); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'FORBIDDEN' || code === 'INVALID_PARTICIPANTS' || code === 'INVALID_SELLER') return res.status(403).json({ error: 'Invalid conversation participants' }); if (code === 'LISTING_NOT_FOUND') return res.status(404).json({ error: 'Listing not found' }); return res.status(500).json({ error: 'Unable to create conversation' }); } });
