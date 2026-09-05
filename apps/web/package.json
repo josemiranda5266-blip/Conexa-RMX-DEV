@@ -1,0 +1,9 @@
+{
+  "name": "@super-app/web",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": { "dev": "vite --host 0.0.0.0", "build": "vite build", "lint": "tsc --noEmit" },
+  "dependencies": { "@super-app/shared-types": "workspace:*", "react": "^19.0.1", "react-dom": "^19.0.1" },
+  "devDependencies": { "@vitejs/plugin-react": "^5.0.4", "typescript": "~5.8.2", "vite": "^6.2.3" }
+}
