@@ -17,6 +17,7 @@ packages/
   shared-auth/
   shared-wallet/
   shared-events/
+  shared-payments/
   shared-security/   # siguiente fase
   shared-ai/         # siguiente fase
 ```
@@ -65,7 +66,9 @@ Cada movimiento conserva `source: CONEXA | NEXORA | SYSTEM` y referencia de orig
 
 La orden Nexora se crea como `PENDING` junto con `paymentTransactions/{id}` en `PAYMENT_PENDING`. El checkout de Mercado Pago es generado server-side y es idempotente. El webhook no confía en el payload del cliente: recupera el pago del proveedor, verifica referencia externa, comercio, monto e ID del pago y recién entonces permite `PAYMENT_PENDING -> PAID`.
 
-Las reversas también son estados financieros explícitos:
+La transición financiera canónica vive ahora en `packages/shared-payments`; la reconciliación de Mercado Pago es el adaptador que ejecuta las escrituras atómicas de cada dominio.
+
+Las reversas son estados financieros explícitos:
 
 ```text
 PAYMENT_PENDING -> PAID
@@ -75,6 +78,14 @@ PAID            -> CHARGEBACK
 ```
 
 Un reembolso de proveedor no se interpreta automáticamente como reversión de un servicio ya completado. En Nexora, un reembolso de una orden pendiente/pagada cancela la orden; un chargeback marca una orden activa o completada como `DISPUTED` para resolución posterior.
+
+### Inventario y concurrencia Nexora
+
+La creación de una orden lee listings dentro de una única transacción Firestore y reserva inventario antes de crear la orden y su `paymentTransaction`. Firestore reintentará la transacción ante una escritura concurrente sobre el mismo listing, evitando la doble reserva.
+
+La reserva queda ligada a `reservedByOrderId` y expira a los 15 minutos. Un checkout no puede generarse después de la expiración; en ese caso la orden y su pago pendiente se cancelan y el inventario se libera. El pago confirmado por Mercado Pago también debe encontrar una reserva válida: si llega después de la expiración, el pago financiero se registra pero la orden queda `DISPUTED` y el inventario se libera para evitar una doble venta.
+
+El endpoint de cancelación libera la reserva dentro de la misma transacción y `PAID -> COMPLETED` consume definitivamente la reserva, marcando el listing como `Vendido` cuando el stock llega a cero.
 
 ## Integración entre dominios
 
@@ -108,4 +119,27 @@ Cuando un servicio Conexa termina en `CLOSED` o `SETTLED`, el shell puede mostra
 
 ## Estado de esta fase
 
-La estructura del monorepo, los contratos compartidos iniciales y el flujo financiero base de Nexora ya están creados. La migración funcional de pantallas, rutas, persistencia Firestore y eventos debe hacerse por dominio, evitando un big-bang. La verificación automatizada de build/lint/tests queda deliberadamente para el cierre de la fase de correcciones.
+### Endurecimiento completado
+
+- `shared-payments` creado como máquina de estados financiera común.
+- Settlement de Mercado Pago de Conexa/Nexora encaminado por el mismo contrato de transición.
+- Creación de órdenes Nexora con reserva de inventario transaccional.
+- Reservas ligadas a la orden, con expiración de 15 minutos.
+- Checkout bloqueado cuando la reserva expiró.
+- Confirmación de pago Nexora actualiza atómicamente pago + orden + inventario cuando la reserva sigue vigente.
+- Pago confirmado después de perder la reserva queda financiero como pagado, pero la orden se marca `DISPUTED` para evitar una venta inconsistente.
+- Cancelación pendiente libera inventario y cancela el `paymentTransaction` pendiente.
+- `PAID -> COMPLETED` libera la reserva y consolida el estado del listing.
+- Se eliminó el camino de settlement directo como mecanismo operativo; el método antiguo queda únicamente como guardia de compatibilidad y falla explícitamente.
+
+La verificación automatizada de build/lint/tests queda deliberadamente para el cierre de la fase de correcciones.
+
+## Siguiente orden recomendado
+
+1. Refund real contra Mercado Pago + confirmación por webhook.
+2. Ledger `shared-wallet` conectado a eventos financieros idempotentes.
+3. Escrow y settlement económico real.
+4. Firestore Rules y auditoría final de seguridad.
+5. Refactor progresivo de `AppContext`, matching y mensajería de Conexa.
+6. Migración final de pantallas Nexora fuera de localStorage.
+7. Build/lint/tests y auditoría de cierre.
