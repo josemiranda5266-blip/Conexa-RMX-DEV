@@ -70,7 +70,9 @@ export const orderRepository = {
       const data = snap.data() as NexoraOrder;
       if (data.buyerId !== actorId && data.sellerId !== actorId) throw new Error('FORBIDDEN');
       if (data.status === 'COMPLETED') { completed = { id, ...data }; return; }
-      if (!['PAID', 'PENDING'].includes(data.status)) throw new Error('INVALID_ORDER_STATE');
+      // Completion is a post-payment transition. PENDING orders must first be
+      // moved to PAID by a trusted payment integration/webhook.
+      if (data.status !== 'PAID') throw new Error('INVALID_ORDER_STATE');
       const completedAt = now();
       completed = { ...data, id, status: 'COMPLETED', completedAt };
       tx.update(orderRef, { status: 'COMPLETED', completedAt, updatedAt: FieldValue.serverTimestamp() });
