@@ -164,6 +164,14 @@ export const orderRepository = {
       if (data.status === 'CANCELLED') { cancelled = { id, ...data }; return; }
       if (data.status !== 'PENDING') throw new Error('INVALID_ORDER_STATE');
 
+      const paymentId = String(data.paymentTransactionId || '').trim();
+      const paymentRef = paymentId ? db().collection('paymentTransactions').doc(paymentId) : null;
+      const paymentSnap = paymentRef ? await tx.get(paymentRef) : null;
+      if (paymentSnap?.exists) {
+        const paymentStatus = String(paymentSnap.data()?.status || '').toUpperCase();
+        if (paymentStatus !== 'PAYMENT_PENDING') throw new Error('INVALID_ORDER_STATE');
+      }
+
       const listingRefs = data.items.map(item => db().collection('listings').doc(item.listingId));
       const listings = await Promise.all(listingRefs.map(ref => tx.get(ref)));
       const cancelledAt = now();
@@ -171,7 +179,7 @@ export const orderRepository = {
         if (!snap.exists) return;
         const listing = snap.data() as Listing;
         const owner = String(listing.reservedByOrderId || '').trim();
-        if (owner && owner !== id) return;
+        if (owner !== id) return;
         const currentStock = Number.isInteger(listing.stock) && Number(listing.stock) >= 0 ? Number(listing.stock) : 0;
         const restoredStock = currentStock + data.items[index].quantity;
         tx.update(listingRefs[index], {
@@ -184,13 +192,8 @@ export const orderRepository = {
         });
       });
 
-      const paymentId = String(data.paymentTransactionId || '').trim();
-      if (paymentId) {
-        const paymentRef = db().collection('paymentTransactions').doc(paymentId);
-        const paymentSnap = await tx.get(paymentRef);
-        if (paymentSnap.exists && String(paymentSnap.data()?.status || '').toUpperCase() === 'PAYMENT_PENDING') {
-          tx.update(paymentRef, { status: 'CANCELLED', cancelledAt, updatedAt: FieldValue.serverTimestamp() });
-        }
+      if (paymentRef && paymentSnap?.exists) {
+        tx.update(paymentRef, { status: 'CANCELLED', cancelledAt, updatedAt: FieldValue.serverTimestamp() });
       }
 
       cancelled = { ...data, id, status: 'CANCELLED' };
