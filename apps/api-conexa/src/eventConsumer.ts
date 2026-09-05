@@ -56,13 +56,21 @@ export async function processNexoraOrderCompleted(limit = 20): Promise<number> {
       });
       if (didProcess) processed++;
     } catch (error) {
-      const attempts = Number(eventDoc.data().attempts ?? 0) + 1;
-      await eventDoc.ref.update({
-        status: attempts >= MAX_ATTEMPTS ? 'FAILED' : 'PENDING',
-        lastError: error instanceof Error ? error.message : 'UNKNOWN',
-        attempts,
-        updatedAt: new Date().toISOString(),
-      });
+      // A transaction can fail because another worker committed the same event.
+      // Never perform a stale, out-of-transaction write here: it could resurrect
+      // PUBLISHED back to PENDING/FAILED. Re-read transactionally and only count
+      // the failure if the event is still PENDING.
+      await firestore.runTransaction(async tx => {
+        const current = await tx.get(eventDoc.ref);
+        if (!current.exists || current.data()?.status !== 'PENDING') return;
+        const attempts = Number(current.data()?.attempts ?? 0) + 1;
+        tx.update(eventDoc.ref, {
+          status: attempts >= MAX_ATTEMPTS ? 'FAILED' : 'PENDING',
+          lastError: error instanceof Error ? error.message : 'UNKNOWN',
+          attempts,
+          updatedAt: new Date().toISOString(),
+        });
+      }).catch(() => undefined);
     }
   }
   return processed;
