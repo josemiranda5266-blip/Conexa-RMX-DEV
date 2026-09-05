@@ -3,10 +3,11 @@ import { resolveSettlementTransition, reversalLedgerKey, reversalReason, type Pr
 import { getAdminDb } from '../firebaseAdmin.js';
 import { MercadoPagoOAuthConnection } from './mercadoPagoOAuthTokenStore.js';
 import { fetchMercadoPagoPaymentWithConnection } from './mercadoPagoPayment.js';
-import { createHeldEscrowInTransaction } from '../../../apps/api-nexora/src/escrowService.js';
 
 const TRANSACTION_COLLECTION = 'transactions';
 const NEXORA_PAYMENT_COLLECTION = 'paymentTransactions';
+const ESCROW_COLLECTION = 'escrows';
+const ESCROW_AUTO_RELEASE_HOURS = 72;
 type ReconciledProviderStatus = ProviderPaymentStatus;
 export type PaymentReconciliationResult =
   | { status: 'PAID'; transactionId: string }
@@ -37,6 +38,27 @@ async function resolveFinancialRecord(transactionId: string) {
   if (conexa.exists) return { ref: db.collection(TRANSACTION_COLLECTION).doc(transactionId), data: conexa.data() || {}, kind: 'CONEXA' as const };
   if (nexora.exists) return { ref: db.collection(NEXORA_PAYMENT_COLLECTION).doc(transactionId), data: nexora.data() || {}, kind: 'NEXORA' as const };
   return null;
+}
+
+function writeHeldEscrow(tx: FirebaseFirestore.Transaction, db: FirebaseFirestore.Firestore, input: { orderId: string; paymentTransactionId: string; buyerId: string; sellerId: string; amountArs: number; providerPaymentId: string }, at: string) {
+  const ref = db.collection(ESCROW_COLLECTION).doc(`escrow:${input.orderId}`);
+  const autoReleaseAt = new Date(Date.parse(at) + ESCROW_AUTO_RELEASE_HOURS * 60 * 60_000).toISOString();
+  tx.create(ref, {
+    id: ref.id,
+    orderId: input.orderId,
+    paymentTransactionId: input.paymentTransactionId,
+    buyerId: input.buyerId,
+    sellerId: input.sellerId,
+    amountArs: input.amountArs,
+    currency: 'ARS',
+    status: 'HELD',
+    createdAt: at,
+    heldAt: at,
+    autoReleaseAt,
+    provider: 'MERCADO_PAGO',
+    providerPaymentId: input.providerPaymentId,
+    custodyMode: 'PROVIDER_SETTLED_CONTROL',
+  });
 }
 
 export async function reconcileMercadoPagoPayment(paymentId: string, connection: MercadoPagoOAuthConnection): Promise<PaymentReconciliationResult> {
@@ -112,14 +134,14 @@ export async function reconcileMercadoPagoPayment(paymentId: string, connection:
         });
         orderWasSettled = reservationValid;
         if (reservationValid) {
-          const escrowRef = db.collection('escrows').doc(`escrow:${orderId}`);
+          const escrowRef = db.collection(ESCROW_COLLECTION).doc(`escrow:${orderId}`);
           const escrowSnap = await tx.get(escrowRef);
-          if (!escrowSnap.exists) createHeldEscrowInTransaction(tx, { orderId, paymentTransactionId: resolved.ref.id, buyerId: String(current.buyerId), sellerId: String(current.merchantId), amountArs: expectedAmount, providerPaymentId: String(paymentId) }, now);
+          if (!escrowSnap.exists) writeHeldEscrow(tx, db, { orderId, paymentTransactionId: resolved.ref.id, buyerId: String(current.buyerId), sellerId: String(current.merchantId), amountArs: expectedAmount, providerPaymentId: String(paymentId) }, now);
         }
       } else if (orderStatus === 'PAID') {
-        const escrowRef = db.collection('escrows').doc(`escrow:${orderId}`);
+        const escrowRef = db.collection(ESCROW_COLLECTION).doc(`escrow:${orderId}`);
         const escrowSnap = await tx.get(escrowRef);
-        if (!escrowSnap.exists) createHeldEscrowInTransaction(tx, { orderId, paymentTransactionId: resolved.ref.id, buyerId: String(current.buyerId), sellerId: String(current.merchantId), amountArs: expectedAmount, providerPaymentId: String(paymentId) }, now);
+        if (!escrowSnap.exists) writeHeldEscrow(tx, db, { orderId, paymentTransactionId: resolved.ref.id, buyerId: String(current.buyerId), sellerId: String(current.merchantId), amountArs: expectedAmount, providerPaymentId: String(paymentId) }, now);
       }
     }
 
@@ -143,7 +165,7 @@ export async function reconcileMercadoPagoPayment(paymentId: string, connection:
           const orderStatus = String(order.status || '').toUpperCase();
           if (transition.chargeback && ['PENDING', 'PAID', 'COMPLETED'].includes(orderStatus)) {
             tx.update(orderRef, { status: 'DISPUTED', disputeReason: 'MERCADO_PAGO_CHARGEBACK', disputeAt: now, updatedAt: FieldValue.serverTimestamp() });
-            const escrowRef = db.collection('escrows').doc(`escrow:${orderId}`);
+            const escrowRef = db.collection(ESCROW_COLLECTION).doc(`escrow:${orderId}`);
             const escrowSnap = await tx.get(escrowRef);
             if (escrowSnap.exists && String(escrowSnap.data()?.status) === 'HELD') tx.update(escrowRef, { status: 'DISPUTED', disputedAt: now, disputeReason: 'MERCADO_PAGO_CHARGEBACK', updatedAt: now });
           } else if (transition.refunded && ['PENDING', 'PAID'].includes(orderStatus)) {
@@ -159,7 +181,7 @@ export async function reconcileMercadoPagoPayment(paymentId: string, connection:
               tx.update(listingRefs[index], { stock: restored, status: restored > 0 ? 'Disponible' : listing.status, reservedQuantity: 0, reservedByOrderId: FieldValue.delete(), reservationExpiresAt: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() });
             });
             tx.update(orderRef, { status: 'CANCELLED', cancellationReason: 'MERCADO_PAGO_REFUND', cancelledAt: now, updatedAt: FieldValue.serverTimestamp() });
-            const escrowRef = db.collection('escrows').doc(`escrow:${orderId}`);
+            const escrowRef = db.collection(ESCROW_COLLECTION).doc(`escrow:${orderId}`);
             const escrowSnap = await tx.get(escrowRef);
             if (escrowSnap.exists && ['PENDING', 'HELD', 'DISPUTED'].includes(String(escrowSnap.data()?.status))) tx.update(escrowRef, { status: 'REFUNDED', refundedAt: now, updatedAt: now });
           }
