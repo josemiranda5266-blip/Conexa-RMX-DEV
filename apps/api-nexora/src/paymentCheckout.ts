@@ -10,7 +10,7 @@ async function assertActiveReservation(orderId: string, order: NexoraOrder, paym
   const listingRefs = order.items.map(item => db.collection('listings').doc(item.listingId));
   const now = new Date().toISOString();
 
-  await db.runTransaction(async tx => {
+  const active = await db.runTransaction(async tx => {
     const [orderSnap, paymentSnap, ...listingSnaps] = await Promise.all([
       tx.get(orderRef),
       tx.get(paymentRef),
@@ -22,12 +22,15 @@ async function assertActiveReservation(orderId: string, order: NexoraOrder, paym
     if (currentOrder.status !== 'PENDING' || currentPayment.status !== 'PAYMENT_PENDING') throw new Error('PAYMENT_NOT_PENDING');
 
     const nowMs = Date.parse(now);
-    const expired = listingSnaps.some((snap, index) => {
-      if (!snap.exists) return true;
+    const reservationValid = listingSnaps.length === currentOrder.items.length && listingSnaps.every((snap, index) => {
+      if (!snap.exists) return false;
       const listing = snap.data() as Listing;
-      return String(listing.reservedByOrderId || '') !== orderId || !listing.reservationExpiresAt || !Number.isFinite(Date.parse(listing.reservationExpiresAt)) || Date.parse(listing.reservationExpiresAt) <= nowMs || Number(listing.reservedQuantity) !== currentOrder.items[index].quantity;
+      return String(listing.reservedByOrderId || '') === orderId
+        && Number(listing.reservedQuantity) === Number(currentOrder.items[index].quantity)
+        && listing.reservationExpiresAt
+        && Date.parse(String(listing.reservationExpiresAt)) > nowMs;
     });
-    if (!expired) return;
+    if (reservationValid) return true;
 
     listingSnaps.forEach((snap, index) => {
       if (!snap.exists) return;
@@ -46,8 +49,10 @@ async function assertActiveReservation(orderId: string, order: NexoraOrder, paym
     });
     tx.update(paymentRef, { status: 'CANCELLED', cancelledAt: now, updatedAt: FieldValue.serverTimestamp() });
     tx.update(orderRef, { status: 'CANCELLED', cancelledAt: now, cancellationReason: 'INVENTORY_RESERVATION_EXPIRED', updatedAt: FieldValue.serverTimestamp() });
-    throw new Error('ORDER_RESERVATION_EXPIRED');
+    return false;
   });
+
+  if (!active) throw new Error('ORDER_RESERVATION_EXPIRED');
 }
 
 export async function prepareNexoraCheckout(orderId: string, buyerId: string) {
