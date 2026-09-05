@@ -1,10 +1,11 @@
-import express from 'express';
+import express, { type Response } from 'express';
 import { requireAuth, type AuthenticatedRequest } from './auth.js';
 import { conversationRepository, listingRepository, orderRepository, reviewRepository, shopRepository } from './repositories.js';
 import { prepareNexoraCheckout } from './paymentCheckout.js';
 import { requestNexoraRefund } from './refundService.js';
 import { confirmDelivery } from './escrowService.js';
 import { escrowRouter, startEscrowAutoReleaseWorker } from './escrowRoutes.js';
+import { chargebackAdminRouter } from '../../../src/server/payments/chargebackAdminRouter.js';
 import { handleMercadoPagoWebhook } from '../../../src/server/payments/mercadoPagoWebhook.js';
 
 const app = express();
@@ -18,81 +19,19 @@ app.get('/api/shops', async (req, res) => { try { res.json(await shopRepository.
 app.get('/api/shops/:id', async (req, res) => { try { const shop = await shopRepository.get(req.params.id); return shop ? res.json(shop) : res.status(404).json({ error: 'Shop not found' }); } catch { return res.status(500).json({ error: 'Unable to load shop' }); } });
 app.get('/api/orders', requireAuth, async (req: AuthenticatedRequest, res) => { try { res.json(await orderRepository.listForUser(req.userId!)); } catch { res.status(500).json({ error: 'Unable to load orders' }); } });
 app.get('/api/orders/:id', requireAuth, async (req: AuthenticatedRequest, res) => { try { const order = await orderRepository.get(req.params.id); if (!order) return res.status(404).json({ error: 'Order not found' }); if (order.buyerId !== req.userId && order.sellerId !== req.userId) return res.status(403).json({ error: 'Forbidden' }); return res.json(order); } catch { return res.status(500).json({ error: 'Unable to load order' }); } });
-app.post('/api/orders', requireAuth, async (req: AuthenticatedRequest, res) => {
-  try {
-    const body = req.body as Record<string, unknown>;
-    if (body.buyerId && body.buyerId !== req.userId) return res.status(403).json({ error: 'buyerId must match authenticated user' });
-    if (!Array.isArray(body.items) || body.items.length === 0 || body.items.length > 50) return res.status(400).json({ error: 'Invalid order items' });
-    const requestedItems = body.items.map(item => { const value = item as Record<string, unknown>; return { listingId: value.listingId, quantity: value.quantity }; });
-    if (requestedItems.some(item => typeof item.listingId !== 'string' || !item.listingId || !Number.isInteger(item.quantity) || item.quantity <= 0 || item.quantity > 100)) return res.status(400).json({ error: 'Invalid order items' });
-    const order = await orderRepository.create({ buyerId: req.userId!, items: requestedItems as Array<{ listingId: string; quantity: number }> });
-    return res.status(201).json(order);
-  } catch (error) {
-    const code = error instanceof Error ? error.message : 'UNKNOWN';
-    if (['INVALID_BUYER', 'INVALID_ORDER_ITEMS', 'INVALID_ORDER_ITEM', 'INVALID_ORDER_PARTIES', 'INVALID_LISTING_PRICE', 'INVALID_ORDER_AMOUNT', 'INSUFFICIENT_STOCK'].includes(code)) return res.status(400).json({ error: code });
-    if (['LISTING_UNAVAILABLE', 'MIXED_SELLER_ORDER'].includes(code)) return res.status(409).json({ error: code });
-    return res.status(500).json({ error: 'Unable to create order' });
-  }
-});
-app.post('/api/orders/:id/pay', requireAuth, async (req: AuthenticatedRequest, res) => {
-  try { return res.status(200).json(await prepareNexoraCheckout(req.params.id, req.userId!)); }
-  catch (error) {
-    const code = error instanceof Error ? error.message : 'UNKNOWN';
-    if (code === 'ORDER_NOT_FOUND') return res.status(404).json({ error: 'Order not found' });
-    if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' });
-    if (['ORDER_NOT_PAYABLE', 'PAYMENT_NOT_PENDING', 'ORDER_RESERVATION_EXPIRED'].includes(code)) return res.status(409).json({ error: code });
-    if (['PAYMENT_TRANSACTION_MISSING', 'PAYMENT_TRANSACTION_NOT_FOUND', 'PAYMENT_ORDER_MISMATCH'].includes(code)) return res.status(500).json({ error: code });
-    if (code.startsWith('MERCADO_PAGO_') || code.startsWith('MP_CHECKOUT_') || code === 'APP_URL_REQUIRED') return res.status(502).json({ error: code });
-    return res.status(500).json({ error: 'Unable to create payment checkout' });
-  }
-});
-app.post('/api/orders/:id/request-refund', requireAuth, async (req: AuthenticatedRequest, res) => {
-  try {
-    const body = req.body as Record<string, unknown>;
-    const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
-    if (!reason) return res.status(400).json({ error: 'REFUND_REASON_REQUIRED' });
-    if (reason.length > 500) return res.status(400).json({ error: 'REFUND_REASON_TOO_LONG' });
-    const result = await requestNexoraRefund(req.params.id, req.userId!, reason);
-    return res.status(202).json({ success: true, ...result });
-  } catch (error) {
-    const code = error instanceof Error ? error.message : 'UNKNOWN';
-    if (code === 'ORDER_NOT_FOUND') return res.status(404).json({ error: 'Order not found' });
-    if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' });
-    if (['ORDER_NOT_REFUNDABLE', 'PAYMENT_NOT_REFUNDABLE', 'ALREADY_REFUNDED'].includes(code)) return res.status(409).json({ error: code });
-    if (['PAYMENT_TRANSACTION_MISSING', 'PAYMENT_TRANSACTION_NOT_FOUND', 'PAYMENT_ORDER_MISMATCH', 'PROVIDER_PAYMENT_ID_MISSING', 'ONLY_FULL_REFUND_SUPPORTED'].includes(code)) return res.status(500).json({ error: code });
-    if (code.startsWith('MP_REFUND_') || code.startsWith('MERCADO_PAGO_')) return res.status(502).json({ error: code });
-    return res.status(500).json({ error: 'Unable to request refund' });
-  }
-});
-
+app.post('/api/orders', requireAuth, async (req: AuthenticatedRequest, res) => { try { const body = req.body as Record<string, unknown>; if (body.buyerId && body.buyerId !== req.userId) return res.status(403).json({ error: 'buyerId must match authenticated user' }); if (!Array.isArray(body.items) || body.items.length === 0 || body.items.length > 50) return res.status(400).json({ error: 'Invalid order items' }); const requestedItems = body.items.map(item => { const value = item as Record<string, unknown>; return { listingId: value.listingId, quantity: value.quantity }; }); if (requestedItems.some(item => typeof item.listingId !== 'string' || !item.listingId || !Number.isInteger(item.quantity) || item.quantity <= 0 || item.quantity > 100)) return res.status(400).json({ error: 'Invalid order items' }); const order = await orderRepository.create({ buyerId: req.userId!, items: requestedItems as Array<{ listingId: string; quantity: number }> }); return res.status(201).json(order); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (['INVALID_BUYER', 'INVALID_ORDER_ITEMS', 'INVALID_ORDER_ITEM', 'INVALID_ORDER_PARTIES', 'INVALID_LISTING_PRICE', 'INVALID_ORDER_AMOUNT', 'INSUFFICIENT_STOCK'].includes(code)) return res.status(400).json({ error: code }); if (['LISTING_UNAVAILABLE', 'MIXED_SELLER_ORDER'].includes(code)) return res.status(409).json({ error: code }); return res.status(500).json({ error: 'Unable to create order' }); } });
+app.post('/api/orders/:id/pay', requireAuth, async (req: AuthenticatedRequest, res: Response) => { try { return res.status(200).json(await prepareNexoraCheckout(req.params.id, req.userId!)); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'ORDER_NOT_FOUND') return res.status(404).json({ error: 'Order not found' }); if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' }); if (['ORDER_NOT_PAYABLE', 'PAYMENT_NOT_PENDING', 'ORDER_RESERVATION_EXPIRED'].includes(code)) return res.status(409).json({ error: code }); if (['PAYMENT_TRANSACTION_MISSING', 'PAYMENT_TRANSACTION_NOT_FOUND', 'PAYMENT_ORDER_MISMATCH'].includes(code)) return res.status(500).json({ error: code }); if (code.startsWith('MERCADO_PAGO_') || code.startsWith('MP_CHECKOUT_') || code === 'APP_URL_REQUIRED') return res.status(502).json({ error: code }); return res.status(500).json({ error: 'Unable to create payment checkout' }); } });
+app.post('/api/orders/:id/request-refund', requireAuth, async (req: AuthenticatedRequest, res: Response) => { try { const body = req.body as Record<string, unknown>; const reason = typeof body.reason === 'string' ? body.reason.trim() : ''; if (!reason) return res.status(400).json({ error: 'REFUND_REASON_REQUIRED' }); if (reason.length > 500) return res.status(400).json({ error: 'REFUND_REASON_TOO_LONG' }); const result = await requestNexoraRefund(req.params.id, req.userId!, reason); return res.status(202).json({ success: true, ...result }); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'ORDER_NOT_FOUND') return res.status(404).json({ error: 'Order not found' }); if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' }); if (['ORDER_NOT_REFUNDABLE', 'PAYMENT_NOT_REFUNDABLE', 'ALREADY_REFUNDED'].includes(code)) return res.status(409).json({ error: code }); if (['PAYMENT_TRANSACTION_MISSING', 'PAYMENT_TRANSACTION_NOT_FOUND', 'PAYMENT_ORDER_MISMATCH', 'PROVIDER_PAYMENT_ID_MISSING', 'ONLY_FULL_REFUND_SUPPORTED'].includes(code)) return res.status(500).json({ error: code }); if (code.startsWith('MP_REFUND_') || code.startsWith('MERCADO_PAGO_')) return res.status(502).json({ error: code }); return res.status(500).json({ error: 'Unable to request refund' }); } });
 app.use(escrowRouter);
-
-// Mercado Pago notifications are authoritative server-to-server events. The handler
-// verifies the provider signature and reconciles payment/chargeback state in Firestore.
+app.use(chargebackAdminRouter);
 app.post('/api/mercadopago/webhook', (req, res) => handleMercadoPagoWebhook(req, res));
-
-// Delivery confirmation is the canonical completion path: it releases the escrow control state.
-app.post('/api/orders/:id/complete', requireAuth, async (req: AuthenticatedRequest, res) => {
-  try { return res.json({ success: true, escrow: await confirmDelivery(req.params.id, req.userId!) }); }
-  catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'ESCROW_NOT_FOUND') return res.status(404).json({ error: code }); if (code === 'FORBIDDEN') return res.status(403).json({ error: code }); if (code === 'ORDER_NOT_READY_FOR_RELEASE') return res.status(409).json({ error: code }); return res.status(500).json({ error: 'Unable to complete order' }); }
-});
-
-app.post('/api/orders/:id/cancel', requireAuth, async (req: AuthenticatedRequest, res) => {
-  try { return res.json(await orderRepository.cancel(req.params.id, req.userId!)); }
-  catch (error) {
-    const code = error instanceof Error ? error.message : 'UNKNOWN';
-    if (code === 'ORDER_NOT_FOUND') return res.status(404).json({ error: 'Order not found' });
-    if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' });
-    if (code === 'INVALID_ORDER_STATE') return res.status(409).json({ error: 'Only pending orders can be cancelled' });
-    return res.status(500).json({ error: 'Unable to cancel order' });
-  }
-});
-app.post('/api/reviews', requireAuth, async (req: AuthenticatedRequest, res) => { try { const body = req.body as Record<string, unknown>; if (body.buyerId && body.buyerId !== req.userId) return res.status(403).json({ error: 'buyerId must match authenticated user' }); const rating = Number(body.rating); if (typeof body.sellerId !== 'string' || !Number.isFinite(rating) || rating < 1 || rating > 5 || typeof body.comment !== 'string') return res.status(400).json({ error: 'Invalid review' }); const review = await reviewRepository.create({ buyerId: req.userId!, sellerId: body.sellerId, listingId: typeof body.listingId === 'string' ? body.listingId : undefined, rating, comment: body.comment.trim().slice(0, 2000), date: new Date().toISOString() }, req.userId!); return res.status(201).json(review); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'PURCHASE_REQUIRED') return res.status(409).json({ error: 'A completed purchase is required to review this seller' }); if (code === 'DUPLICATE_REVIEW') return res.status(409).json({ error: 'Review already exists' }); if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' }); return res.status(500).json({ error: 'Unable to create review' }); } });
-app.get('/api/conversations', requireAuth, async (req: AuthenticatedRequest, res) => { try { res.json(await conversationRepository.listForUser(req.userId!)); } catch { res.status(500).json({ error: 'Unable to load conversations' }); } });
-app.post('/api/conversations', requireAuth, async (req: AuthenticatedRequest, res) => { try { const body = req.body as Record<string, unknown>; if (typeof body.listingId !== 'string' || typeof body.sellerId !== 'string') return res.status(400).json({ error: 'Invalid conversation' }); const conversation = await conversationRepository.create({ listingId: body.listingId, buyerId: req.userId!, sellerId: body.sellerId, stage: 'Consulta', lastMessageText: '', lastMessageTime: new Date().toISOString(), unreadCountBuyer: 0, unreadCountSeller: 0 }, req.userId!); return res.status(201).json(conversation); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'FORBIDDEN' || code === 'INVALID_PARTICIPANTS' || code === 'INVALID_SELLER') return res.status(403).json({ error: 'Invalid conversation participants' }); if (code === 'LISTING_NOT_FOUND') return res.status(404).json({ error: 'Listing not found' }); return res.status(500).json({ error: 'Unable to create conversation' }); } });
-app.get('/api/conversations/:id/messages', requireAuth, async (req: AuthenticatedRequest, res) => { try { res.json(await conversationRepository.listMessages(req.params.id, req.userId!, parseLimit(req.query.limit))); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'CONVERSATION_NOT_FOUND') return res.status(404).json({ error: 'Conversation not found' }); if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' }); return res.status(500).json({ error: 'Unable to load messages' }); } });
-app.post('/api/conversations/:id/messages', requireAuth, async (req: AuthenticatedRequest, res) => { try { const body = req.body as Record<string, unknown>; if (typeof body.text !== 'string') return res.status(400).json({ error: 'Message text is required' }); return res.status(201).json(await conversationRepository.sendMessage(req.params.id, req.userId!, body.text)); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'CONVERSATION_NOT_FOUND') return res.status(404).json({ error: 'Conversation not found' }); if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' }); if (code === 'INVALID_MESSAGE') return res.status(400).json({ error: 'Message text is required' }); return res.status(500).json({ error: 'Unable to send message' }); } });
-app.post('/api/orders/completed-event', requireAuth, (_req, res) => res.status(410).json({ error: 'Use /api/orders/:id/confirm-delivery' }));
-
+app.post('/api/orders/:id/complete', requireAuth, async (req: AuthenticatedRequest, res: Response) => { try { return res.json({ success: true, escrow: await confirmDelivery(req.params.id, req.userId!) }); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'ESCROW_NOT_FOUND') return res.status(404).json({ error: code }); if (code === 'FORBIDDEN') return res.status(403).json({ error: code }); if (code === 'ORDER_NOT_READY_FOR_RELEASE') return res.status(409).json({ error: code }); return res.status(500).json({ error: 'Unable to complete order' }); } });
+app.post('/api/orders/:id/cancel', requireAuth, async (req: AuthenticatedRequest, res: Response) => { try { return res.json(await orderRepository.cancel(req.params.id, req.userId!)); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'ORDER_NOT_FOUND') return res.status(404).json({ error: 'Order not found' }); if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' }); if (code === 'INVALID_ORDER_STATE') return res.status(409).json({ error: 'Only pending orders can be cancelled' }); return res.status(500).json({ error: 'Unable to cancel order' }); } });
+app.post('/api/reviews', requireAuth, async (req: AuthenticatedRequest, res: Response) => { try { const body = req.body as Record<string, unknown>; if (body.buyerId && body.buyerId !== req.userId) return res.status(403).json({ error: 'buyerId must match authenticated user' }); const rating = Number(body.rating); if (typeof body.sellerId !== 'string' || !Number.isFinite(rating) || rating < 1 || rating > 5 || typeof body.comment !== 'string') return res.status(400).json({ error: 'Invalid review' }); const review = await reviewRepository.create({ buyerId: req.userId!, sellerId: body.sellerId, listingId: typeof body.listingId === 'string' ? body.listingId : undefined, rating, comment: body.comment.trim().slice(0, 2000), date: new Date().toISOString() }, req.userId!); return res.status(201).json(review); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'PURCHASE_REQUIRED') return res.status(409).json({ error: 'A completed purchase is required to review this seller' }); if (code === 'DUPLICATE_REVIEW') return res.status(409).json({ error: 'Review already exists' }); if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' }); return res.status(500).json({ error: 'Unable to create review' }); } });
+app.get('/api/conversations', requireAuth, async (req: AuthenticatedRequest, res: Response) => { try { res.json(await conversationRepository.listForUser(req.userId!)); } catch { res.status(500).json({ error: 'Unable to load conversations' }); } });
+app.post('/api/conversations', requireAuth, async (req: AuthenticatedRequest, res: Response) => { try { const body = req.body as Record<string, unknown>; if (typeof body.listingId !== 'string' || typeof body.sellerId !== 'string') return res.status(400).json({ error: 'Invalid conversation' }); const conversation = await conversationRepository.create({ listingId: body.listingId, buyerId: req.userId!, sellerId: body.sellerId, stage: 'Consulta', lastMessageText: '', lastMessageTime: new Date().toISOString(), unreadCountBuyer: 0, unreadCountSeller: 0 }, req.userId!); return res.status(201).json(conversation); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'FORBIDDEN' || code === 'INVALID_PARTICIPANTS' || code === 'INVALID_SELLER') return res.status(403).json({ error: 'Invalid conversation participants' }); if (code === 'LISTING_NOT_FOUND') return res.status(404).json({ error: 'Listing not found' }); return res.status(500).json({ error: 'Unable to create conversation' }); } });
+app.get('/api/conversations/:id/messages', requireAuth, async (req: AuthenticatedRequest, res: Response) => { try { res.json(await conversationRepository.listMessages(req.params.id, req.userId!, parseLimit(req.query.limit))); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'CONVERSATION_NOT_FOUND') return res.status(404).json({ error: 'Conversation not found' }); if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' }); return res.status(500).json({ error: 'Unable to load messages' }); } });
+app.post('/api/conversations/:id/messages', requireAuth, async (req: AuthenticatedRequest, res: Response) => { try { const body = req.body as Record<string, unknown>; if (typeof body.text !== 'string') return res.status(400).json({ error: 'Message text is required' }); return res.status(201).json(await conversationRepository.sendMessage(req.params.id, req.userId!, body.text)); } catch (error) { const code = error instanceof Error ? error.message : 'UNKNOWN'; if (code === 'CONVERSATION_NOT_FOUND') return res.status(404).json({ error: 'Conversation not found' }); if (code === 'FORBIDDEN') return res.status(403).json({ error: 'Forbidden' }); if (code === 'INVALID_MESSAGE') return res.status(400).json({ error: 'Message text is required' }); return res.status(500).json({ error: 'Unable to send message' }); } });
+app.post('/api/orders/completed-event', requireAuth, (_req: AuthenticatedRequest, res: Response) => res.status(410).json({ error: 'Use /api/orders/:id/confirm-delivery' }));
 export { app };
 if (process.env.NODE_ENV !== 'test') { startEscrowAutoReleaseWorker(); const port = Number(process.env.PORT ?? 4102); app.listen(port, () => console.log(`Nexora API listening on ${port}`)); }
