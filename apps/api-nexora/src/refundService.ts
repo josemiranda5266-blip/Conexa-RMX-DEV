@@ -24,13 +24,31 @@ export async function requestNexoraRefund(orderId: string, buyerId: string, reas
     if (currentOrder.status !== 'PAID') throw new Error('ORDER_NOT_REFUNDABLE');
     if (payment.orderId !== orderId || payment.buyerId !== buyerId || payment.merchantId !== currentOrder.sellerId || payment.amountArs !== currentOrder.totalAmount) throw new Error('PAYMENT_ORDER_MISMATCH');
     if (payment.status === 'REFUNDED') throw new Error('ALREADY_REFUNDED');
+    if (payment.status === 'CHARGEBACK') throw new Error('PAYMENT_CHARGEBACK_IN_PROGRESS');
     if (payment.status !== 'PAID') throw new Error('PAYMENT_NOT_REFUNDABLE');
     if (!payment.providerPaymentId) throw new Error('PROVIDER_PAYMENT_ID_MISSING');
+
+    const refundStatus = String(payment.refundStatus || 'NONE').toUpperCase();
+    if (refundStatus === 'CONFIRMED') throw new Error('ALREADY_REFUNDED');
+    if (refundStatus === 'PROCESSING' || refundStatus === 'REQUESTED') throw new Error('REFUND_ALREADY_IN_PROGRESS');
+
+    // A non-final chargeback blocks a new refund request. The chargeback must
+    // reach a final provider outcome first so refund and chargeback cannot race
+    // to create two independent financial reversals for the same payment.
+    const chargebackQuery = await tx.get(
+      db.collection('chargebackCases')
+        .where('paymentTransactionId', '==', payment.id)
+        .limit(20),
+    );
+    const chargebackInProgress = chargebackQuery.docs.some(doc => {
+      const status = String(doc.data()?.status || '').toUpperCase();
+      return status === 'OPENED' || status === 'UNDER_REVIEW' || status === 'EXPIRED';
+    });
+    if (chargebackInProgress) throw new Error('CHARGEBACK_IN_PROGRESS');
+
     const now = new Date().toISOString();
-    const refundStatus = String(payment.refundStatus || 'NONE');
     const refundAmount = Number(payment.refundAmountArs || payment.amountArs);
     if (!Number.isFinite(refundAmount) || refundAmount !== payment.amountArs) throw new Error('ONLY_FULL_REFUND_SUPPORTED');
-    if (refundStatus === 'CONFIRMED') throw new Error('ALREADY_REFUNDED');
     tx.update(paymentRef, { refundStatus: 'PROCESSING', refundAmountArs: payment.amountArs, refundReason: reason.trim().slice(0, 500), refundRequestedAt: payment.refundRequestedAt || now, updatedAt: FieldValue.serverTimestamp() });
     return { merchantId: payment.merchantId, providerPaymentId: payment.providerPaymentId, paymentTransactionId: payment.id, amountArs: payment.amountArs, idempotencyKey: `refund:${payment.id}` };
   });
@@ -41,8 +59,30 @@ export async function requestNexoraRefund(orderId: string, buyerId: string, reas
       const fresh = await tx.get(paymentRef);
       if (!fresh.exists) throw new Error('PAYMENT_TRANSACTION_NOT_FOUND');
       const current = fresh.data() || {};
+      const currentStatus = String(current.status || '').toUpperCase();
+      if (currentStatus === 'REFUNDED') {
+        tx.update(paymentRef, {
+          refundStatus: 'CONFIRMED',
+          refundProviderId: provider.providerRefundId,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        return;
+      }
+      if (currentStatus === 'CHARGEBACK') {
+        // The provider accepted the refund request, but the financial state was
+        // finalized as a chargeback concurrently. Do not mark it confirmed or
+        // create a second reversal; the authoritative payment webhook decides
+        // whether Mercado Pago actually completed a refund.
+        tx.update(paymentRef, {
+          refundStatus: 'FAILED',
+          refundFailureReason: 'PAYMENT_FINANCIAL_STATE_CHANGED_TO_CHARGEBACK',
+          refundProviderId: provider.providerRefundId,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        return;
+      }
       tx.update(paymentRef, {
-        refundStatus: String(current.status || '') === 'REFUNDED' ? 'CONFIRMED' : 'REQUESTED',
+        refundStatus: 'REQUESTED',
         refundProviderId: provider.providerRefundId,
         updatedAt: FieldValue.serverTimestamp(),
       });
