@@ -11,13 +11,26 @@ export type ProductCategory = 'Tecnología' | 'Vehículos' | 'Hogar' | 'Servicio
 export interface TrustIndex { score: number; level: TrustLevel; stars: number; totalSales: number; totalPurchases: number; completedOpsRate: number; avgResponseTimeMin: number; accountAgeMonths: number; verifiedPhone: boolean; verifiedEmail: boolean; verifiedIdentity: boolean; reportsCount: number; }
 export interface NexoraProfile { userId: string; username?: string; phone?: string; avatarUrl?: string; city: string; neighborhood?: string; bio?: string; registrationDate: string; trustIndex: TrustIndex; badges: string[]; shopId?: string; }
 export interface ServicePackage { id: string; title: string; price: number; description?: string; imageUrl?: string; }
-export interface Listing { id: string; sellerId: string; sellerName: string; sellerAvatar?: string; sellerTrustLevel: TrustLevel; sellerStars: number; title: string; description: string; price: number; currency: 'ARS'; category: ProductCategory; condition: 'Nuevo' | 'Usado' | 'Reacondicionado'; images: string[]; city: string; neighborhood?: string; distanceKm?: number; lat?: number; lng?: number; createdAt: string; updatedAt?: string; status: ProductStatus; qualityScore: number; viewsCount: number; favoritesCount: number; queriesCount: number; featured?: boolean; deliveryOption: 'Retiro en persona' | 'Entrega a domicilio' | 'Ambas opciones'; acceptedPaymentMethods: string[]; suggestedPriceRange?: { min: number; max: number }; serviceProfession?: string; subServices?: ServicePackage[]; requiresInstallation?: boolean; }
+export interface Listing {
+  id: string; sellerId: string; sellerName: string; sellerAvatar?: string; sellerTrustLevel: TrustLevel; sellerStars: number;
+  title: string; description: string; price: number; currency: 'ARS'; category: ProductCategory; condition: 'Nuevo' | 'Usado' | 'Reacondicionado'; images: string[];
+  city: string; neighborhood?: string; distanceKm?: number; lat?: number; lng?: number; createdAt: string; updatedAt?: string; status: ProductStatus;
+  /** Stock is server-owned. Legacy listings without this field are treated as single-unit listings. */
+  stock?: number;
+  /** Quantity temporarily reserved by an unpaid order. */
+  reservedQuantity?: number;
+  /** ISO timestamp after which an unpaid reservation can be reclaimed. */
+  reservationExpiresAt?: string;
+  qualityScore: number; viewsCount: number; favoritesCount: number; queriesCount: number; featured?: boolean;
+  deliveryOption: 'Retiro en persona' | 'Entrega a domicilio' | 'Ambas opciones'; acceptedPaymentMethods: string[];
+  suggestedPriceRange?: { min: number; max: number }; serviceProfession?: string; subServices?: ServicePackage[]; requiresInstallation?: boolean;
+}
 export interface Shop { id: string; ownerId: string; name: string; logoUrl?: string; coverUrl?: string; category: string; description: string; address: string; neighborhood?: string; city: string; hours: string; phone?: string; whatsapp?: string; isAliadoNexora: boolean; stars: number; yearsInNexora: number; catalogCount: number; }
 export type NexoraOrderStatus = 'PENDING' | 'PAID' | 'COMPLETED' | 'CANCELLED' | 'DISPUTED';
 export interface NexoraOrderItem { listingId: string; quantity: number; unitPrice: number; }
 export interface NexoraOrder { id: string; buyerId: string; sellerId: string; items: NexoraOrderItem[]; totalAmount: number; currency: 'ARS'; status: NexoraOrderStatus; requiresInstallation: boolean; paymentTransactionId?: string; createdAt: string; completedAt?: string; }
 export type PaymentTransactionStatus = 'PAYMENT_PENDING' | 'PAID' | 'REFUNDED' | 'CHARGEBACK' | 'CANCELLED';
-export interface PaymentTransaction { id: string; domain: Domain; orderId: string; buyerId: string; merchantId: string; amountArs: number; currency: 'ARS'; status: PaymentTransactionStatus; provider: 'MERCADO_PAGO'; providerPaymentId?: string; preferenceId?: string; checkoutUrl?: string; paidAt?: string; createdAt: string; updatedAt?: string; }
+export interface PaymentTransaction { id: string; domain: Domain; orderId: string; buyerId: string; merchantId: string; amountArs: number; currency: 'ARS'; status: PaymentTransactionStatus; provider: 'MERCADO_PAGO'; providerPaymentId?: string; preferenceId?: string; checkoutUrl?: string; paidAt?: string; createdAt: string; updatedAt?: string; refundedAt?: string; chargebackAt?: string; cancelledAt?: string; }
 export type EscrowStatus = 'PENDING' | 'HELD' | 'RELEASED' | 'DISPUTED' | 'REFUNDED';
 export interface EscrowPayment { id: string; orderId: string; listingId: string; amount: number; currency: 'ARS'; buyerId: string; sellerId: string; paymentMethod: 'CARD' | 'MERCADO_PAGO' | 'TRANSFER'; status: EscrowStatus; deliveryPinHash?: string; createdAt: string; autoReleaseAt: string; releasedAt?: string; disputeReason?: string; }
 export type NegotiationStage = 'Consulta' | 'En conversación' | 'Oferta realizada' | 'Oferta aceptada' | 'Encuentro programado' | 'Operación concretada' | 'Cancelada';
