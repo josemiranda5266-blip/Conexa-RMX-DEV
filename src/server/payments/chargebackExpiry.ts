@@ -8,6 +8,8 @@ const BATCH_LIMIT = 100;
  * Marks unanswered chargeback cases as EXPIRED after their provider response deadline.
  * It deliberately does not mark the payment as CHARGEBACK: financial loss is only
  * recognized when Mercado Pago confirms the final outcome (coverage_applied=false).
+ * Evidence metadata/drafts are not treated as provider-submitted evidence; only the
+ * explicit submission timestamp prevents an unanswered case from expiring.
  */
 export async function expireOverdueChargebackCases(now = new Date()): Promise<number> {
   const db = await getAdminDb();
@@ -27,11 +29,11 @@ export async function expireOverdueChargebackCases(now = new Date()): Promise<nu
       const data = current.data() || {};
       const status = String(data.status || '');
       const deadline = String(data.responseDeadline || '');
-      const evidence = Array.isArray(data.evidence) ? data.evidence : [];
+      const evidenceSubmittedAt = String(data.evidenceSubmittedAt || '').trim();
 
       if (!['OPENED', 'UNDER_REVIEW'].includes(status)) return;
       if (!deadline || deadline > nowIso) return;
-      if (evidence.length > 0) return;
+      if (evidenceSubmittedAt) return;
 
       transaction.update(document.ref, {
         status: 'EXPIRED',
