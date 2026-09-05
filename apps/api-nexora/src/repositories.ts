@@ -48,10 +48,11 @@ export const orderRepository = {
   },
   async create(input: Omit<NexoraOrder, 'id'>): Promise<NexoraOrder> {
     if (!input.buyerId) throw new Error('INVALID_BUYER');
-    if (!Array.isArray(input.items) || input.items.length === 0) throw new Error('INVALID_ORDER_ITEMS');
+    if (!Array.isArray(input.items) || input.items.length === 0 || input.items.length > 50) throw new Error('INVALID_ORDER_ITEMS');
 
     const listingIds = input.items.map(item => item.listingId);
     if (listingIds.some(id => !id) || new Set(listingIds).size !== listingIds.length) throw new Error('INVALID_ORDER_ITEMS');
+    if (input.items.some(item => !Number.isInteger(item.quantity) || item.quantity <= 0 || item.quantity > 100)) throw new Error('INVALID_ORDER_ITEM');
 
     const listings = await Promise.all(listingIds.map(id => listingRepository.get(id)));
     if (listings.some(listing => !listing || listing.status !== 'Disponible')) throw new Error('LISTING_UNAVAILABLE');
@@ -63,28 +64,33 @@ export const orderRepository = {
 
     const trustedItems = input.items.map(item => {
       const listing = trustedListings.find(candidate => candidate.id === item.listingId)!;
-      if (!Number.isInteger(item.quantity) || item.quantity <= 0) throw new Error('INVALID_ORDER_ITEM');
       if (!Number.isFinite(listing.price) || listing.price <= 0) throw new Error('INVALID_LISTING_PRICE');
       return { listingId: listing.id, quantity: item.quantity, unitPrice: listing.price };
     });
-    const trustedTotal = trustedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+    const trustedTotal = Math.round(trustedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0) * 100) / 100;
     if (!Number.isFinite(trustedTotal) || trustedTotal <= 0) throw new Error('INVALID_ORDER_AMOUNT');
+
+    // Installation is derived exclusively from trusted listing data. A client
+    // cannot force or suppress the Conexa cross-domain installation event.
+    const requiresInstallation = trustedListings.some(listing => listing.requiresInstallation === true);
 
     const ref = db().collection('orders').doc();
     const createdAt = now();
-    const value = {
-      ...input,
+    const value: NexoraOrder = {
+      id: ref.id,
       buyerId: input.buyerId,
       sellerId,
       items: trustedItems,
       totalAmount: trustedTotal,
-      currency: 'ARS' as const,
-      status: 'PENDING' as const,
+      currency: 'ARS',
+      status: 'PENDING',
+      requiresInstallation,
       createdAt
     };
-    delete (value as Partial<NexoraOrder> & { requiresInstallation?: boolean }).requiresInstallation;
-    await ref.create(value);
-    return { id: ref.id, ...value } as NexoraOrder;
+    const firestoreValue = { ...value };
+    delete (firestoreValue as { id?: string }).id;
+    await ref.create(firestoreValue);
+    return value;
   },
   async complete(id: string, actorId: string): Promise<{ order: NexoraOrder; eventId?: string }> {
     const orderRef = db().collection('orders').doc(id);
