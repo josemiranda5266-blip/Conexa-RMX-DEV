@@ -81,11 +81,47 @@ export async function reconcileMercadoPagoPayment(paymentId: string, connection:
       }
       tx.update(resolved.ref, update); return { status: 'UPDATED', transactionId, paymentStatus };
     }
+
     if (paymentStatus === 'refunded' || paymentStatus === 'charged_back' || paymentStatus === 'chargedback') {
-      if (paymentStatus === 'refunded') update.refundedAt = current.refundedAt || now; else update.chargebackAt = current.chargebackAt || now;
-      tx.update(resolved.ref, update); return { status: 'UPDATED', transactionId, paymentStatus };
+      const isChargeback = paymentStatus === 'charged_back' || paymentStatus === 'chargedback';
+      const terminalStatus = isChargeback ? 'CHARGEBACK' : 'REFUNDED';
+      if (isChargeback) update.chargebackAt = current.chargebackAt || now;
+      else update.refundedAt = current.refundedAt || now;
+
+      if (resolved.kind === 'NEXORA') {
+        // A provider reversal is authoritative for the payment ledger, but it
+        // must not fabricate a completed service reversal. Completed orders
+        // remain completed; chargebacks are flagged as disputes for follow-up.
+        if (currentStatus === 'PAYMENT_PENDING' || currentStatus === 'PAID') update.status = terminalStatus;
+        else if (currentStatus === 'REFUNDED' || currentStatus === 'CHARGEBACK') update.status = currentStatus;
+        else update.status = terminalStatus;
+        const orderId = String(current.orderId || '').trim();
+        if (orderId) {
+          const orderRef = db.collection('orders').doc(orderId);
+          const orderSnap = await tx.get(orderRef);
+          if (orderSnap.exists) {
+            const order = orderSnap.data() || {};
+            const orderStatus = String(order.status || '').toUpperCase();
+            if (isChargeback && ['PENDING', 'PAID', 'COMPLETED'].includes(orderStatus)) {
+              tx.update(orderRef, { status: 'DISPUTED', disputeReason: 'MERCADO_PAGO_CHARGEBACK', disputeAt: now, updatedAt: now });
+            } else if (!isChargeback && ['PENDING', 'PAID'].includes(orderStatus)) {
+              tx.update(orderRef, { status: 'CANCELLED', cancellationReason: 'MERCADO_PAGO_REFUND', cancelledAt: now, updatedAt: now });
+            }
+          }
+        }
+      } else if (['PAYMENT_PENDING', 'CREATED', 'PAID', 'SERVICE_IN_PROGRESS', 'SERVICE_COMPLETED'].includes(currentStatus)) {
+        // Preserve the existing Conexa service state while recording the
+        // financial reversal. Business/service reversal remains a separate
+        // workflow and is never inferred from a provider notification.
+        update.status = currentStatus === 'PAYMENT_PENDING' || currentStatus === 'CREATED' ? 'CANCELLED' : terminalStatus;
+      }
+      tx.update(resolved.ref, update);
+      return { status: 'UPDATED', transactionId, paymentStatus };
     }
-    if (paymentStatus === 'cancelled' && ['PAYMENT_PENDING', 'CREATED'].includes(currentStatus)) { update.status = 'CANCELLED'; update.cancelledAt = current.cancelledAt || now; }
+
+    if (paymentStatus === 'cancelled' && ['PAYMENT_PENDING', 'CREATED'].includes(currentStatus)) {
+      update.status = 'CANCELLED'; update.cancelledAt = current.cancelledAt || now;
+    }
     tx.update(resolved.ref, update);
     return { status: 'UPDATED', transactionId, paymentStatus };
   });
