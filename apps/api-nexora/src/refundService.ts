@@ -31,22 +31,30 @@ export async function requestNexoraRefund(orderId: string, buyerId: string, reas
     const refundAmount = Number(payment.refundAmountArs || payment.amountArs);
     if (!Number.isFinite(refundAmount) || refundAmount !== payment.amountArs) throw new Error('ONLY_FULL_REFUND_SUPPORTED');
     if (refundStatus === 'CONFIRMED') throw new Error('ALREADY_REFUNDED');
-    tx.update(paymentRef, {
-      refundStatus: 'PROCESSING',
-      refundAmountArs: payment.amountArs,
-      refundReason: reason.trim().slice(0, 500),
-      refundRequestedAt: payment.refundRequestedAt || now,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
+    tx.update(paymentRef, { refundStatus: 'PROCESSING', refundAmountArs: payment.amountArs, refundReason: reason.trim().slice(0, 500), refundRequestedAt: payment.refundRequestedAt || now, updatedAt: FieldValue.serverTimestamp() });
     return { merchantId: payment.merchantId, providerPaymentId: payment.providerPaymentId, paymentTransactionId: payment.id, amountArs: payment.amountArs, idempotencyKey: `refund:${payment.id}` };
   });
 
   try {
     const provider = await requestMercadoPagoRefund({ merchantId: prepared.merchantId, paymentId: prepared.providerPaymentId, idempotencyKey: prepared.idempotencyKey });
-    await paymentRef.update({ refundStatus: 'REQUESTED', refundProviderId: provider.providerRefundId, updatedAt: FieldValue.serverTimestamp() });
+    await db.runTransaction(async tx => {
+      const fresh = await tx.get(paymentRef);
+      if (!fresh.exists) throw new Error('PAYMENT_TRANSACTION_NOT_FOUND');
+      const current = fresh.data() || {};
+      tx.update(paymentRef, {
+        refundStatus: String(current.status || '') === 'REFUNDED' ? 'CONFIRMED' : 'REQUESTED',
+        refundProviderId: provider.providerRefundId,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
     return { accepted: true, paymentTransactionId: prepared.paymentTransactionId, providerRefundId: provider.providerRefundId };
   } catch (error) {
-    await paymentRef.update({ refundStatus: 'FAILED', updatedAt: FieldValue.serverTimestamp() }).catch(() => undefined);
+    await db.runTransaction(async tx => {
+      const fresh = await tx.get(paymentRef);
+      if (!fresh.exists) return;
+      const current = fresh.data() || {};
+      if (String(current.status || '') !== 'REFUNDED') tx.update(paymentRef, { refundStatus: 'FAILED', updatedAt: FieldValue.serverTimestamp() });
+    }).catch(() => undefined);
     throw error;
   }
 }
