@@ -18,7 +18,7 @@ function inventoryForListing(listing: Listing, at: string) {
     status = stock > 0 ? 'Disponible' : 'Vendido';
   }
 
-  return { stock, status, reservedQuantity: status === 'Reservado' ? reservedQuantity : 0 };
+  return { stock, status, reservedQuantity };
 }
 
 function reservationExpiry(from: string): string {
@@ -28,9 +28,7 @@ function reservationExpiry(from: string): string {
 export const listingRepository = {
   async list(limit = 50): Promise<Listing[]> {
     const snap = await db().collection('listings').where('status', '==', 'Disponible').limit(safeLimit(limit)).get();
-    return snap.docs
-      .map(d => ({ id: d.id, ...d.data() } as Listing))
-      .filter(listing => (Number.isInteger(listing.stock) ? Number(listing.stock) > 0 : true));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as Listing)).filter(listing => (Number.isInteger(listing.stock) ? Number(listing.stock) > 0 : true));
   },
   async get(id: string): Promise<Listing | null> {
     const d = await db().collection('listings').doc(id).get();
@@ -87,7 +85,7 @@ export const orderRepository = {
 
       const trustedListings = listingSnapshots.map((snapshot, index) => ({ id: listingIds[index], ...(snapshot.data() as Listing) })) as Listing[];
       const inventory = trustedListings.map(listing => inventoryForListing(listing, createdAt));
-      if (inventory.some(item => item.status === 'Pausado' || item.status === 'Vendido' || item.stock <= 0)) throw new Error('LISTING_UNAVAILABLE');
+      if (inventory.some(item => item.status !== 'Disponible' || item.stock <= 0)) throw new Error('LISTING_UNAVAILABLE');
 
       const sellerId = trustedListings[0].sellerId;
       if (!sellerId || sellerId === input.buyerId) throw new Error('INVALID_ORDER_PARTIES');
@@ -108,21 +106,14 @@ export const orderRepository = {
         const item = trustedItems[index];
         const state = inventory[index];
         const remaining = state.stock - item.quantity;
-        const exhausted = remaining === 0;
-        const listingRef = listingRefs[index];
-        const update: Record<string, unknown> = {
+        tx.update(listingRefs[index], {
           stock: remaining,
-          status: exhausted ? 'Reservado' : 'Disponible',
+          status: 'Reservado',
+          reservedQuantity: item.quantity,
+          reservedByOrderId: orderRef.id,
+          reservationExpiresAt: reservationExpiry(createdAt),
           updatedAt: FieldValue.serverTimestamp(),
-        };
-        if (exhausted) {
-          update.reservedQuantity = item.quantity;
-          update.reservationExpiresAt = reservationExpiry(createdAt);
-        } else {
-          update.reservedQuantity = 0;
-          update.reservationExpiresAt = FieldValue.delete();
-        }
-        tx.update(listingRef, update);
+        });
       });
 
       const requiresInstallation = trustedListings.some(listing => listing.requiresInstallation === true);
@@ -179,12 +170,15 @@ export const orderRepository = {
       listings.forEach((snap, index) => {
         if (!snap.exists) return;
         const listing = snap.data() as Listing;
+        const owner = String(listing.reservedByOrderId || '').trim();
+        if (owner && owner !== id) return;
         const currentStock = Number.isInteger(listing.stock) && Number(listing.stock) >= 0 ? Number(listing.stock) : 0;
         const restoredStock = currentStock + data.items[index].quantity;
         tx.update(listingRefs[index], {
           stock: restoredStock,
           status: restoredStock > 0 ? 'Disponible' : listing.status,
           reservedQuantity: 0,
+          reservedByOrderId: FieldValue.delete(),
           reservationExpiresAt: FieldValue.delete(),
           updatedAt: FieldValue.serverTimestamp(),
         });
@@ -223,9 +217,12 @@ export const orderRepository = {
         if (!listingSnap.exists) return;
         const listing = listingSnap.data() as Listing;
         const stock = Number.isInteger(listing.stock) && Number(listing.stock) >= 0 ? Number(listing.stock) : 0;
+        const owner = String(listing.reservedByOrderId || '').trim();
+        if (owner && owner !== id) throw new Error('LISTING_RESERVATION_MISMATCH');
         tx.update(listingRefs[index], {
           status: stock === 0 ? 'Vendido' : 'Disponible',
           reservedQuantity: 0,
+          reservedByOrderId: FieldValue.delete(),
           reservationExpiresAt: FieldValue.delete(),
           updatedAt: FieldValue.serverTimestamp(),
         });
