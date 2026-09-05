@@ -5,7 +5,7 @@ import { reconcileMercadoPagoPayment } from './mercadoPagoReconciliation.js';
 import { MercadoPagoOAuthConnection, decryptOAuthToken, normalizeMercadoPagoOAuthConnection } from './mercadoPagoOAuthTokenStore.js';
 import { startChargebackExpiryWorker } from './chargebackExpiry.js';
 import { getChargebackFromMP } from '@super-app/shared-payments';
-import { openOrUpdateChargebackCase, resolveChargebackCase } from './chargebackResolutionService.js';
+import { absorbChargebackCasesForRefund, openOrUpdateChargebackCase, resolveChargebackCase } from './chargebackResolutionService.js';
 
 const CONNECTION_COLLECTION = 'mercado_pago_connections';
 startChargebackExpiryWorker();
@@ -81,7 +81,8 @@ export async function handleMercadoPagoWebhook(req: Request, res: Response): Pro
       const paymentSnapshot = await db.collection('paymentTransactions').where('providerPaymentId', '==', String(providerPaymentId)).limit(1).get();
       if (paymentSnapshot.empty) return res.status(404).json({ success: false, code: 'PAYMENT_TRANSACTION_NOT_FOUND' });
       const paymentTransactionId = paymentSnapshot.docs[0].id;
-      await openOrUpdateChargebackCase({ chargeback, paymentTransactionId, merchantId, webhookAction: eventType(req) || 'chargeback', receivedAt: new Date().toISOString() });
+      const caseRecord = await openOrUpdateChargebackCase({ chargeback, paymentTransactionId, merchantId, webhookAction: eventType(req) || 'chargeback', receivedAt: new Date().toISOString() });
+      if (caseRecord.status === 'RESOLVED_BY_REFUND') return res.status(200).json({ success: true, chargebackId: signedResourceId, status: 'RESOLVED_BY_REFUND' });
 
       if (chargeback.coverageApplied === true || chargeback.coverageApplied === false) {
         const resolution = chargeback.coverageApplied ? 'Mercado Pago resolvió el chargeback a favor del comercio.' : 'Mercado Pago resolvió el chargeback en contra del comercio.';
@@ -103,6 +104,10 @@ export async function handleMercadoPagoWebhook(req: Request, res: Response): Pro
     if (String(connection.merchantId) !== merchantId) return res.status(403).json({ success: false, code: 'MERCADO_PAGO_CONNECTION_MISMATCH' });
 
     const result = await reconcileMercadoPagoPayment(providerPaymentId, connection);
+    if (result.status === 'UPDATED' && result.paymentStatus === 'refunded') {
+      const absorbed = await absorbChargebackCasesForRefund(result.transactionId);
+      return res.status(200).json({ success: true, ...result, chargebackCasesAbsorbed: absorbed });
+    }
     return res.status(200).json({ success: true, ...result });
   } catch (error: any) {
     console.error('[MERCADO PAGO WEBHOOK]', error?.message || error);
