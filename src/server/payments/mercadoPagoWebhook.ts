@@ -74,7 +74,7 @@ export async function handleMercadoPagoWebhook(req: Request, res: Response): Pro
       if (String(connection.merchantId) !== merchantId) return res.status(403).json({ success: false, code: 'MERCADO_PAGO_CONNECTION_MISMATCH' });
 
       const accessToken = decryptOAuthToken(connection.encryptedAccessToken);
-      const chargeback = await getChargebackFromMP(signedResourceId, accessToken);
+      const chargeback = await getChargebackFromMP(signedResourceId, accessToken, connection.externalUserId);
       if (chargeback.paymentId && String(chargeback.paymentId) !== String(providerPaymentId)) return res.status(400).json({ success: false, code: 'CHARGEBACK_PAYMENT_MISMATCH' });
 
       const db = getAdminDb();
