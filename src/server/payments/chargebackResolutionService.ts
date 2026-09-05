@@ -89,7 +89,6 @@ export async function openOrUpdateChargebackCase(input: {
       resolutionReason: existing.resolutionReason ? String(existing.resolutionReason) : undefined,
     };
 
-    // A provider case that was already resolved is immutable from webhook refreshes.
     if (existingStatus === 'RESOLVED_FAVORABLE' || existingStatus === 'RESOLVED_UNFAVORABLE') {
       record.status = existingStatus;
       record.coverageApplied = existing.coverageApplied === true || existing.coverageApplied === false ? existing.coverageApplied : incomingCoverage;
@@ -135,8 +134,6 @@ export async function resolveChargebackCase(
     if (currentCaseStatus === 'RESOLVED_FAVORABLE' || currentCaseStatus === 'RESOLVED_UNFAVORABLE') throw new Error('CHARGEBACK_ALREADY_RESOLVED_DIFFERENTLY');
 
     const paymentStatus = String(payment.status || '').toUpperCase();
-    // Refund/cancel/chargeback are terminal financial outcomes and cannot be
-    // silently rewritten by an administrator resolving a stale chargeback case.
     if (coverageApplied && ['REFUNDED', 'CANCELLED', 'CHARGEBACK'].includes(paymentStatus)) throw new Error('CHARGEBACK_RESOLUTION_CONFLICT_WITH_PAYMENT_STATE');
     if (!coverageApplied && paymentStatus === 'REFUNDED') throw new Error('CHARGEBACK_RESOLUTION_CONFLICT_WITH_REFUND');
 
@@ -151,10 +148,36 @@ export async function resolveChargebackCase(
       tx.update(paymentRef, {
         status: 'PAID', paymentStatus: 'approved', chargebackResolvedAt: now,
         chargebackResolution: 'FAVORABLE', chargebackResolutionReason: reason,
+        settlementStatus: 'SETTLED', settledAt: now,
         updatedAt: FieldValue.serverTimestamp(),
       });
       if (orderRef && orderSnap?.exists && String(orderSnap.data()?.status || '').toUpperCase() === 'DISPUTED') {
-        tx.update(orderRef, { status: 'PAID', disputeResolvedAt: now, disputeResolution: 'CHARGEBACK_FAVORABLE', updatedAt: FieldValue.serverTimestamp() });
+        const order = orderSnap.data() || {};
+        tx.update(orderRef, {
+          status: 'COMPLETED', completedAt: now, disputeResolvedAt: now,
+          disputeResolution: 'CHARGEBACK_FAVORABLE', escrowReleasedAt: now,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        if (order.requiresInstallation) {
+          const outboxRef = db.collection('eventOutbox').doc();
+          tx.create(outboxRef, {
+            id: outboxRef.id,
+            type: 'NEXORA_ORDER_COMPLETED',
+            occurredAt: now,
+            producer: 'NEXORA',
+            payload: {
+              eventId: outboxRef.id,
+              type: 'NEXORA_ORDER_COMPLETED',
+              occurredAt: now,
+              userId: String(order.buyerId || chargeback.buyerId || payment.buyerId || ''),
+              orderId,
+              listingIds: Array.isArray(order.items) ? order.items.map((item: any) => String(item.listingId)) : [],
+              requiresInstallation: true,
+            },
+            status: 'PENDING',
+            attempts: 0,
+          });
+        }
       }
       if (escrowRef && escrowSnap?.exists && String(escrowSnap.data()?.status) === 'DISPUTED') {
         const transition = resolveEscrowTransition('DISPUTED', 'CHARGEBACK_FAVORABLE');
