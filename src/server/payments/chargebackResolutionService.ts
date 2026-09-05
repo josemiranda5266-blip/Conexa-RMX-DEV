@@ -132,12 +132,38 @@ export async function resolveChargebackCase(chargebackId: string, coverageApplie
       const transition = resolveEscrowTransition('DISPUTED', 'CHARGEBACK_FAVORABLE');
       if (transition.changed) tx.update(escrowRef!, { status: transition.status, releasedAt: now, releaseReason: 'ADMIN_RESOLUTION', updatedAt: now });
     } else {
+      const orderStatus = orderSnap?.exists ? String(orderSnap.data()?.status || '').toUpperCase() : '';
+      const escrowStatus = escrowSnap?.exists ? String(escrowSnap.data()?.status || '').toUpperCase() : '';
+
       tx.update(paymentRef, { status: 'CHARGEBACK', paymentStatus: 'charged_back', chargebackAt: payment.chargebackAt || now, chargebackResolvedAt: now, chargebackResolution: 'UNFAVORABLE', chargebackResolutionReason: reason, updatedAt: FieldValue.serverTimestamp() });
-      if (orderRef && orderSnap?.exists) tx.update(orderRef, { status: 'CANCELLED', cancellationReason: 'MERCADO_PAGO_CHARGEBACK_LOST', cancelledAt: now, updatedAt: FieldValue.serverTimestamp() });
-      if (escrowRef && escrowSnap?.exists && ['HELD', 'DISPUTED'].includes(String(escrowSnap.data()?.status))) {
-        const transition = resolveEscrowTransition(String(escrowSnap.data()?.status) as any, 'CHARGEBACK_LOST');
+
+      if (orderRef && orderSnap?.exists) {
+        if (orderStatus === 'COMPLETED') {
+          // A lost chargeback after fulfillment cannot truthfully roll the order
+          // back to CANCELLED: inventory, installation, events and reputation may
+          // already have been finalized. Preserve the fulfillment history and
+          // record the financial loss separately.
+          tx.update(orderRef, {
+            chargebackResolution: 'UNFAVORABLE',
+            chargebackResolutionReason: reason,
+            chargebackLostAt: now,
+            financialStatus: 'CHARGEBACK',
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        } else {
+          tx.update(orderRef, { status: 'CANCELLED', cancellationReason: 'MERCADO_PAGO_CHARGEBACK_LOST', cancelledAt: now, updatedAt: FieldValue.serverTimestamp() });
+        }
+      }
+
+      // Only a still-held/disputed escrow can be transitioned to REFUNDED here.
+      // A RELEASED escrow represents an already-completed fulfillment and must
+      // remain an immutable fulfillment record while the financial reversal is
+      // recorded separately below.
+      if (escrowRef && escrowSnap?.exists && ['HELD', 'DISPUTED'].includes(escrowStatus)) {
+        const transition = resolveEscrowTransition(escrowStatus as any, 'CHARGEBACK_LOST');
         if (transition.changed) tx.update(escrowRef, { status: transition.status, refundedAt: now, updatedAt: now });
       }
+
       const reversalRef = db.collection(REVERSALS).doc(reversalLedgerKey(providerPaymentId, 'CHARGEBACK'));
       const reversalSnap = await tx.get(reversalRef);
       if (!reversalSnap.exists) tx.create(reversalRef, { id: reversalRef.id, domain: 'NEXORA', paymentTransactionId: paymentId, providerPaymentId, orderId, kind: 'CHARGEBACK', amountArs: Number(payment.amountArs || chargeback.amount || 0), currency: 'ARS', reason: reversalReason('CHARGEBACK', reason), confirmedAt: now, source: 'MERCADO_PAGO_CHARGEBACK_RESOLUTION' });
