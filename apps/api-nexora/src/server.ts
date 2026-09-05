@@ -5,6 +5,7 @@ import { prepareNexoraCheckout } from './paymentCheckout.js';
 import { requestNexoraRefund } from './refundService.js';
 import { confirmDelivery } from './escrowService.js';
 import { escrowRouter, startEscrowAutoReleaseWorker } from './escrowRoutes.js';
+import { handleMercadoPagoWebhook } from '../../../src/server/payments/mercadoPagoWebhook.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -65,6 +66,10 @@ app.post('/api/orders/:id/request-refund', requireAuth, async (req: Authenticate
 });
 
 app.use(escrowRouter);
+
+// Mercado Pago notifications are authoritative server-to-server events. The handler
+// verifies the provider signature and reconciles payment/chargeback state in Firestore.
+app.post('/api/mercadopago/webhook', (req, res) => handleMercadoPagoWebhook(req, res));
 
 // Delivery confirmation is the canonical completion path: it releases the escrow control state.
 app.post('/api/orders/:id/complete', requireAuth, async (req: AuthenticatedRequest, res) => {
