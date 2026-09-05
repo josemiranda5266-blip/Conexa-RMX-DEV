@@ -62,6 +62,10 @@ walletTransactions/{id}
 
 Cada movimiento conserva `source: CONEXA | NEXORA | SYSTEM` y referencia de origen.
 
+### Regla crítica de refunds
+
+Mercado Pago devuelve el dinero directamente al comprador según el medio de pago. Por lo tanto, un refund externo **no debe crear automáticamente un `CREDIT` en `walletTransactions`**, porque eso produciría doble contabilización si el wallet representa dinero interno distinto del saldo de Mercado Pago. El ledger solo se mutará cuando exista un saldo interno previamente acreditado y la reversión de ese saldo esté explícitamente modelada. Mientras tanto, `financialReversals/{id}` funciona como registro financiero/auditoría idempotente del evento externo.
+
 ### Flujo de pago Nexora
 
 La orden Nexora se crea como `PENDING` junto con `paymentTransactions/{id}` en `PAYMENT_PENDING`. El checkout de Mercado Pago es generado server-side y es idempotente. El webhook no confía en el payload del cliente: recupera el pago del proveedor, verifica referencia externa, comercio, monto e ID del pago y recién entonces permite `PAYMENT_PENDING -> PAID`.
@@ -77,7 +81,11 @@ PAID            -> REFUNDED
 PAID            -> CHARGEBACK
 ```
 
+Los refunds se solicitan únicamente desde backend. El endpoint autenticado no acepta un importe arbitrario: el flujo actual de Nexora soporta refund total y toma el importe de `paymentTransactions/{id}`. La solicitud usa `X-Idempotency-Key` de Mercado Pago derivada de la transacción y el estado local pasa a `PROCESSING/REQUESTED`; el estado financiero final se deriva de la confirmación del proveedor.
+
 Un reembolso de proveedor no se interpreta automáticamente como reversión de un servicio ya completado. En Nexora, un reembolso de una orden pendiente/pagada cancela la orden; un chargeback marca una orden activa o completada como `DISPUTED` para resolución posterior.
+
+Cada refund/chargeback confirmado genera además un documento determinista en `financialReversals`, cuya clave incorpora el `payment_id` y el tipo de reversión. Esto hace idempotente el registro aun cuando Mercado Pago reintente la notificación.
 
 ### Inventario y concurrencia Nexora
 
@@ -131,13 +139,18 @@ Cuando un servicio Conexa termina en `CLOSED` o `SETTLED`, el shell puede mostra
 - Cancelación pendiente libera inventario y cancela el `paymentTransaction` pendiente.
 - `PAID -> COMPLETED` libera la reserva y consolida el estado del listing.
 - Se eliminó el camino de settlement directo como mecanismo operativo; el método antiguo queda únicamente como guardia de compatibilidad y falla explícitamente.
+- Refund total Nexora iniciado exclusivamente server-side mediante Mercado Pago.
+- Idempotencia del refund mediante `X-Idempotency-Key` del proveedor.
+- Reversión confirmada registrada de forma determinista en `financialReversals`.
+- Chargeback/refund no generan créditos artificiales en el wallet interno.
+- Webhook puede resolver el comercio a partir del `providerPaymentId` cuando no existe `transactionId` en query.
 
 La verificación automatizada de build/lint/tests queda deliberadamente para el cierre de la fase de correcciones.
 
 ## Siguiente orden recomendado
 
-1. Refund real contra Mercado Pago + confirmación por webhook.
-2. Ledger `shared-wallet` conectado a eventos financieros idempotentes.
+1. Completar soporte específico de notificaciones `chargebacks` y resolución de casos contra Mercado Pago.
+2. Ledger `shared-wallet` conectado a eventos financieros internos reales, solo cuando exista un saldo interno que revertir.
 3. Escrow y settlement económico real.
 4. Firestore Rules y auditoría final de seguridad.
 5. Refactor progresivo de `AppContext`, matching y mensajería de Conexa.
