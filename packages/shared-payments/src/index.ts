@@ -1,4 +1,5 @@
 export * from './escrow.js';
+export * from './mercadopago/chargebackClient.js';
 
 export type PaymentDomain = 'CONEXA' | 'NEXORA';
 export type ProviderPaymentStatus =
