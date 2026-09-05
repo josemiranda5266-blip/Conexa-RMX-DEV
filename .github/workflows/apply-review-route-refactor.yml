@@ -26,7 +26,6 @@ jobs:
           from pathlib import Path
           p = Path('server.ts')
           s = p.read_text(encoding='utf-8')
-          import re
 
           import_line = 'import { handleProfessionalReviewSave } from "./src/server/reviewRoute.js";'
           if import_line not in s:
@@ -35,21 +34,19 @@ jobs:
                   raise SystemExit('ANCHOR_IMPORT_NOT_FOUND')
               s = s.replace(anchor, anchor + '\n' + import_line, 1)
 
-          pattern = re.compile(
-              r'  // Review creation and reputation aggregation are authoritative on the backend\.\n'
-              r'  app\.post\("/api/reviews/create".*?\n'
-              r'  // Backward-compatible close endpoint\.',
-              re.DOTALL,
-          )
-          replacement = '  app.post("/api/reviews/create", rateLimiter, handleProfessionalReviewSave);\n\n  // Backward-compatible close endpoint.'
-          s2, n = pattern.subn(replacement, s, count=1)
-          if n != 1:
+          start_marker = '  // Review creation and reputation aggregation are authoritative on the backend.'
+          end_marker = '  // Backward-compatible close endpoint.'
+          start = s.find(start_marker)
+          end = s.find(end_marker, start if start >= 0 else 0)
+          if start < 0 or end < 0:
               if 'app.post("/api/reviews/create", rateLimiter, handleProfessionalReviewSave);' in s:
-                  s2 = s
-              else:
-                  raise SystemExit(f'LEGACY_REVIEW_ROUTE_NOT_FOUND:{n}')
+                  p.write_text(s, encoding='utf-8')
+                  raise SystemExit(0)
+              raise SystemExit(f'REVIEW_BLOCK_NOT_FOUND start={start} end={end}')
 
-          p.write_text(s2, encoding='utf-8')
+          replacement = '  app.post("/api/reviews/create", rateLimiter, handleProfessionalReviewSave);\n\n'
+          s = s[:start] + replacement + s[end:]
+          p.write_text(s, encoding='utf-8')
 
       - name: Commit and push
         shell: bash
