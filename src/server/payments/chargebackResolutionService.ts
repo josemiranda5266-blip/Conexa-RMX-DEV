@@ -113,24 +113,28 @@ export async function resolveChargebackCase(chargebackId: string, coverageApplie
     const escrowSnap = escrowRef ? await tx.get(escrowRef) : null;
 
     if (coverageApplied) {
-      // A favorable provider outcome is only a settlement repair for a payment
-      // that was previously moved into the chargeback dispute state. Requiring
-      // both linked records prevents silently settling a payment with a missing
-      // or inconsistent escrow/order state.
       const orderStatus = orderSnap?.exists ? String(orderSnap.data()?.status || '').toUpperCase() : '';
       const escrowStatus = escrowSnap?.exists ? String(escrowSnap.data()?.status || '').toUpperCase() : '';
-      if (!orderSnap?.exists || !escrowSnap?.exists || orderStatus !== 'DISPUTED' || escrowStatus !== 'DISPUTED') {
+      const wasAlreadySettled = orderStatus === 'DISPUTED' && escrowStatus === 'RELEASED';
+      const activeDispute = orderStatus === 'DISPUTED' && escrowStatus === 'DISPUTED';
+      // A favorable outcome may follow a chargeback opened after fulfillment.
+      // In that case reconciliation marks the order DISPUTED but the escrow is
+      // already RELEASED and must remain released; requiring DISPUTED escrow
+      // would make the case impossible to resolve.
+      if ((!activeDispute && !wasAlreadySettled) || !orderSnap?.exists || !escrowSnap?.exists) {
         throw new Error('CHARGEBACK_RESOLUTION_REQUIRES_DISPUTED_ORDER_ESCROW');
       }
       tx.update(paymentRef, { status: 'PAID', paymentStatus: 'approved', chargebackResolvedAt: now, chargebackResolution: 'FAVORABLE', chargebackResolutionReason: reason, settlementStatus: 'SETTLED', settledAt: now, updatedAt: FieldValue.serverTimestamp() });
       const order = orderSnap.data() || {};
-      tx.update(orderRef!, { status: 'COMPLETED', completedAt: now, disputeResolvedAt: now, disputeResolution: 'CHARGEBACK_FAVORABLE', escrowReleasedAt: now, updatedAt: FieldValue.serverTimestamp() });
-      if (order.requiresInstallation) {
+      tx.update(orderRef!, { status: 'COMPLETED', completedAt: order.completedAt || now, disputeResolvedAt: now, disputeResolution: 'CHARGEBACK_FAVORABLE', ...(wasAlreadySettled ? {} : { escrowReleasedAt: now }), updatedAt: FieldValue.serverTimestamp() });
+      if (order.requiresInstallation && !wasAlreadySettled) {
         const outboxRef = db.collection('eventOutbox').doc();
         tx.create(outboxRef, { id: outboxRef.id, type: 'NEXORA_ORDER_COMPLETED', occurredAt: now, producer: 'NEXORA', payload: { eventId: outboxRef.id, type: 'NEXORA_ORDER_COMPLETED', occurredAt: now, userId: String(order.buyerId || chargeback.buyerId || payment.buyerId || ''), orderId, listingIds: Array.isArray(order.items) ? order.items.map((item: any) => String(item.listingId)) : [], requiresInstallation: true }, status: 'PENDING', attempts: 0 });
       }
-      const transition = resolveEscrowTransition('DISPUTED', 'CHARGEBACK_FAVORABLE');
-      if (transition.changed) tx.update(escrowRef!, { status: transition.status, releasedAt: now, releaseReason: 'ADMIN_RESOLUTION', updatedAt: now });
+      if (!wasAlreadySettled) {
+        const transition = resolveEscrowTransition('DISPUTED', 'CHARGEBACK_FAVORABLE');
+        if (transition.changed) tx.update(escrowRef!, { status: transition.status, releasedAt: now, releaseReason: 'ADMIN_RESOLUTION', updatedAt: now });
+      }
     } else {
       const orderStatus = orderSnap?.exists ? String(orderSnap.data()?.status || '').toUpperCase() : '';
       const escrowStatus = escrowSnap?.exists ? String(escrowSnap.data()?.status || '').toUpperCase() : '';
@@ -139,10 +143,6 @@ export async function resolveChargebackCase(chargebackId: string, coverageApplie
 
       if (orderRef && orderSnap?.exists) {
         if (orderStatus === 'COMPLETED') {
-          // A lost chargeback after fulfillment cannot truthfully roll the order
-          // back to CANCELLED: inventory, installation, events and reputation may
-          // already have been finalized. Preserve the fulfillment history and
-          // record the financial loss separately.
           tx.update(orderRef, {
             chargebackResolution: 'UNFAVORABLE',
             chargebackResolutionReason: reason,
@@ -155,10 +155,6 @@ export async function resolveChargebackCase(chargebackId: string, coverageApplie
         }
       }
 
-      // Only a still-held/disputed escrow can be transitioned to REFUNDED here.
-      // A RELEASED escrow represents an already-completed fulfillment and must
-      // remain an immutable fulfillment record while the financial reversal is
-      // recorded separately below.
       if (escrowRef && escrowSnap?.exists && ['HELD', 'DISPUTED'].includes(escrowStatus)) {
         const transition = resolveEscrowTransition(escrowStatus as any, 'CHARGEBACK_LOST');
         if (transition.changed) tx.update(escrowRef, { status: transition.status, refundedAt: now, updatedAt: now });
