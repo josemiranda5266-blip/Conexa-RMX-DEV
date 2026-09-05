@@ -17,7 +17,9 @@ export interface Listing { id: string; sellerId: string; sellerName: string; sel
 export interface Shop { id: string; ownerId: string; name: string; logoUrl?: string; coverUrl?: string; category: string; description: string; address: string; neighborhood?: string; city: string; hours: string; phone?: string; whatsapp?: string; isAliadoNexora: boolean; stars: number; yearsInNexora: number; catalogCount: number; }
 export type NexoraOrderStatus = 'PENDING' | 'PAID' | 'COMPLETED' | 'CANCELLED' | 'DISPUTED';
 export interface NexoraOrderItem { listingId: string; quantity: number; unitPrice: number; }
-export interface NexoraOrder { id: string; buyerId: string; sellerId: string; items: NexoraOrderItem[]; totalAmount: number; currency: 'ARS'; status: NexoraOrderStatus; requiresInstallation: boolean; createdAt: string; completedAt?: string; }
+export interface NexoraOrder { id: string; buyerId: string; sellerId: string; items: NexoraOrderItem[]; totalAmount: number; currency: 'ARS'; status: NexoraOrderStatus; requiresInstallation: boolean; paymentTransactionId?: string; createdAt: string; completedAt?: string; }
+export type PaymentTransactionStatus = 'PAYMENT_PENDING' | 'PAID' | 'REFUNDED' | 'CHARGEBACK' | 'CANCELLED';
+export interface PaymentTransaction { id: string; domain: Domain; orderId: string; buyerId: string; merchantId: string; amountArs: number; currency: 'ARS'; status: PaymentTransactionStatus; provider: 'MERCADO_PAGO'; providerPaymentId?: string; paidAt?: string; createdAt: string; updatedAt?: string; }
 export type EscrowStatus = 'PENDING' | 'HELD' | 'RELEASED' | 'DISPUTED' | 'REFUNDED';
 export interface EscrowPayment { id: string; orderId: string; listingId: string; amount: number; currency: 'ARS'; buyerId: string; sellerId: string; paymentMethod: 'CARD' | 'MERCADO_PAGO' | 'TRANSFER'; status: EscrowStatus; deliveryPinHash?: string; createdAt: string; autoReleaseAt: string; releasedAt?: string; disputeReason?: string; }
 export type NegotiationStage = 'Consulta' | 'En conversación' | 'Oferta realizada' | 'Oferta aceptada' | 'Encuentro programado' | 'Operación concretada' | 'Cancelada';
