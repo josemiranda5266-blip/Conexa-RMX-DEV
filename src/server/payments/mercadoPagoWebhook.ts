@@ -3,8 +3,12 @@ import { getAdminDb } from '../firebaseAdmin.js';
 import { verifyMercadoPagoWebhookSignature } from './mercadoPagoConfig.js';
 import { reconcileMercadoPagoPayment } from './mercadoPagoReconciliation.js';
 import { MercadoPagoOAuthConnection, normalizeMercadoPagoOAuthConnection } from './mercadoPagoOAuthTokenStore.js';
+import { startChargebackExpiryWorker } from './chargebackExpiry.js';
 
 const CONNECTION_COLLECTION = 'mercado_pago_connections';
+
+startChargebackExpiryWorker();
+
 function resourceId(req: Request): string | undefined {
   const body = req.body as any;
   const query = req.query as any;
