@@ -33,9 +33,9 @@ El wrapper entregado a `onSchedule` retorna `Promise<void>`; la función de ejec
 
 No se fuerza `maxInstances: 1`. Cloud Scheduler/Functions puede producir ejecuciones solapadas y el pipeline ya posee idempotencia durable por `DomainEvent.id`. Firebase advierte explícitamente que una nueva ejecución puede comenzar mientras otra sigue activa. citeturn0search0
 
-La prueba emulada ejecutó dos workers concurrentemente sobre el mismo evento. Ambas ejecuciones pudieron reportar `processed=1`, pero el resultado durable fue único: un solo lead de instalación, un solo ledger de idempotencia y el outbox quedó `PUBLISHED` con `attempts=1`.
+La prueba emulada ejecutó dos workers concurrentemente sobre el mismo evento. En la validación actual, una ejecución reportó `processed=1` y la otra `processed=0`, mientras el resultado durable fue único: un solo lead de instalación, un solo ledger de idempotencia y el outbox quedó `PUBLISHED` con `attempts=1`.
 
-Esto confirma que el contrato importante del worker es la idempotencia de los efectos persistentes, no que el contador local `processed` sea globalmente único entre ejecuciones concurrentes.
+El contrato importante del worker es la idempotencia de los efectos persistentes. El contador `processed` es local a cada ejecución y no debe interpretarse como contador global de entregas concurrentes.
 
 ## Despliegue
 
@@ -70,10 +70,29 @@ PASS — 0 errores
 ```text
 pnpm --filter @super-app/event-worker build
 
-lib\\index.js  9.7kb
-Done in 50ms
+lib\\index.js  9.8kb
+Done in 90ms
 
 PASS
+```
+
+### Consumer Nexora / integración emulada
+
+Comando:
+
+```text
+pnpm test:nexora-event-consumer-emulator
+```
+
+Resultado real:
+
+```text
+✔ Nexora consumer: concurrent workers create one lead and publish once
+✔ Nexora consumer: repeated delivery is a durable no-op
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
 ```
 
 ### Emulator / integración del worker
@@ -94,19 +113,17 @@ Resultado real:
 ℹ suites 0
 ℹ pass 3
 ℹ fail 0
-ℹ cancelled 0
-ℹ skipped 0
 ```
 
 Se utilizó el Firestore Emulator con el proyecto `demo-conexa-unified`.
 
-También apareció un `MetadataLookupWarning` durante la ejecución local, pero no provocó fallo: las 3 pruebas terminaron correctamente con código 0.
+También apareció un `MetadataLookupWarning` durante ambas ejecuciones locales, pero no provocó fallo: las pruebas terminaron correctamente con código 0.
 
 ## Resultado
 
 **FASE 31.3 — PASS.**
 
-La implementación mínima del worker programado está compilando y funcionando contra Firestore Emulator, incluyendo ejecución vacía y concurrencia/idempotencia.
+La implementación mínima del worker programado está compilando y funcionando contra Firestore Emulator, incluyendo ejecución vacía, integración con el consumer y concurrencia/idempotencia.
 
 ## Próximo control recomendado
 
