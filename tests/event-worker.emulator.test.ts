@@ -77,9 +77,9 @@ test('event worker: concurrent executions remain idempotent', async () => {
   const lead = await db.collection('installationLeads').doc(orderId).get();
   const ledger = await db.collection('processedEvents').doc(eventId).get();
 
-  // Both scheduled invocations may successfully claim the same delivery batch.
-  // Durable idempotency guarantees that only one invocation performs the effect.
-  assert.deepEqual(results, [1, 1]);
+  // Exactly one concurrent invocation claims the delivery; the other observes
+  // ALREADY_PROCESSED. The local processed counter therefore sums to one.
+  assert.equal(results.reduce((sum, value) => sum + value, 0), 1);
   assert.equal(outbox.data()?.status, 'PUBLISHED');
   assert.equal(outbox.data()?.attempts, 1);
   assert.equal(lead.exists, true);
