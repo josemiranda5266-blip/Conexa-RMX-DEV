@@ -49,6 +49,43 @@ export async function absorbChargebackCasesForRefund(paymentTransactionId: strin
     if (!paymentSnap.exists) throw new Error('PAYMENT_TRANSACTION_NOT_FOUND');
     const payment = paymentSnap.data() || {};
     if (String(payment.status || '').toUpperCase() !== 'REFUNDED') return 0;
+
+    const orderId = String(payment.orderId || '').trim();
+    const orderRef = orderId ? db.collection(ORDERS).doc(orderId) : null;
+    const orderSnap = orderRef ? await tx.get(orderRef) : null;
+    const escrowRef = orderId ? db.collection(ESCROWS).doc(`escrow:${orderId}`) : null;
+    const escrowSnap = escrowRef ? await tx.get(escrowRef) : null;
+    const orderStatus = orderSnap?.exists ? String(orderSnap.data()?.status || '').toUpperCase() : '';
+    const escrowStatus = escrowSnap?.exists ? String(escrowSnap.data()?.status || '').toUpperCase() : '';
+
+    // A confirmed provider refund absorbs an in-flight chargeback. Reconcile
+    // the commercial/escrow state in the same transaction so a refund webhook
+    // cannot leave PAYMENT=REFUNDED while ORDER/ESCROW remain DISPUTED.
+    // COMPLETED remains terminal: refund never rewinds fulfillment history.
+    if (orderRef && orderSnap?.exists && ['PENDING', 'PAID', 'DISPUTED'].includes(orderStatus)) {
+      tx.update(orderRef, {
+        status: 'CANCELLED',
+        cancellationReason: 'MERCADO_PAGO_REFUND_ABSORBED_CHARGEBACK',
+        cancelledAt: resolvedAt,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    } else if (orderRef && orderSnap?.exists && orderStatus === 'COMPLETED') {
+      tx.update(orderRef, {
+        financialStatus: 'REFUNDED',
+        refundAbsorbedChargebackAt: resolvedAt,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    if (escrowRef && escrowSnap?.exists && ['PENDING', 'HELD', 'DISPUTED'].includes(escrowStatus)) {
+      tx.update(escrowRef, {
+        status: 'REFUNDED',
+        refundedAt: resolvedAt,
+        refundReason: 'MERCADO_PAGO_REFUND_ABSORBED_CHARGEBACK',
+        updatedAt: resolvedAt,
+      });
+    }
+
     const snapshot = await tx.get(db.collection(CASES).where('paymentTransactionId', '==', paymentRef.id));
     let absorbed = 0;
     snapshot.docs.forEach(caseSnap => {
