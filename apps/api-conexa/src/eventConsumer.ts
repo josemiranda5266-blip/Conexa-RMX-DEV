@@ -1,12 +1,13 @@
 import type { NexoraOrderCompletedEvent } from '@super-app/shared-types';
 import type { DomainEvent } from '@super-app/shared-events';
+import type { DocumentReference, Firestore, Transaction } from 'firebase-admin/firestore';
 import { dispatchDomainEvent } from './eventDispatcher.js';
 import { getAdminDb } from '../../../src/server/firebaseAdmin.js';
 import { runEventIdempotently } from './eventIdempotency.js';
 import { nextFailureState } from './outboxRecovery.js';
 
-function db() {
-  return getAdminDb();
+function db(): Firestore {
+  return getAdminDb() as Firestore;
 }
 
 function buildDomainEvent(data: Record<string, unknown>): DomainEvent {
@@ -26,13 +27,13 @@ function buildDomainEvent(data: Record<string, unknown>): DomainEvent {
 async function handleNexoraOrderCompleted(event: DomainEvent): Promise<void> {
   const firestore = db();
   const payload = event.payload as NexoraOrderCompletedEvent;
-  const eventRef = firestore.collection('eventOutbox').doc(event.id);
+  const eventRef = firestore.collection('eventOutbox').doc(event.id) as DocumentReference;
 
-  await runEventIdempotently(firestore, event, async tx => {
+  await runEventIdempotently(firestore, event, async (tx: Transaction) => {
     const current = await tx.get(eventRef);
     if (!current.exists || current.data()?.status !== 'PENDING') return;
 
-    const orderRef = firestore.collection('orders').doc(payload.orderId);
+    const orderRef = firestore.collection('orders').doc(payload.orderId) as DocumentReference;
     const order = await tx.get(orderRef);
     if (!order.exists) throw new Error('ORDER_NOT_FOUND');
 
@@ -51,7 +52,7 @@ async function handleNexoraOrderCompleted(event: DomainEvent): Promise<void> {
       return;
     }
 
-    const leadRef = firestore.collection('installationLeads').doc(payload.orderId);
+    const leadRef = firestore.collection('installationLeads').doc(payload.orderId) as DocumentReference;
     const lead = await tx.get(leadRef);
     if (!lead.exists) {
       tx.create(leadRef, {
@@ -83,7 +84,7 @@ export async function processNexoraOrderCompleted(limit = 20): Promise<number> {
       await dispatchDomainEvent(event, { NEXORA_ORDER_COMPLETED: handleNexoraOrderCompleted });
       processed++;
     } catch (error) {
-      await firestore.runTransaction(async tx => {
+      await firestore.runTransaction(async (tx: Transaction) => {
         const current = await tx.get(eventDoc.ref);
         if (!current.exists || current.data()?.status !== 'PENDING') return;
 
