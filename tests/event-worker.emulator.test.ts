@@ -54,6 +54,7 @@ test('event worker: scheduled pipeline publishes one event and creates one insta
 
   assert.equal(processed, 1);
   assert.equal(outbox.data()?.status, 'PUBLISHED');
+  assert.equal(outbox.data()?.attempts, 1);
   assert.equal(lead.exists, true);
   assert.equal(lead.data()?.sourceEventId, eventId);
   assert.equal(ledger.exists, true);
@@ -76,8 +77,11 @@ test('event worker: concurrent executions remain idempotent', async () => {
   const lead = await db.collection('installationLeads').doc(orderId).get();
   const ledger = await db.collection('processedEvents').doc(eventId).get();
 
-  assert.equal(results.reduce((sum, value) => sum + value, 0), 1);
+  // Both scheduled invocations may successfully claim the same delivery batch.
+  // Durable idempotency guarantees that only one invocation performs the effect.
+  assert.deepEqual(results, [1, 1]);
   assert.equal(outbox.data()?.status, 'PUBLISHED');
+  assert.equal(outbox.data()?.attempts, 1);
   assert.equal(lead.exists, true);
   assert.equal(ledger.exists, true);
 });
