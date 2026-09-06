@@ -3,7 +3,7 @@
 **Proyecto:** Conexa-RMX-DEV / Super App  
 **Rama:** `integration/conexa-unified`  
 **Fecha:** 2026-09-06  
-**Estado:** **FASE 30.6 IMPLEMENTADA — IDEMPOTENCIA DURABLE; EJECUCIÓN LOCAL PENDIENTE**
+**Estado:** **FASE 30.7 IMPLEMENTADA — CONSUMER DURABLE; EJECUCIÓN LOCAL PENDIENTE**
 
 ## 1. Objetivo
 
@@ -19,6 +19,8 @@ Auditar y cerrar el contrato transversal que permitirá que CONEXA publique `CON
 
 **Resuelto para el nuevo evento:** la identidad canónica es exclusivamente `DomainEvent.id`; el payload de `CONEXA_SERVICE_CLOSED` no contiene `eventId`.
 
+**Pendiente en legado Nexora:** `NEXORA_ORDER_COMPLETED` todavía conserva `payload.eventId` por compatibilidad. No se modifica en esta fase; la identidad transversal canónica del envelope sigue siendo `eventOutbox.id`/`DomainEvent.id`.
+
 ### P1 — Outbox tenía `FAILED` pero no recuperación formal
 
 **FASE 30.4 implementada:** se añadió `apps/api-conexa/src/outboxRecovery.ts` con:
@@ -33,7 +35,7 @@ Auditar y cerrar el contrato transversal que permitirá que CONEXA publique `CON
 - `lastError` se limpia al reencolar;
 - el replay no se habilita todavía desde HTTP ni desde un scheduler.
 
-Se eligió **fail-closed** para códigos desconocidos: un error no clasificado no entra en un bucle automático. Firebase recomienda que los retries se utilicen para fallos transitorios, que exista una condición de terminación y que el procesamiento sea idempotente. citeturn0search4
+Firebase recomienda que los retries se utilicen para fallos transitorios, que exista una condición de terminación y que el procesamiento sea idempotente. citeturn0search4
 
 ### P1 — No existe todavía scheduler/worker productivo demostrado
 
@@ -43,15 +45,21 @@ Existe un endpoint interno para el consumer legado `NEXORA_ORDER_COMPLETED`, pro
 
 ### P1 — Consumer actual especializado
 
-**Parcialmente resuelto:** FASE 30.3 añadió dispatcher común. El consumer Nexora legado sigue especializado y todavía no se migra para evitar un cambio transversal antes de validar compatibilidad.
+**FASE 30.7 parcialmente resuelta:** el consumer Nexora fue adaptado para usar `processedEvents/{DomainEvent.id}` como ledger durable. La creación de `installationLeads`, el cambio del Outbox a `PUBLISHED` y el ledger se realizan dentro de la misma transacción de Firestore.
+
+Esto elimina la ventana en la que un worker podría crear el efecto y fallar antes de registrar la entrega. La transacción también permite que dos workers concurrentes converjan en un único efecto. Firestore puede reejecutar la callback ante contención, por lo que el código mantiene todos los efectos dentro de la transacción. citeturn0search0turn0search1
+
+La migración todavía no convierte el consumer en un handler genérico del dispatcher; eso queda para 30.8.
 
 ### P1 — Validación de runtime insuficiente
 
 **Resuelto para `CONEXA_SERVICE_CLOSED`:** envelope y payload tienen validación compartida antes del routing.
 
+**30.7:** el consumer legado ahora valida mínimamente el envelope Nexora antes de procesarlo (`id`, `type`, `occurredAt`, `producer`, `payload`). La validación completa del contrato legado queda fuera de esta fase.
+
 ### P1 — Idempotencia durable
 
-**FASE 30.6 implementada:** se añadió `apps/api-conexa/src/eventIdempotency.ts`.
+**FASE 30.6 implementada y validada localmente: 3/3 PASS.**
 
 La política es:
 
@@ -62,13 +70,7 @@ La política es:
 5. crear `processedEvents/{eventId}` antes de finalizar la transacción;
 6. si el efecto falla, la transacción completa se aborta y no queda un falso positivo en el ledger.
 
-El helper se limita deliberadamente a **efectos Firestore transaccionales**. No debe envolver llamadas HTTP, Mercado Pago, correo, APIs externas u otros side effects no transaccionales. Para esos efectos se requiere una clave idempotente propia o un mecanismo de Outbox/Task Queue adicional.
-
-Esta decisión es coherente con la semántica de Firestore: las funciones de transacción pueden ejecutarse más de una vez por contención y las escrituras se aplican atómicamente sólo cuando la transacción finalmente confirma. citeturn0search0turn0search1 Firebase además recomienda persistir el estado asociado al ID del evento para protegerse de entregas duplicadas. citeturn0search4
-
-### P1 — Identidad determinista del productor
-
-**Pendiente de integración.** `reviewService.ts` todavía no produce `CONEXA_SERVICE_CLOSED`. Cuando se conecte, el `DomainEvent.id` deberá derivarse de una identidad estable del cierre, no generarse aleatoriamente dentro de la callback de `runTransaction`, porque Firestore puede volver a ejecutar esa callback ante contención. citeturn0search0
+El helper se limita deliberadamente a **efectos Firestore transaccionales**. No debe envolver llamadas HTTP, Mercado Pago, correo, APIs externas u otros side effects no transaccionales. Para esos efectos se requiere una clave idempotente propia o un mecanismo de Outbox/Task Queue adicional. Firebase recomienda precisamente persistir el estado asociado al ID del evento para protegerse de entregas duplicadas. citeturn0search4
 
 ## 3. FASE 30.4 — Política de Retry/Replay
 
@@ -87,7 +89,7 @@ Códigos considerados transitorios:
 
 Códigos conocidos como terminales incluyen permisos, autenticación, argumentos inválidos, precondiciones, recurso inexistente y errores de contrato/evento.
 
-Los errores desconocidos son terminales por defecto. La clasificación puede recibir además un error con `retryable: true|false`, permitiendo que una capa superior determine explícitamente la semántica sin depender del texto del mensaje.
+Los errores desconocidos son terminales por defecto.
 
 ### Límite
 
@@ -118,7 +120,7 @@ El replay exige:
 6. conservación absoluta del `DomainEvent.id`;
 7. registro opcional de actor y motivo.
 
-No se implementó todavía un endpoint para ejecutar este replay. Eso se hará cuando exista una política de autorización administrativa y un mecanismo operacional auditado.
+No se implementó todavía un endpoint para ejecutar este replay.
 
 ## 4. FASE 30.6 — Idempotencia durable
 
@@ -126,54 +128,96 @@ Se creó:
 
 `apps/api-conexa/src/eventIdempotency.ts`
 
-y:
-
 `tests/event-idempotency.emulator.test.ts`
 
-El script es:
+Script:
 
 ```text
 pnpm test:event-idempotency-emulator
 ```
 
-Escenarios cubiertos:
+**Resultado local confirmado por el entorno de desarrollo:**
 
-1. dos entregas concurrentes del mismo `DomainEvent.id` ejecutan el efecto Firestore una sola vez;
-2. una segunda entrega posterior devuelve `ALREADY_PROCESSED` y no modifica el efecto;
-3. si el efecto falla, no queda `processedEvents/{eventId}` persistido.
+```text
+✔ concurrent deliveries execute the Firestore effect once
+✔ repeated delivery becomes a durable no-op
+✔ failed effect does not leave a false processed ledger
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
++ Script exited successfully (code 0)
+```
 
-La prueba utiliza exclusivamente `demo-*` + `FIRESTORE_EMULATOR_HOST` y se niega a ejecutarse contra Firestore real.
+El `MetadataLookupWarning` mostrado por Node no afectó la ejecución: el proceso terminó con código 0 y los tres escenarios pasaron.
+
+## 5. FASE 30.7 — Integración del consumer con idempotencia durable
+
+Se modificó:
+
+`apps/api-conexa/src/eventConsumer.ts`
+
+Cambios principales:
+
+1. el consumer obtiene Firestore mediante el inicializador seguro `getAdminDb()`, compatible con el emulator `demo-*`;
+2. valida el envelope mínimo de `NEXORA_ORDER_COMPLETED`;
+3. usa `DomainEvent.id` como identidad de entrega;
+4. delega el efecto a `runEventIdempotently()`;
+5. crea `installationLeads/{orderId}` dentro de la misma transacción;
+6. marca `eventOutbox/{eventId}` como `PUBLISHED` dentro de esa misma transacción;
+7. crea `processedEvents/{eventId}` dentro de la misma transacción;
+8. dos workers concurrentes no pueden duplicar el efecto Firestore;
+9. se mantiene la protección contra escrituras stale en el camino de error;
+10. no se introducen llamadas externas dentro de la transacción.
+
+**Importante:** la implementación mantiene una única transacción de Firestore para ledger + efecto + estado `PUBLISHED`. No se utiliza una transacción anidada.
+
+Se agregó:
+
+`tests/nexora-event-consumer.emulator.test.ts`
+
+con dos escenarios:
+
+- dos workers concurrentes → una instalación + un ledger + un `PUBLISHED`;
+- segunda entrega → no-op durable.
+
+Script:
+
+```text
+pnpm test:nexora-event-consumer-emulator
+```
 
 **Ejecución local:** pendiente de confirmación por el entorno de desarrollo.
 
-## 5. Decisiones de seguridad y arquitectura
+## 6. Decisiones de seguridad y arquitectura
 
 - No se habilita replay automático de `FAILED`.
 - No se agrega scheduler todavía.
 - No se modifica `reviewService.ts` todavía.
 - No se produce todavía `CONEXA_SERVICE_CLOSED`.
-- No se cambia el contrato legado de `NEXORA_ORDER_COMPLETED`.
-- No se permite que el replay cambie el `DomainEvent.id`; ese ID es la identidad estable del evento y debe seguir siendo la misma durante todas las entregas.
+- No se cambia todavía el contrato de payload legado de `NEXORA_ORDER_COMPLETED`.
+- No se permite que el replay cambie el `DomainEvent.id`.
 - `replayCount` separa el historial de recuperación del contador de intentos de una entrega concreta.
 - El ledger `processedEvents` sólo protege efectos que participan en la misma transacción Firestore. No se considera una garantía de exactly-once para sistemas externos.
 
 Firestore garantiza atomicidad y aislamiento serializable de las transacciones; aun así, las transacciones pueden reintentarse ante contención, por lo que el código debe ser seguro frente a múltiples ejecuciones. citeturn0search0turn0search1
 
-## 6. Gates restantes de FASE 30.x
+## 7. Gates restantes de FASE 30.x
 
-1. **Ejecutar `pnpm test:event-idempotency-emulator`.**
-2. Diseñar autorización administrativa real para replay.
-3. Diseñar worker/scheduler productivo, preferentemente gestionado y no dependiente de un proceso web único.
-4. Integrar dispatcher + outbox + consumer sin romper Nexora.
-5. Conectar el ledger durable al handler real de `CONEXA_SERVICE_CLOSED`.
+1. **FASE 30.7:** ejecutar `pnpm test:nexora-event-consumer-emulator`.
+2. Revisar el resultado de 30.7 y corregir cualquier incompatibilidad real.
+3. Integrar dispatcher + outbox + consumer sin romper Nexora.
+4. Conectar el ledger durable al handler real de `CONEXA_SERVICE_CLOSED`.
+5. Diseñar autorización administrativa real para replay.
 6. Probar integración Outbox → dispatcher → consumer en Firestore Emulator.
-7. Recién después modificar `reviewService.ts` para producir `CONEXA_SERVICE_CLOSED` dentro de la misma transacción del cierre.
+7. Diseñar worker/scheduler productivo gestionado.
+8. Recién después modificar `reviewService.ts` para producir `CONEXA_SERVICE_CLOSED` dentro de la misma transacción del cierre.
 
-## 7. Resultado
+## 8. Resultado
 
 **FASE 30.2 — PASS confirmado localmente (5/5).**  
 **FASE 30.3 — PASS confirmado localmente (4/4).**  
 **FASE 30.4 — PASS confirmado localmente (6/6).**  
 **FASE 30.5 — AUDITORÍA COMPLETADA; scheduler/worker productivo pendiente.**  
-**FASE 30.6 — IMPLEMENTADA; ejecución local pendiente.**  
-**Producción de `CONEXA_SERVICE_CLOSED`: BLOQUEADA hasta validar el ledger en emulator, integrar el consumer y cerrar el diseño del worker.**
+**FASE 30.6 — PASS confirmado localmente (3/3).**  
+**FASE 30.7 — IMPLEMENTADA; ejecución local pendiente.**  
+**Producción de `CONEXA_SERVICE_CLOSED`: BLOQUEADA hasta validar 30.7, integrar dispatcher/consumer y cerrar el diseño operacional del worker.**
