@@ -74,8 +74,28 @@ export async function saveProfessionalReview(
       const existingReview = reviewSnap.data() as Review;
 
       // A retry after the review was committed must still complete the
-      // REVIEW_PENDING -> CLOSED transition atomically. CLOSED is a safe no-op.
+      // REVIEW_PENDING -> CLOSED transition atomically. If settlement was
+      // interrupted after review creation, this retry also finishes it.
       if (request.status === 'REVIEW_PENDING') {
+        const completedTransactionsSnap = await tx.get(
+          db.collection(TRANSACTIONS_COLLECTION)
+            .where('serviceRequestId', '==', normalized.serviceRequestId)
+            .where('status', '==', 'SERVICE_COMPLETED')
+            .limit(1),
+        );
+        const completedTransactionDoc = completedTransactionsSnap.docs[0];
+        const now = new Date().toISOString();
+
+        if (completedTransactionDoc) {
+          tx.update(completedTransactionDoc.ref, {
+            status: 'SETTLED',
+            reviewCompletedAt: now,
+            settledAt: now,
+            settlementStatus: 'SETTLED',
+            settlementReason: 'REVIEW_COMPLETED',
+          });
+        }
+
         tx.update(requestRef, { status: 'CLOSED' });
       } else if (request.status !== 'CLOSED') {
         // Preserve the legacy COMPLETED -> review compatibility path without
