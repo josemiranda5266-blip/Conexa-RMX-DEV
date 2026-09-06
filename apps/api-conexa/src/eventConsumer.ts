@@ -3,8 +3,7 @@ import type { DomainEvent } from '@super-app/shared-events';
 import { dispatchDomainEvent } from './eventDispatcher.js';
 import { getAdminDb } from '../../../src/server/firebaseAdmin.js';
 import { runEventIdempotently } from './eventIdempotency.js';
-
-const MAX_ATTEMPTS = 5;
+import { nextFailureState } from './outboxRecovery.js';
 
 function db() {
   return getAdminDb();
@@ -87,11 +86,10 @@ export async function processNexoraOrderCompleted(limit = 20): Promise<number> {
       await firestore.runTransaction(async tx => {
         const current = await tx.get(eventDoc.ref);
         if (!current.exists || current.data()?.status !== 'PENDING') return;
-        const attempts = Number(current.data()?.attempts ?? 0) + 1;
+
+        const failure = nextFailureState(Number(current.data()?.attempts ?? 0), error);
         tx.update(eventDoc.ref, {
-          status: attempts >= MAX_ATTEMPTS ? 'FAILED' : 'PENDING',
-          lastError: error instanceof Error ? error.message : 'UNKNOWN',
-          attempts,
+          ...failure,
           updatedAt: new Date().toISOString(),
         });
       }).catch(() => undefined);
