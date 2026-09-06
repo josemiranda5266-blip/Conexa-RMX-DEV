@@ -13,109 +13,87 @@ Determinar quién tiene actualmente autoridad funcional para ejecutar `REVIEW_PE
 
 ### 1. La máquina de estados separa explícitamente reseña y cierre
 
-`src/domain/jobStateMachine.ts` define:
+`src/domain/jobStateMachine.ts` define `COMPLETED -> REVIEW_PENDING -> CLOSED`, con acciones distintas `SUBMIT_REVIEW` y `CLOSE_JOB`. No es correcto inferir por la máquina que publicar una reseña equivale automáticamente al cierre.
 
-`COMPLETED -> REVIEW_PENDING -> CLOSED`
+### 2. El flujo frontend de reseña termina en `addReview()`
 
-con acciones distintas `SUBMIT_REVIEW` y `CLOSE_JOB`. Por lo tanto, no es correcto inferir que publicar una reseña equivale automáticamente al cierre del servicio.
+`src/components/ReviewModal.tsx` recopila las seis dimensiones de calificación y el comentario y al enviar llama a `AppContext.addReview()`. No existe en este componente una segunda acción de cierre posterior.
 
-### 2. El único flujo frontend de reseña auditado termina en `addReview()`
+### 3. `AppContext.addReview()` está orientado al backend autoritativo
 
-`src/components/ReviewModal.tsx` solicita al cliente las seis dimensiones de calificación y el comentario, y al enviar llama a `AppContext.addReview()`.
-
-El componente entrega algunos campos históricos como `clientId`, `clientName` y `clientAvatar`, pero el `AppContext` no los utiliza para autorizar la operación backend.
-
-### 3. `AppContext.addReview()` ya está orientado al backend autoritativo
-
-El método obtiene el ID token de Firebase y realiza `POST /api/reviews/create`. El cuerpo enviado contiene únicamente `serviceRequestId` y los datos de la reseña; no confía en `clientId`, `clientName`, `clientAvatar` ni `isVerifiedJob` recibidos desde el componente.
-
-Esto es correcto: la identidad efectiva debe derivarse del token y la elegibilidad del servicio debe resolverse contra Firestore.
+El método obtiene el ID token de Firebase y realiza `POST /api/reviews/create`. El contrato efectivo se basa en `serviceRequestId` y los datos de la reseña; la identidad efectiva debe seguir derivándose del token y de Firestore.
 
 ### 4. El backend de reseñas no materializa `CLOSED`
 
-`src/server/reviewRoute.ts` autentica al usuario y delega en `saveProfessionalReview()`.
+`reviewRoute` autentica y delega en `saveProfessionalReview()`. `reviewService` realiza la transacción de reseña, reputación y liquidación financiera, pero no actualiza `service_requests.status` a `CLOSED`.
 
-`src/server/reviewService.ts` realiza una transacción que:
+Firestore garantiza atomicidad de la transacción y puede volver a ejecutar la función transaccional ante conflictos, por lo que cualquier futuro cierre debe ser idempotente y tolerante a concurrencia. citeturn0search0turn0search1
 
-- verifica solicitud, cliente y profesional;
-- evita duplicados mediante ID determinístico de reseña;
-- valida elegibilidad;
-- crea la reseña;
-- actualiza reputación y proyecciones;
-- puede pasar la transacción financiera de `SERVICE_COMPLETED` a `SETTLED`;
-- pero NO actualiza `service_requests.status` a `CLOSED`.
+### 5. Drift entre clientes HTTP de Reviews
 
-La transacción es una buena base para el futuro cierre porque Firestore ejecuta las operaciones atómicamente y puede reintentar la función transaccional ante concurrencia. citeturn0search0turn0search1
+`src/services/reviewApiService.ts` utiliza `POST /api/reviews`, mientras el flujo activo de `AppContext` utiliza `POST /api/reviews/create`.
 
-### 5. Se detectó drift entre dos clientes HTTP de Reviews
+**Severidad:** P1 — contract/runtime drift.
 
-Existe `src/services/reviewApiService.ts`, que publica en `POST /api/reviews`, mientras `AppContext.addReview()` publica en `POST /api/reviews/create`.
+### 6. `RequestsList` confirma que `REVIEW_PENDING` y `CLOSED` son estados visibles, pero no ofrece un segundo cierre
 
-El flujo activo auditado por `ReviewModal` utiliza `AppContext`, por lo que el camino efectivo es `/api/reviews/create`. El cliente `reviewApiService.ts` queda como contrato alternativo/legacy y debe consolidarse antes del cierre de la migración.
+`src/components/RequestsList.tsx` muestra explícitamente `Esperando reseña` cuando el estado es `REVIEW_PENDING` y `Trabajo cerrado` cuando es `CLOSED`. Para estados posteriores al trabajo no aparece un botón independiente de `CLOSE_JOB`; la acción disponible para el usuario en ese punto es la reseña.
 
-**Severidad:** P1 — contract/runtime drift, no P0.
+Esto aporta evidencia funcional a favor de que el cierre administrativo debe ocurrir como consecuencia del flujo de reseña, aunque la máquina de estados haya separado ambas acciones conceptualmente.
 
-### 6. No se encontró una acción frontend separada de `CLOSE_JOB`
+### 7. El modal de reseña no ejecuta ninguna segunda acción
 
-En el árbol funcional auditado aparecen `ReviewModal`, `reviewApiService`, `reviewRoute`, `reviewService` y la máquina de estados, pero no se demostró una UI activa que ejecute una acción backend independiente `CLOSE_JOB`.
+`ReviewModal` sólo ejecuta `addReview(...)` y luego `onClose()`. No llama a un endpoint de cierre ni dispara una acción `CLOSE_JOB`.
 
-Esto refuerza la conclusión de que actualmente existe un hueco de lifecycle: el usuario puede completar el trabajo y enviar la reseña, pero el agregado `service_requests` no queda materializado en `CLOSED` por el servicio de reseñas.
+## Conclusión de FASE 27.8
 
-## Decisión arquitectónica
+La evidencia frontend disponible refuerza **Opción A — reseña como acto de cierre administrativo**:
 
-El cierre canónico debe pertenecer al backend y debe existir **un solo writer** para `REVIEW_PENDING -> CLOSED`.
+```text
+COMPLETED
+   ↓
+REVIEW_PENDING
+   ↓
+POST /api/reviews/create
+   ↓
+transacción canónica
+   ├── crear/recuperar review
+   ├── actualizar reputación
+   ├── liquidar estado financiero si corresponde
+   ├── service_requests.status = CLOSED
+   └── eventOutbox CONEXA_SERVICE_CLOSED
+```
 
-Antes de implementarlo debemos decidir una de estas dos semánticas:
+No se encontró una UX que requiera que el usuario ejecute un segundo `CLOSE_JOB`.
 
-### Opción A — reseña como acto de cierre
+## Decisión pendiente antes de implementación
 
-`POST /api/reviews/create` ejecuta una única transacción que crea/recupera la reseña, verifica `REVIEW_PENDING`, actualiza `service_requests.status = CLOSED` y crea `CONEXA_SERVICE_CLOSED` en `eventOutbox`.
+La decisión funcional queda suficientemente respaldada para diseñar el writer único, pero antes de producir el evento deben definirse y probarse:
 
-Esta opción es coherente si el producto considera que, una vez que el cliente envía su evaluación, el servicio queda administrativamente cerrado.
+1. qué hacer si la reseña ya existe pero el servicio permanece `REVIEW_PENDING`;
+2. qué hacer si el servicio ya está `CLOSED` y llega un reintento;
+3. cómo garantizar que el `eventOutbox` se cree una sola vez;
+4. cómo resolver el drift `/api/reviews` vs `/api/reviews/create`;
+5. cómo cubrir dos envíos concurrentes del mismo cliente.
 
-### Opción B — cierre explícito separado
-
-La reseña sólo crea la evaluación y mantiene `REVIEW_PENDING`. Un endpoint backend separado `CLOSE_JOB` ejecuta el cierre después de una acción explícita del cliente/profesional o de una política automática.
-
-No debe implementarse esta opción sin encontrar primero una necesidad funcional real para un segundo acto del usuario.
-
-## Recomendación de auditoría
-
-Con el estado actual del producto, **Opción A es la candidata más coherente**, pero todavía se clasifica como decisión de arquitectura pendiente hasta revisar el comportamiento de `RequestsList`/historial de trabajos y cualquier UX que dependa de `REVIEW_PENDING`.
-
-No producir `CONEXA_SERVICE_CLOSED` hasta que esa decisión esté fijada y cubierta por pruebas de concurrencia/idempotencia.
-
-## Reglas de implementación futura
-
-El writer canónico deberá:
-
-1. autenticar por Firebase UID;
-2. verificar que el UID corresponde al `clientId` de la solicitud;
-3. verificar profesional asignado;
-4. aceptar sólo `REVIEW_PENDING` como cierre normal;
-5. crear o recuperar la reseña mediante su ID determinístico;
-6. actualizar `service_requests.status = CLOSED` en la misma transacción;
-7. crear `eventOutbox` en esa misma transacción si el evento ya tiene consumidor real;
-8. evitar efectos externos dentro del callback transaccional;
-9. tolerar reintentos y dos solicitudes concurrentes sin duplicar reseñas, cierres ni eventos.
-
-Firebase documenta que las funciones transaccionales pueden ejecutarse más de una vez y que las operaciones atómicas no aplican parcialmente; por eso la lógica debe depender del estado persistido y ser idempotente. citeturn0search0turn0search6
+Firestore serializa transacciones y resuelve la contención mediante reintentos o fallo controlado; el diseño debe depender del estado persistido y no de efectos externos dentro del callback. citeturn0search0turn0search1
 
 ## Severidad
 
 - **P1 — lifecycle incompleto:** no existe writer demostrado para `REVIEW_PENDING -> CLOSED`.
-- **P1 — contract drift:** `reviewApiService.ts` usa `/api/reviews`, mientras el flujo activo de `AppContext` usa `/api/reviews/create`.
-- **P1 — event readiness:** `CONEXA_SERVICE_CLOSED` continúa reservado y no debe producirse aún.
+- **P1 — contract drift:** existen dos rutas HTTP conceptuales para Reviews.
+- **P1 — event readiness:** `CONEXA_SERVICE_CLOSED` continúa reservado hasta implementar y probar el writer.
 - **Sin P0:** no se detectó en esta fase una pérdida financiera inmediata.
 
-## Próximo paso — FASE 27.8
+## Próximo paso — FASE 27.9
 
-Auditar `RequestsList`, historial de trabajos y cualquier selector de estado para comprobar qué UX espera el producto después de publicar una reseña. Si no existe una necesidad de acción adicional, cerrar el contrato con **reseña = cierre administrativo** y diseñar el writer transaccional único antes de crear el productor `CONEXA_SERVICE_CLOSED`.
+Diseñar el contrato exacto del writer canónico de cierre y sus pruebas de idempotencia/concurrencia. Después de validar ese contrato, implementar una única ruta HTTP de Reviews y el productor transaccional `CONEXA_SERVICE_CLOSED`.
 
 ## Referencias inspeccionadas
 
 - `src/domain/jobStateMachine.ts`
 - `src/components/ReviewModal.tsx`
+- `src/components/RequestsList.tsx`
 - `src/context/AppContext.tsx`
 - `src/services/reviewApiService.ts`
 - `src/server/reviewRoute.ts`
