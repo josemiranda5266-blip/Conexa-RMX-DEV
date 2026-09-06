@@ -88,3 +88,60 @@ test('CONEXA review: concurrent writes converge to one review and atomically clo
   assert.equal((await transactionRef.get()).data()?.status, 'SETTLED');
   assert.equal((await requestRef.get()).data()?.status, 'CLOSED');
 });
+
+test('CONEXA review: existing review plus REVIEW_PENDING repairs interrupted settlement and closes atomically', async () => {
+  requireEmulator();
+
+  const db = getAdminDb();
+  const serviceRequestId = 'service-review-existing-test';
+  const clientId = 'client-review-existing-test';
+  const professionalId = 'professional-review-existing-test';
+  const requestRef = db.collection('service_requests').doc(serviceRequestId);
+  const transactionRef = db.collection('transactions').doc('transaction-review-existing-test');
+  const reviewRef = db.collection('reviews').doc(
+    reviewIdForService(clientId, professionalId, serviceRequestId),
+  );
+
+  await Promise.all([
+    requestRef.set({
+      id: serviceRequestId,
+      clientId,
+      assignedProfessionalId: professionalId,
+      status: 'REVIEW_PENDING',
+    }),
+    db.collection('users').doc(clientId).set({ id: clientId, name: 'Cliente Retry', isBlocked: false }),
+    db.collection('users').doc(professionalId).set({
+      id: professionalId,
+      name: 'Profesional Retry',
+      isBlocked: false,
+      rating: 5,
+      reviewCount: 1,
+    }),
+    transactionRef.set({
+      id: transactionRef.id,
+      serviceRequestId,
+      status: 'SERVICE_COMPLETED',
+      settlementStatus: 'PENDING',
+    }),
+    reviewRef.set({
+      id: reviewRef.id,
+      clientId,
+      professionalId,
+      serviceRequestId,
+      overallRating: 5,
+    }),
+  ]);
+
+  const result = await saveProfessionalReview(clientId, {
+    ...reviewInput,
+    professionalId,
+    serviceRequestId,
+  });
+
+  assert.equal(result.created, false);
+  assert.equal(result.review.id, reviewRef.id);
+  assert.equal((await requestRef.get()).data()?.status, 'CLOSED');
+  assert.equal((await transactionRef.get()).data()?.status, 'SETTLED');
+  assert.equal((await transactionRef.get()).data()?.settlementReason, 'REVIEW_COMPLETED');
+  assert.equal((await db.collection('reviews').where('serviceRequestId', '==', serviceRequestId).get()).size, 1);
+});
