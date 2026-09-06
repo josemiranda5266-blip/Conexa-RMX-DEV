@@ -1,111 +1,102 @@
-# FASE 28 — DISEÑO E IMPLEMENTACIÓN DEL CIERRE ATÓMICO DE SERVICIO
+# FASE 28/29 — CIERRE ATÓMICO E IDEMPOTENCIA DEL SERVICIO
 
 **Proyecto:** CONEXA-RMX-DEV  
 **Rama:** `integration/conexa-unified`  
 **Fecha:** 2026-09-06  
-**Estado:** VERIFICACIÓN POST-CAMBIO — PASS
+**Estado:** FASE 28 PASS — FASE 29 VERIFICACIÓN PENDIENTE
 
-## 1. Gate previo
+## 1. FASE 28 — gate aprobado
 
 La implementación del cierre `REVIEW_PENDING -> CLOSED` quedó desbloqueada después de obtener evidencia local contra Firestore Emulator.
 
-Comando ejecutado antes del cambio:
+Comando ejecutado después de la implementación:
 
 ```bash
 pnpm test:conexa-review-emulator
 ```
 
-**Resultado:** PASS.
-
-La ejecución levantó Firestore Emulator con el proyecto demo `demo-conexa-unified` y terminó con código 0. Se demostró una sola reseña, un solo incremento de `reviewCount`, una sola liquidación y el mismo `reviewId` determinista ante dos escrituras concurrentes.
-
-## 2. Estado implementado
-
-`saveProfessionalReview()` continúa utilizando una única transacción Firestore y ahora:
-
-- mantiene el `reviewId` determinista;
-- crea reseña, reputación, proyección pública, Radar y liquidación dentro de la misma transacción;
-- registra `settlementReason: 'REVIEW_COMPLETED'` al liquidar por reseña;
-- cambia `REVIEW_PENDING -> CLOSED` dentro de esa misma transacción;
-- si una segunda llamada encuentra la reseña ya creada y el servicio sigue `REVIEW_PENDING`, completa únicamente el cierre dentro de la misma transacción;
-- si el servicio ya está `CLOSED` y la reseña existe, devuelve idempotentemente sin efectos secundarios;
-- conserva la compatibilidad existente para `COMPLETED`: puede crear la reseña, pero no cierra directamente desde `COMPLETED`.
-
-Firestore documenta que las transacciones son atómicas y que ante modificaciones concurrentes la operación puede reintentarse completa; por eso el cierre se mantiene dentro de la misma transacción y no como escritura posterior. citeturn0search0turn0search1
-
-## 3. Máquina de estados
-
-La máquina canónica define:
-
-```text
-COMPLETED -> REVIEW_PENDING -> CLOSED
-```
-
-`SUBMIT_REVIEW` permite `COMPLETED -> REVIEW_PENDING` y `CLOSE_JOB` permite `REVIEW_PENDING -> CLOSED`.
-
-La implementación actual no inventa una transición `COMPLETED -> CLOSED`: solamente cierra cuando el estado persistido es `REVIEW_PENDING`.
-
-## 4. Matriz implementada
-
-| Estado | Reseña | Comportamiento |
-|---|---|---|
-| `REVIEW_PENDING` | no existe | crea reseña + reputación + liquidación si corresponde + `CLOSED`, atómicamente |
-| `REVIEW_PENDING` | existe | no duplica efectos; completa `CLOSED` de forma idempotente |
-| `CLOSED` | existe | éxito idempotente, sin efectos secundarios |
-| `CLOSED` | no existe | no se inventa una reseña; la ruta normal no repara silenciosamente |
-| `COMPLETED` | no existe | conserva compatibilidad: crea reseña pero permanece fuera del cierre atómico hasta `REVIEW_PENDING` |
-
-## 5. Prueba post-cambio — PASS
-
-Se ejecutó nuevamente, después de la implementación:
-
-```bash
-pnpm test:conexa-review-emulator
-```
-
-Resultado observado en consola:
+Resultado observado:
 
 ```text
 ✔ CONEXA review: two concurrent writes converge to one review
 ℹ tests 1
 ℹ pass 1
 ℹ fail 0
-ℹ cancelled 0
-ℹ skipped 0
-ℹ todo 0
 + Script exited successfully (code 0)
 ```
 
-El emulador utilizó `demo-conexa-unified` y se apagó correctamente al finalizar.
+El emulador utilizó el proyecto demo `demo-conexa-unified`. La prueba confirmó una sola reseña, un solo incremento de `reviewCount`, una sola liquidación, `settlementReason: 'REVIEW_COMPLETED'`, estado `CLOSED` y `reviewId` determinista ante dos escrituras concurrentes.
 
-La prueba confirmó nuevamente:
+La salida incluyó `MetadataLookupWarning`, pero no produjo fallo (`fail 0`, código 0). Se mantiene como observación de entorno.
 
-- dos escrituras concurrentes convergen en una sola reseña;
-- no hay doble incremento de reputación;
-- no hay doble liquidación;
-- el `reviewId` determinista converge;
-- el proceso termina con código 0.
+## 2. Implementación vigente
 
-**Nota:** la salida contiene `MetadataLookupWarning`, pero no produjo fallo: `pass 1`, `fail 0`, código 0. Se mantiene como observación de entorno para una futura limpieza, no como fallo de la prueba.
+`saveProfessionalReview()` utiliza una única transacción Firestore y:
+
+- mantiene `reviewId` determinista;
+- crea reseña, reputación, proyección pública, Radar y liquidación dentro de la misma transacción;
+- registra `settlementReason: 'REVIEW_COMPLETED'` al liquidar por reseña;
+- cambia `REVIEW_PENDING -> CLOSED` en la misma transacción;
+- si una segunda llamada encuentra la reseña ya creada y el servicio sigue `REVIEW_PENDING`, completa el cierre;
+- si la reseña ya existe y `REVIEW_PENDING` persiste, ahora también busca una transacción `SERVICE_COMPLETED` y completa la liquidación antes del cierre. Esto cubre el caso de una interrupción lógica entre creación de reseña y liquidación;
+- si el servicio ya está `CLOSED` y la reseña existe, mantiene un no-op idempotente;
+- no inventa `COMPLETED -> CLOSED`.
+
+Firestore documenta atomicidad de transacciones y reintentos ante contención. citeturn0search0turn0search1
+
+## 3. FASE 29 — hallazgo y corrección preventiva
+
+Durante la revisión posterior al PASS se detectó un caso de recuperación que la primera prueba no cubría:
+
+```text
+REVIEW_PENDING
+   + reseña ya existente
+   + transaction = SERVICE_COMPLETED
+              ↓
+        retry de la operación
+```
+
+La versión anterior cerraba el servicio pero no liquidaba esa transacción si la reseña ya existía. Eso podía dejar inconsistencia entre servicio cerrado y transacción pendiente.
+
+Se corrigió `src/server/reviewService.ts` para que, únicamente cuando el servicio sigue `REVIEW_PENDING`, el retry busque `SERVICE_COMPLETED`, lo pase a `SETTLED` con `settlementReason: 'REVIEW_COMPLETED'` y cierre el servicio en la misma transacción.
+
+No se modifica la rama `CLOSED`, que continúa siendo un no-op idempotente.
+
+## 4. Prueba FASE 29 agregada
+
+`tests/conexa-review-concurrency.emulator.test.ts` ahora contiene además el escenario:
+
+- reseña existente;
+- servicio `REVIEW_PENDING`;
+- transacción `SERVICE_COMPLETED`;
+- retry de `saveProfessionalReview()`;
+- expectativa: `created === false`, una sola reseña, transacción `SETTLED`, `settlementReason === 'REVIEW_COMPLETED'` y servicio `CLOSED`.
+
+**Esta prueba ampliada todavía NO fue ejecutada.** No se declara PASS de FASE 29 hasta ejecutar el comando contra el Emulator.
+
+## 5. Matriz de estados
+
+| Estado | Reseña | Comportamiento objetivo |
+|---|---|---|
+| `REVIEW_PENDING` | no existe | crear + reputación + liquidación si corresponde + `CLOSED`, atómico |
+| `REVIEW_PENDING` | existe | recuperar liquidación pendiente si existe + `CLOSED`, sin duplicar reseña/reputación |
+| `CLOSED` | existe | no-op idempotente |
+| `CLOSED` | no existe | anomalía; no reparar silenciosamente |
+| `COMPLETED` | no existe | compatibilidad histórica; no cerrar directamente |
 
 ## 6. Evento `CONEXA_SERVICE_CLOSED`
 
-`packages/shared-events` reserva `CONEXA_SERVICE_CLOSED`, pero todavía no existe evidencia suficiente de productor y consumidor operativo con replay/recovery.
+`packages/shared-events` reserva `CONEXA_SERVICE_CLOSED`, pero todavía no existe evidencia suficiente de productor + consumidor + replay/recovery operativo.
 
 Por seguridad de contrato, **no se emite todavía** desde `saveProfessionalReview()`.
 
-## 7. Riesgos pendientes
+## 7. Próximos gates
 
-1. Añadir casos explícitos para dos cierres concurrentes y `CLOSED` con reseña existente.
-2. Definir y probar la anomalía `CLOSED` sin reseña.
-3. Auditar el contrato completo de `CONEXA_SERVICE_CLOSED` antes de emitir outbox.
-4. Validar el comportamiento de la ruta HTTP completa, además del servicio de dominio.
-5. Considerar una prueba posterior contra un entorno Firestore real para diferencias que el Emulator no reproduce completamente.
+1. Ejecutar `pnpm test:conexa-review-emulator` con la prueba FASE 29 ampliada.
+2. Añadir y ejecutar dos cierres concurrentes.
+3. Añadir y ejecutar `CLOSED + reseña existente` como no-op.
+4. Añadir y ejecutar `CLOSED + sin reseña` como anomalía explícita.
+5. Auditar contrato completo de `CONEXA_SERVICE_CLOSED` antes de producir outbox.
+6. Validar ruta HTTP completa además del servicio de dominio.
 
-Firebase advierte que el Emulator no implementa todo el comportamiento transaccional de producción y puede diferir especialmente en escenarios de múltiples escrituras concurrentes; por ello este PASS es un gate local necesario, no una certificación de producción. citeturn0search2
-
-## 8. Criterio de salida
-
-**FASE 28 — PASS para el escenario de concurrencia e implementación post-cambio.**
-
-Quedan pendientes los escenarios adicionales y la auditoría del evento antes de considerar cerrado todo el ciclo de servicio.
+Firebase garantiza aislamiento serializable para transacciones, pero el Emulator no sustituye una validación de producción; este proceso conserva el Emulator como gate local de seguridad. citeturn0search1
