@@ -22,6 +22,7 @@ export interface EventOutboxRecord<TPayload = unknown> extends DomainEvent<TPayl
   status: 'PENDING' | 'PUBLISHED' | 'FAILED';
   attempts: number;
   lastError?: string | null;
+  replayCount?: number;
 }
 
 function isNonEmptyString(value: unknown): value is string {
