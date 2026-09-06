@@ -2,7 +2,7 @@
 
 **Fecha:** 2026-09-06  
 **Rama:** `integration/conexa-unified`  
-**HEAD auditado:** `13255c6f524a111645497a60eb1619b152ea80a6`  
+**HEAD auditado:** `66fdaa6d548f2dfd080c6495075c07a84b21d9bd`  
 **Estado:** ABIERTO — requiere corrección antes de cerrar la fase de eventos.
 
 ## Objetivo
@@ -13,15 +13,9 @@ Determinar si `CONEXA_SERVICE_CLOSED` tiene hoy una transición de dominio real 
 
 ### 1. La máquina de estados define `CLOSED`, pero el cierre no tiene implementación demostrada
 
-`src/domain/jobStateMachine.ts` define:
+`src/domain/jobStateMachine.ts` define `COMPLETED -> REVIEW_PENDING -> CLOSED` y `CLOSE_JOB` como transición válida únicamente desde `REVIEW_PENDING` hacia `CLOSED`.
 
-- `COMPLETED`
-- `REVIEW_PENDING`
-- `CLOSED`
-
-Y define `CLOSE_JOB` como transición válida únicamente desde `REVIEW_PENDING` hacia `CLOSED`.
-
-Conclusión: el contrato de dominio reconoce un cierre posterior a la reseña, pero la implementación efectiva debe localizarse y verificarse antes de producir un evento de cierre.
+Se inspeccionó el árbol completo de la rama `integration/conexa-unified` y no se encontró un writer backend separado que materialice `REVIEW_PENDING -> CLOSED`.
 
 ### 2. La ruta de completar trabajo sí implementa `IN_PROGRESS -> REVIEW_PENDING`
 
@@ -51,6 +45,12 @@ La regla de `service_requests` permite al cliente modificar únicamente un conju
 
 Esto es correcto desde el punto de vista de autoridad, pero implica que el cierre canónico debe quedar explícitamente en backend.
 
+### 6. Conclusión reforzada por el inventario de la rama
+
+El árbol completo auditado muestra que `apps/api-conexa` actualmente contiene únicamente el consumidor de eventos y su servidor interno; el runtime de negocio de CONEXA sigue concentrado en el servidor legado/unificado y servicios `src/server/*`.
+
+No se encontró un segundo cierre oculto en `apps/api-conexa` que justifique producir `CONEXA_SERVICE_CLOSED` ahora.
+
 ## Decisión de arquitectura
 
 **NO producir todavía `CONEXA_SERVICE_CLOSED`.**
@@ -59,15 +59,19 @@ El evento permanece como contrato reservado en `shared-events`, pero no debe ten
 
 `REVIEW_PENDING -> CLOSED`
 
-La transición debe:
+La transición deberá:
 
 1. verificar identidad/autoridad;
 2. verificar que la solicitud esté en `REVIEW_PENDING`;
 3. crear/confirmar la reseña de forma idempotente;
 4. actualizar `service_requests.status = CLOSED` dentro de la misma transacción;
-5. crear el evento `CONEXA_SERVICE_CLOSED` en `eventOutbox` dentro de esa misma transacción si existe un consumidor real;
+5. crear `eventOutbox` dentro de esa misma transacción sólo cuando exista un consumidor real;
 6. usar un identificador único del evento, sin duplicar `id`/`eventId` innecesariamente;
 7. mantener la operación segura ante reintentos y concurrencia.
+
+Firestore garantiza atomicidad de las transacciones y puede reejecutar una función transaccional ante contención, por lo que la operación no debe depender de efectos externos dentro del callback transaccional. citeturn0search0turn0search2
+
+Si el evento se vuelve retryable/asíncrono, debe tratarse como entrega potencialmente duplicada y el consumidor debe ser idempotente. Firebase documenta semántica de entrega al menos una vez y recomienda idempotencia para funciones event-driven con reintentos. citeturn0search1turn0search5
 
 ## Severidad
 
@@ -77,7 +81,7 @@ La transición debe:
 
 ## Próximo paso
 
-Auditar y, si corresponde, corregir el writer canónico de `REVIEW_PENDING -> CLOSED`. Después de eso se debe decidir el consumidor real de `CONEXA_SERVICE_CLOSED` y agregar pruebas de concurrencia/idempotencia antes de activar su productor.
+Auditar el contrato funcional de `reviewService` y del cliente de reseñas para decidir quién tiene autoridad para cerrar el servicio y, si corresponde, implementar después un único writer canónico `REVIEW_PENDING -> CLOSED`. Sólo después se diseñará el productor de `CONEXA_SERVICE_CLOSED` y sus pruebas de concurrencia/idempotencia.
 
 ## Referencias inspeccionadas
 
@@ -87,3 +91,4 @@ Auditar y, si corresponde, corregir el writer canónico de `REVIEW_PENDING -> CL
 - `src/server/reviewPolicy.ts`
 - `firestore.rules`
 - `server.ts`
+- árbol completo de `integration/conexa-unified`
