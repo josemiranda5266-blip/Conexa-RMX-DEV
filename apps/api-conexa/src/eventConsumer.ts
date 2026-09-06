@@ -81,7 +81,7 @@ export async function processNexoraOrderCompleted(limit = 20): Promise<number> {
   for (const eventDoc of snapshot.docs) {
     try {
       const event = buildDomainEvent(eventDoc.data() || {});
-      let result: EventIdempotencyResult = 'ALREADY_PROCESSED';
+      let result: EventIdempotencyResult | undefined;
       await dispatchDomainEvent(event, {
         NEXORA_ORDER_COMPLETED: async domainEvent => {
           result = await handleNexoraOrderCompleted(domainEvent);
