@@ -14,6 +14,7 @@
     "test:event-dispatcher": "tsx --test tests/domain-event-dispatcher.test.ts",
     "test:outbox-recovery": "tsx --test tests/outbox-recovery.test.ts",
     "test:event-idempotency-emulator": "firebase emulators:exec --project demo-conexa-unified --only firestore \"pnpm exec tsx --test tests/event-idempotency.emulator.test.ts\"",
+    "test:nexora-event-consumer-emulator": "firebase emulators:exec --project demo-conexa-unified --only firestore \"pnpm exec tsx --test tests/nexora-event-consumer.emulator.test.ts\"",
     "build:legacy-conexa": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs"
   },
   "dependencies": {
