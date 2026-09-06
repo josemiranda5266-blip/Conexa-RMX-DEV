@@ -23,51 +23,16 @@ export function getFirebaseAdmin(): any {
   // Safe emulator path: only a demo-* project with an explicit emulator host.
   // Firebase recommends demo projects for emulator tests, and the Admin SDK
   // automatically routes Firestore to FIRESTORE_EMULATOR_HOST.
-  if (
-    firestoreEmulatorHost &&
-    /^demo-[a-z0-9-]+$/i.test(emulatorProjectId || '')
-  ) {
-    try {
-      firebaseAdminApp = firebaseAdmin.initializeApp({ projectId: emulatorProjectId });
-      return firebaseAdminApp;
-    } catch (error: any) {
-      console.error('[FIREBASE ADMIN] Emulator initialization failed:', error?.message || error);
-      return null;
+  if (firestoreEmulatorHost) {
+    if (!emulatorProjectId?.startsWith('demo-')) {
+      throw new Error('FIRESTORE_EMULATOR_REQUIRES_DEMO_PROJECT');
     }
   }
 
-  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT?.trim();
-  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
-  let credential: any = null;
-
-  if (serviceAccount) {
-    try {
-      const parsed = serviceAccount.startsWith('{')
-        ? JSON.parse(serviceAccount)
-        : JSON.parse(Buffer.from(serviceAccount, 'base64').toString('utf8'));
-      credential = firebaseAdmin.cert(parsed);
-    } catch (error: any) {
-      console.error('[FIREBASE ADMIN] Invalid FIREBASE_SERVICE_ACCOUNT:', error?.message || error);
-    }
-  }
-
-  if (!credential && credentialsPath) {
-    try {
-      credential = firebaseAdmin.applicationDefault();
-    } catch (error: any) {
-      console.error('[FIREBASE ADMIN] GOOGLE_APPLICATION_CREDENTIALS unavailable:', error?.message || error);
-    }
-  }
-
-  if (!credential) {
-    try {
-      credential = firebaseAdmin.applicationDefault();
-    } catch {
-      // Application Default Credentials are unavailable.
-    }
-  }
-
-  if (!credential) return null;
+  const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  const credential = serviceAccountJson
+    ? firebaseAdmin.credential.cert(JSON.parse(serviceAccountJson))
+    : firebaseAdmin.credential.applicationDefault();
 
   try {
     firebaseAdminApp = firebaseAdmin.initializeApp({ credential });
@@ -79,7 +44,7 @@ export function getFirebaseAdmin(): any {
 }
 
 function getFirestoreDatabaseId(): string {
-  if (cachedDatabaseId) return cachedDatabaseId;
+  if (cachedDatabaseId !== null) return cachedDatabaseId;
   try {
     const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
     if (fs.existsSync(configPath)) {
