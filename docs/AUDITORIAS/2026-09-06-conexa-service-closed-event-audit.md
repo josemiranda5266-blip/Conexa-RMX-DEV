@@ -3,191 +3,155 @@
 **Proyecto:** Conexa-RMX-DEV / Super App  
 **Rama:** `integration/conexa-unified`  
 **Fecha:** 2026-09-06  
-**Estado:** **FASE 30.3 IMPLEMENTADA — DISPATCHER COMÚN; PRODUCCIÓN DEL EVENTO AÚN BLOQUEADA**
+**Estado:** **FASE 30.4 IMPLEMENTADA — POLÍTICA DE RETRY/REPLAY; EJECUCIÓN LOCAL PENDIENTE**
 
 ## 1. Objetivo
 
 Auditar y cerrar el contrato transversal que permitirá que CONEXA publique `CONEXA_SERVICE_CLOSED` hacia el mecanismo de Outbox/Eventos sin conectar todavía el productor al cierre de servicio.
 
-## 2. Hallazgos iniciales
+## 2. Hallazgos y estado
 
 ### P1 — El evento estaba declarado pero no tenía payload canónico propio
 
-`packages/shared-events/src/index.ts` declaraba `CONEXA_SERVICE_CLOSED` dentro de `DomainEventType`, pero no existía una interfaz específica para su payload ni una validación de runtime.
-
-**Resuelto:** se añadió `ConexaServiceClosedEvent`, factory y validator.
+**Resuelto:** `ConexaServiceClosedEvent`, factory y validator compartidos.
 
 ### P1 — Duplicación de identidad del evento
 
-El contrato común tiene `DomainEvent.id`, mientras que `NexoraOrderCompletedEvent` también contiene `payload.eventId`.
+**Resuelto para el nuevo evento:** la identidad canónica es exclusivamente `DomainEvent.id`; el payload de `CONEXA_SERVICE_CLOSED` no contiene `eventId`.
 
-**Decisión para el nuevo evento:** la identidad canónica será exclusivamente `DomainEvent.id`; `ConexaServiceClosedEvent` no contiene `eventId`.
+### P1 — Outbox tenía `FAILED` pero no recuperación formal
 
-El contrato legado de Nexora no se modificó todavía para evitar un cambio transversal innecesario antes de cerrar su compatibilidad.
+**FASE 30.4 implementada:** se añadió `apps/api-conexa/src/outboxRecovery.ts` con:
 
-### P1 — Outbox existe y tiene estados, pero la recuperación de `FAILED` no está cerrada
+- clasificación explícita `RETRYABLE | PERMANENT`;
+- límite común de cinco intentos;
+- transición determinista de error;
+- `FAILED` como estado terminal para errores permanentes o agotamiento del límite;
+- replay manual únicamente desde `FAILED` y con autorización explícita;
+- replay conserva el `DomainEvent.id` y reinicia solamente el presupuesto de intentos de esa entrega;
+- `replayCount` permite conservar trazabilidad de cuántos replays manuales tuvo el evento;
+- `lastError` se limpia al reencolar;
+- el replay no se habilita todavía desde HTTP ni desde un scheduler.
 
-`EventOutboxRecord` contempla `PENDING | PUBLISHED | FAILED` y el consumidor de Nexora mueve el evento a `FAILED` después de cinco intentos. Sin embargo, el consumidor normal solamente consulta `status == PENDING`.
+Se eligió **fail-closed** para códigos desconocidos: un error no clasificado no entra en un bucle automático. Esta decisión evita convertir un bug permanente en reintentos indefinidos. Firebase recomienda que los retries se utilicen para fallos transitorios, que exista una condición de terminación y que el procesamiento sea idempotente. citeturn0search0
 
-**Pendiente:** política explícita de replay/recovery con autorización, auditoría e idempotencia.
+### P1 — No existe todavía scheduler/worker productivo demostrado
 
-### P1 — No existe scheduler/worker demostrado para procesar automáticamente el Outbox
+**Pendiente.** No se agrega `setInterval`, cron en proceso ni scheduler en esta fase.
 
-Existe `POST /internal/events/process-nexora`, protegido mediante `x-internal-event-secret`, pero el `package.json` auditado no contiene un worker/scheduler dedicado que invoque automáticamente este procesamiento.
+### P1 — Consumer actual especializado
 
-**Pendiente:** cerrar mecanismo operacional de entrega automática.
-
-### P1 — El consumer actual no es genérico
-
-`apps/api-conexa/src/eventConsumer.ts` está especializado en `NEXORA_ORDER_COMPLETED`.
-
-**FASE 30.3 implementada:** se añadió `apps/api-conexa/src/eventDispatcher.ts`, un dispatcher común que valida el envelope antes del routing y selecciona handlers mediante `DomainEventType`. No se conectó todavía al consumer productivo para evitar modificar el flujo Nexora antes de cerrar la política de retry/replay.
+**Parcialmente resuelto:** FASE 30.3 añadió dispatcher común. El consumer Nexora legado sigue especializado y todavía no se migra para evitar un cambio transversal antes de validar compatibilidad.
 
 ### P1 — Validación de runtime insuficiente
 
-El consumer actual convierte `payload` mediante cast a `NexoraOrderCompletedEvent` y solamente valida manualmente campos mínimos.
+**Resuelto para `CONEXA_SERVICE_CLOSED`:** envelope y payload tienen validación compartida antes del routing.
 
-**Resuelto para el nuevo contrato:** el contrato compartido valida el envelope completo para `CONEXA_SERVICE_CLOSED`: `id`, `type`, `occurredAt`, `producer` y `payload`. Además, exige `producer === 'CONEXA'` para este evento.
+### P1 — Idempotencia durable
 
-La migración del consumer legado Nexora a validación compartida queda pendiente para una fase específica de compatibilidad.
+**Pendiente de integración.** El dispatcher mantiene `DomainEvent.id` como identidad canónica, pero no persiste por sí mismo un ledger de eventos procesados. La idempotencia durable deberá quedar en el handler/consumer mediante transacción y/o clave natural del efecto.
 
-### P2 — Inconsistencia menor en `lastError`
+Firestore puede reejecutar una función transaccional ante contención, por lo que el código transaccional debe tolerar múltiples ejecuciones. Además, los flujos event-driven tienen semántica de entrega al menos una vez y deben diseñarse de forma idempotente. citeturn0search1turn0search2
 
-El consumer escribe `lastError: null` al publicar correctamente.
-
-**Resuelto:** `EventOutboxRecord.lastError` acepta explícitamente `string | null`.
-
-### P1 — Riesgo de semántica de evento descartado
-
-El consumer actual puede marcar `NEXORA_ORDER_COMPLETED` como `PUBLISHED` cuando el pedido no está `COMPLETED`, registrando `EVENT_STALE_ORDER_NOT_COMPLETED`.
-
-**Pendiente:** definir clasificación de errores terminales versus reintentables para el dispatcher común.
-
-## 3. Contrato canónico aprobado
-
-Se mantiene en `packages/shared-events/src/index.ts`:
-
-```ts
-interface ConexaServiceClosedEvent {
-  serviceRequestId: string;
-  clientId: string;
-  professionalId: string;
-  closedAt: string;
-  closeReason: 'REVIEW_COMPLETED';
-}
-```
-
-El envelope conserva una única identidad de evento:
-
-```ts
-interface DomainEvent<TPayload> {
-  id: string;
-  type: DomainEventType;
-  occurredAt: string;
-  producer: 'CONEXA' | 'NEXORA';
-  payload: TPayload;
-}
-```
-
-Funciones disponibles:
-
-- `isConexaServiceClosedEvent(value)` — valida payload.
-- `createConexaServiceClosedEvent(input)` — construye payload canónico.
-- `isDomainEvent(value)` — valida envelope y delega el payload según el tipo.
-- `isConexaServiceClosedDomainEvent(value)` — valida específicamente `CONEXA_SERVICE_CLOSED` producido por CONEXA.
-- `EventOutboxRecord.lastError?: string | null` — convención normalizada.
-
-## 4. FASE 30.3 — Dispatcher común
+## 3. FASE 30.4 — Política de Retry/Replay
 
 Se añadió:
 
-`apps/api-conexa/src/eventDispatcher.ts`
+`apps/api-conexa/src/outboxRecovery.ts`
 
-Responsabilidades actuales:
+### Clasificación
 
-1. validar que la entrada sea un `DomainEvent` válido;
-2. validar específicamente que `CONEXA_SERVICE_CLOSED` tenga productor `CONEXA` y payload válido;
-3. enrutar por `DomainEventType` mediante un registry de handlers;
-4. rechazar tipos sin handler con `UNSUPPORTED_DOMAIN_EVENT_TYPE`;
-5. mantener `DomainEvent.id` como identidad/idempotency key canónica disponible para el consumidor.
+Códigos considerados transitorios:
 
-**Decisión importante:** el dispatcher es deliberadamente stateless. No marca eventos como procesados ni escribe Firestore. La idempotencia durable debe quedar en el consumer/handler mediante una operación transaccional sobre el `eventOutbox` y/o una clave natural del efecto producido. Esto evita fingir que un dispatcher en memoria resuelve entrega at-least-once.
+- `ABORTED`
+- `DEADLINE_EXCEEDED`
+- `RESOURCE_EXHAUSTED`
+- `UNAVAILABLE`
 
-Tampoco se modificó `reviewService.ts` ni se comenzó todavía a producir `CONEXA_SERVICE_CLOSED`.
+Códigos conocidos como terminales incluyen permisos, autenticación, argumentos inválidos, precondiciones, recurso inexistente y errores de contrato/evento.
 
-## 5. Pruebas agregadas para FASE 30.3
+Los errores desconocidos son terminales por defecto. La clasificación puede recibir además un error con `retryable: true|false`, permitiendo que una capa superior determine explícitamente la semántica sin depender del texto del mensaje.
+
+### Límite
+
+`OUTBOX_MAX_ATTEMPTS = 5`.
+
+Para un error reintentable:
+
+```text
+attempts < 5  → PENDING
+attempts >= 5 → FAILED
+```
+
+Para un error permanente:
+
+```text
+cualquier intento → FAILED
+```
+
+### Replay manual
+
+El replay exige:
+
+1. autorización explícita;
+2. estado actual `FAILED`;
+3. nuevo presupuesto de entrega (`attempts = 0`);
+4. `lastError = null`;
+5. incremento de `replayCount`;
+6. conservación absoluta del `DomainEvent.id`;
+7. registro opcional de actor y motivo.
+
+No se implementó todavía un endpoint para ejecutar este replay. Eso se hará cuando exista una política de autorización administrativa y un mecanismo operacional auditado.
+
+## 4. Pruebas de FASE 30.4
 
 Se creó:
 
-`tests/domain-event-dispatcher.test.ts`
+`tests/outbox-recovery.test.ts`
 
 Escenarios:
 
-1. routing de `CONEXA_SERVICE_CLOSED` por `DomainEventType`;
-2. rechazo del envelope inválido antes de invocar handler;
-3. rechazo de tipo sin handler;
-4. repetición del mismo evento conserva exactamente el mismo `DomainEvent.id`, dejando explícito que la deduplicación durable pertenece al consumer.
+1. clasificación de errores transitorios y permanentes;
+2. retryable debajo del límite permanece `PENDING`;
+3. error permanente pasa inmediatamente a `FAILED`;
+4. retryable en el quinto intento pasa a `FAILED`;
+5. replay sin autorización es rechazado;
+6. replay de `PUBLISHED` es rechazado;
+7. replay autorizado conserva el ID, reinicia intentos y aumenta `replayCount`.
 
 Script:
 
-`pnpm test:event-dispatcher`
-
-**Ejecución local:** pendiente de confirmación por el entorno de desarrollo después de este commit.
-
-## 6. Evidencia local confirmada de FASE 30.2
-
-El usuario ejecutó en la rama `integration/conexa-unified`:
-
 ```text
-pnpm test:shared-events-contract
-
-✔ CONEXA_SERVICE_CLOSED contract accepts the canonical payload
-✔ CONEXA_SERVICE_CLOSED validator rejects missing identity and invalid close reason
-✔ CONEXA_SERVICE_CLOSED validator rejects malformed dates
-✔ CONEXA_SERVICE_CLOSED envelope requires canonical identity and producer
-✔ CONEXA_SERVICE_CLOSED envelope rejects invalid occurredAt and payload
-ℹ tests 5
-ℹ pass 5
-ℹ fail 0
-ℹ cancelled 0
-ℹ skipped 0
-ℹ todo 0
+pnpm test:outbox-recovery
 ```
 
-Resultado: **FASE 30.2 PASS — 5/5**.
+**Ejecución local:** pendiente de confirmación por el entorno de desarrollo.
 
-## 7. Aspectos positivos ya demostrados
+## 5. Decisiones de seguridad y arquitectura
 
-- El Outbox se crea dentro de la misma transacción que produce `NEXORA_ORDER_COMPLETED`.
-- El documento del Outbox tiene ID estable y estado explícito.
-- El consumer vuelve a leer transaccionalmente el evento antes de mutarlo.
-- La creación de `installationLeads/{orderId}` usa una clave natural que evita duplicación.
-- La ruta interna exige secreto y comparación `timingSafeEqual`.
-- La implementación de cierre de servicio de CONEXA ya fue validada con 5 escenarios concurrentes en Firestore Emulator.
-- El contrato compartido de `CONEXA_SERVICE_CLOSED` tiene validación de payload y envelope.
-- El dispatcher común no ejecuta efectos laterales fuera del handler, manteniendo la frontera entre routing y entrega durable.
+- No se habilita replay automático de `FAILED`.
+- No se agrega scheduler todavía.
+- No se modifica `reviewService.ts` todavía.
+- No se produce todavía `CONEXA_SERVICE_CLOSED`.
+- No se cambia el contrato legado de `NEXORA_ORDER_COMPLETED`.
+- No se permite que el replay cambie el `DomainEvent.id`; ese ID es la identidad estable del evento y debe seguir siendo la misma durante todas las entregas.
+- `replayCount` separa el historial de recuperación del contador de intentos de una entrega concreta.
 
-## 8. Gates restantes de FASE 30.x
+La decisión sigue la recomendación oficial de evitar retries infinitos y combinar retry con idempotencia. citeturn0search0turn0search2
 
-1. **Ejecutar `test:event-dispatcher` localmente.**
-2. Definir política `PENDING → PUBLISHED` y `PENDING → FAILED` con clasificación terminal/reintentable.
-3. Definir replay de `FAILED`, límites y autorización.
-4. Definir scheduler/worker de producción.
-5. Integrar el dispatcher con el consumer sin romper el flujo Nexora existente.
-6. Diseñar/validar idempotencia durable por `DomainEvent.id` y clave natural del efecto.
-7. Probar integración Outbox → dispatcher → consumer en emulator.
-8. Recién después modificar `reviewService.ts` para producir `CONEXA_SERVICE_CLOSED` dentro de la misma transacción del cierre.
+## 6. Gates restantes de FASE 30.x
 
-## 9. Decisión de arquitectura
+1. **Ejecutar `pnpm test:outbox-recovery`.**
+2. Diseñar autorización administrativa real para replay.
+3. Diseñar worker/scheduler productivo, preferentemente gestionado y no dependiente de un proceso web único.
+4. Integrar dispatcher + outbox + consumer sin romper Nexora.
+5. Implementar idempotencia durable por `DomainEvent.id` y clave natural del efecto.
+6. Probar integración Outbox → dispatcher → consumer en Firestore Emulator.
+7. Recién después modificar `reviewService.ts` para producir `CONEXA_SERVICE_CLOSED` dentro de la misma transacción del cierre.
 
-**FASE 30.3 implementada a nivel de routing, pero no habilitada en producción.**
-
-No se agrega todavía el productor `CONEXA_SERVICE_CLOSED`, no se añade scheduler y no se habilita replay hasta cerrar los estados y la política de retry.
-
-Firestore puede reejecutar una función de transacción cuando existe contención; por eso el código dentro de una transacción debe tolerar múltiples ejecuciones y no depender de efectos laterales externos. La documentación oficial también recomienda idempotencia para flujos con reintentos y entrega at-least-once. citeturn0search0turn0search1
-
-## 10. Resultado
+## 7. Resultado
 
 **FASE 30.2 — PASS confirmado localmente (5/5).**  
-**FASE 30.3 — IMPLEMENTADA; ejecución local pendiente.**  
-**Producción de `CONEXA_SERVICE_CLOSED`: BLOQUEADA hasta completar retry/replay, worker e integración.**
+**FASE 30.3 — PASS confirmado localmente (4/4).**  
+**FASE 30.4 — IMPLEMENTADA; ejecución local pendiente.**  
+**Producción de `CONEXA_SERVICE_CLOSED`: BLOQUEADA hasta completar worker, idempotencia durable e integración emulator.**
