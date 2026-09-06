@@ -3,28 +3,50 @@
 **Proyecto:** CONEXA-RMX-DEV  
 **Rama:** `integration/conexa-unified`  
 **Fecha:** 2026-09-06  
-**Estado:** DISEÑO PREVIO — NO IMPLEMENTADO
+**Estado:** GATE DE CONCURRENCIA APROBADO — CIERRE ATÓMICO AÚN NO IMPLEMENTADO
 
 ## 1. Gate previo
 
-La implementación del cierre `REVIEW_PENDING -> CLOSED` queda bloqueada hasta obtener evidencia local de que la prueba de concurrencia contra Firestore Emulator pasa.
+La implementación del cierre `REVIEW_PENDING -> CLOSED` quedó bloqueada hasta obtener evidencia local de que la prueba de concurrencia contra Firestore Emulator pasa.
 
-Comando preparado:
+Comando ejecutado:
 
 ```bash
 pnpm test:conexa-review-emulator
 ```
 
-La prueba debe demostrar como mínimo:
+**Resultado ejecutado el 2026-09-06:** PASS.
 
-- una sola reseña para dos escrituras concurrentes;
+Salida relevante:
+
+```text
+✔ CONEXA review: two concurrent writes converge to one review (33552.0274ms)
+ℹ tests 1
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 60072.7943
++  Script exited successfully (code 0)
+```
+
+La ejecución levantó Firestore Emulator con el proyecto demo `demo-conexa-unified` y terminó correctamente con código 0. El CLI informó explícitamente que el proyecto demo utiliza configuración emulada y que los servicios no emulados no pueden ser accedidos para ese proyecto.
+
+La prueba demostró:
+
+- una sola reseña ante dos escrituras concurrentes;
 - un solo incremento de `reviewCount`;
 - una sola liquidación de la transacción `SERVICE_COMPLETED`;
 - mismo `reviewId` determinista en ambas respuestas;
-- ausencia de acceso a producción;
+- ejecución contra Firestore Emulator del proyecto `demo-conexa-unified`, no contra el proyecto productivo;
 - el estado del servicio continúa `REVIEW_PENDING` mientras el cierre todavía no está implementado.
 
-No se registra PASS hasta ejecutar realmente el comando.
+### Evidencia y límite de la prueba
+
+El PASS es válido para el escenario de concurrencia implementado en `tests/conexa-review-concurrency.emulator.test.ts`. No equivale por sí solo a una certificación de comportamiento idéntico en producción: Firebase documenta que el Emulator no reproduce toda la semántica de transacciones de producción y puede diferir en escenarios de concurrencia. Cloud Firestore de producción sí garantiza aislamiento serializable y sus clientes de servidor reintentan transacciones ante contención. Por lo tanto, la prueba local es un gate necesario, pero no sustituye pruebas posteriores contra un entorno controlado de integración.
+
+La ejecución también mostró un `MetadataLookupWarning` de Node (`code = UNKNOWN`). No provocó fallo: el test terminó con `pass 1`, `fail 0` y código 0. Debe investigarse si vuelve a aparecer en ejecuciones posteriores, pero no bloquea este gate.
 
 ## 2. Estado actual auditado
 
@@ -56,7 +78,7 @@ El objetivo de FASE 28 es que el cierre efectivo se produzca de forma atómica c
 
 ## 5. Concurrencia requerida
 
-Antes de declarar la implementación segura se deben cubrir al menos:
+El gate ejecutado cubre el escenario base de dos escrituras concurrentes del mismo servicio. Antes de declarar la implementación completa y segura se deben cubrir además:
 
 1. doble click del mismo cliente;
 2. dos dispositivos simultáneos;
@@ -76,7 +98,7 @@ Por eso **no se debe emitir todavía** desde el writer de reseñas solamente par
 
 ## 7. Cambio mínimo propuesto
 
-Una vez aprobado el gate de concurrencia:
+Con el gate de concurrencia aprobado:
 
 - mantener el `reviewId` determinista;
 - mantener la escritura dentro de una única transacción Firestore;
@@ -89,7 +111,9 @@ Una vez aprobado el gate de concurrencia:
 
 ## 8. Criterio de salida
 
-FASE 28 no se considera cerrada hasta contar con evidencia ejecutada de:
+El gate de concurrencia de FASE 28 queda **APROBADO**.
+
+FASE 28 completa seguirá requiriendo evidencia ejecutada de:
 
 - 0 reseñas duplicadas;
 - 0 doble incremento de reputación;
@@ -98,4 +122,5 @@ FASE 28 no se considera cerrada hasta contar con evidencia ejecutada de:
 - transición atómica `REVIEW_PENDING -> CLOSED`;
 - retry idempotente;
 - comportamiento seguro de `CLOSED`;
-- sin acceso accidental a Firestore de producción durante las pruebas.
+- sin acceso accidental a Firestore de producción durante las pruebas;
+- contrato de `CONEXA_SERVICE_CLOSED` validado antes de emitir el evento.
