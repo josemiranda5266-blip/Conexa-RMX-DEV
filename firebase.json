@@ -5,6 +5,12 @@
   "storage": {
     "rules": "storage.rules"
   },
+  "functions": {
+    "source": "apps/event-worker",
+    "predeploy": [
+      "pnpm --filter @super-app/event-worker build"
+    ]
+  },
   "emulators": {
     "firestore": {
       "port": 8080
