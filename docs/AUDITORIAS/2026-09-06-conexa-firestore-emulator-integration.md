@@ -28,39 +28,51 @@ En ese caso se inicializa Firebase Admin con `projectId` y el SDK dirige Firesto
 
 Si esas condiciones no se cumplen, el flujo anterior de credenciales permanece intacto.
 
-Esto establece un fail-safe importante: la suite de concurrencia no puede saltar silenciosamente desde el entorno de prueba hacia un proyecto Firebase real.
+### 3. `package.json`
+
+Se agregó el runner reproducible:
+
+`pnpm test:conexa-review-emulator`
+
+que utiliza `firebase emulators:exec --project demo-conexa-unified --only firestore` y ejecuta la suite de concurrencia con `tsx`.
+
+### 4. `tests/conexa-review-concurrency.emulator.test.ts`
+
+La prueba ya no depende de que el shell establezca manualmente `NODE_ENV=test`. La barrera de seguridad de ejecución es:
+
+- `FIRESTORE_EMULATOR_HOST` presente;
+- `GCLOUD_PROJECT` o `FIREBASE_PROJECT_ID` con formato `demo-*`.
+
+Esto permite que `firebase emulators:exec` proporcione el contexto del emulator sin introducir sintaxis específica de Bash/PowerShell en el test.
 
 ## Base técnica
 
-Firebase documenta que el Admin SDK se conecta automáticamente al Firestore Emulator cuando está definido `FIRESTORE_EMULATOR_HOST`, y que el valor no debe incluir `http://`. Para entornos de prueba, Firebase recomienda proyectos `demo-*` porque no tienen recursos reales ni riesgo de modificar producción. citeturn0search2turn0search0
+Firebase documenta que el Admin SDK se conecta automáticamente al Firestore Emulator cuando está definido `FIRESTORE_EMULATOR_HOST`, y recomienda proyectos `demo-*` para pruebas. citeturn0search2turn0search0
 
-Firebase también documenta `firebase emulators:exec` como mecanismo para automatizar pruebas con arranque y apagado del emulador. citeturn0search0
+Firebase también documenta `firebase emulators:exec` como mecanismo para automatizar pruebas con arranque y apagado del emulador. citeturn0search0turn0search5
 
 ## Suite preparada
 
-`tests/conexa-review-concurrency.emulator.test.ts` ya contiene la prueba principal de doble escritura concurrente.
+`tests/conexa-review-concurrency.emulator.test.ts` contiene la prueba principal de doble escritura concurrente.
 
 La suite se niega a ejecutarse si:
 
-- no está en `NODE_ENV=test`;
 - no existe `FIRESTORE_EMULATOR_HOST`;
 - el project ID no comienza con `demo-`.
 
-Además verifica el estado persistido después de las dos operaciones: una sola review, `reviewCount=1`, transaction `SETTLED`, mismo review ID en ambas respuestas y `service_requests.status` todavía en `REVIEW_PENDING`. fileciteturn191file0L2-L2
-
-La política actual exige que el request tenga `clientId`, `assignedProfessionalId` y estado `COMPLETED` o `REVIEW_PENDING`, condiciones que la semilla de la prueba satisface. fileciteturn192file0L2-L2
+Además verifica el estado persistido después de las dos operaciones: una sola review, `reviewCount=1`, transaction `SETTLED`, mismo review ID en ambas respuestas y `service_requests.status` todavía en `REVIEW_PENDING`. fileciteturn200file0L2-L2
 
 ## Ejecución pendiente
 
 **No se declara PASS de integración todavía.** Desde esta auditoría se preparó la infraestructura y se revisó el código de la prueba, pero no se ejecutó el Firebase Emulator ni la suite en una máquina con Firebase CLI/Java disponible.
 
-La ejecución prevista en el entorno local es:
+La ejecución prevista es simplemente:
 
 ```text
-firebase emulators:exec --project demo-conexa-review "NODE_ENV=test GCLOUD_PROJECT=demo-conexa-review FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 pnpm exec tsx --test tests/conexa-review-concurrency.emulator.test.ts"
+pnpm test:conexa-review-emulator
 ```
 
-Si el shell local no acepta la asignación de variables de esa forma, deben establecerse como variables de entorno antes de ejecutar `firebase emulators:exec`.
+El script fija el proyecto `demo-conexa-unified` y limita la ejecución al emulador Firestore. Firebase documenta que `emulators:exec` inicia los emuladores configurados, ejecuta el script y los detiene al finalizar. citeturn0search5
 
 ## Criterio de cierre de FASE 27.16
 
