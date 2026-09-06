@@ -3,7 +3,7 @@
 **Proyecto:** Conexa-RMX-DEV / Super App  
 **Rama:** `integration/conexa-unified`  
 **Fecha:** 2026-09-06  
-**Estado:** **PASS — VALIDACIÓN LOCAL Y EMULADA COMPLETADAS**
+**Estado:** **PASS — VALIDACIÓN LOCAL, EMULADA Y REGRESIÓN COMPLETA COMPLETADAS**
 
 ## Objetivo
 
@@ -117,23 +117,33 @@ Resultado real:
 
 Se utilizó el Firestore Emulator con el proyecto `demo-conexa-unified`.
 
-También apareció un `MetadataLookupWarning` durante ambas ejecuciones locales, pero no provocó fallo: las pruebas terminaron correctamente con código 0.
+También apareció un `MetadataLookupWarning` durante las ejecuciones locales, pero no provocó fallo: las pruebas terminaron correctamente con código 0.
+
+## Regresión completa de la cadena de eventos
+
+La regresión solicitada se ejecutó completa, en este orden:
+
+1. `pnpm test:event-idempotency-emulator` — **3/3 PASS**;
+2. `pnpm test:nexora-event-consumer-emulator` — **2/2 PASS**;
+3. `pnpm test:event-dispatcher-emulator` — **2/2 PASS**;
+4. `pnpm test:outbox-recovery-emulator` — **3/3 PASS**;
+5. `pnpm test:outbox-recovery` — **6/6 PASS**;
+6. `pnpm test:event-worker-emulator` — **3/3 PASS**.
+
+**Total de esta regresión: 19/19 pruebas PASS, 0 FAIL.**
+
+Los casos validados cubren concurrencia, idempotencia durable, delivery repetido, dispatcher E2E, recuperación de outbox, replay autorizado, rechazo de replay no autorizado, preservación de identidad del evento y ejecución vacía del worker.
+
+El `MetadataLookupWarning` volvió a aparecer durante los tests que levantan el emulator, pero no alteró los resultados ni el código de salida.
 
 ## Resultado
 
-**FASE 31.3 — PASS.**
+**FASE 31.3 — PASS DEFINITIVO.**
 
-La implementación mínima del worker programado está compilando y funcionando contra Firestore Emulator, incluyendo ejecución vacía, integración con el consumer y concurrencia/idempotencia.
+La implementación mínima del worker programado está compilando y funcionando contra Firestore Emulator, incluyendo ejecución vacía, integración con el consumer, concurrencia/idempotencia y regresión completa de la cadena de eventos.
 
-## Próximo control recomendado
+La evidencia disponible permite avanzar a **FASE 31.4 — readiness de despliegue**, pero esta fase todavía no implica desplegar automáticamente.
 
-Antes de desplegar, ejecutar la regresión de los contratos que forman la cadena completa:
+## Próximo paso
 
-1. `test:event-idempotency-emulator`;
-2. `test:nexora-event-consumer-emulator`;
-3. `test:event-dispatcher-emulator`;
-4. `test:outbox-recovery-emulator`;
-5. `test:outbox-recovery`;
-6. `test:event-worker-emulator`.
-
-Después de esa regresión se podrá evaluar la preparación de **FASE 31.4 — readiness de despliegue**, sin desplegar automáticamente.
+FASE 31.4 debe limitarse a una revisión de readiness: configuración de proyecto, APIs requeridas, billing/plan, permisos del runtime, variables de entorno, configuración de región/timeout/memoria, estrategia de observabilidad y procedimiento de rollback. El despliegue real debe quedar fuera hasta que sea solicitado explícitamente.
