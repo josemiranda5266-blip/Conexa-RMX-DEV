@@ -1,59 +1,117 @@
-import { cert, getApps, initializeApp } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
 import type { NexoraOrderCompletedEvent } from '@super-app/shared-types';
+import type { DomainEvent } from '@super-app/shared-events';
+import { getAdminDb } from '../../../src/server/firebaseAdmin.js';
+import { runEventIdempotently } from './eventIdempotency.js';
 
 const MAX_ATTEMPTS = 5;
 
 function db() {
-  const app = getApps()[0] ?? initializeApp({ credential: cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT ?? '{}')) });
-  return getFirestore(app);
+  return getAdminDb();
+}
+
+function buildDomainEvent(data: Record<string, unknown>): DomainEvent {
+  const id = typeof data.id === 'string' ? data.id : '';
+  const type = data.type;
+  const occurredAt = typeof data.occurredAt === 'string' ? data.occurredAt : '';
+  const producer = data.producer;
+  const payload = data.payload;
+
+  if (
+    !id ||
+    type !== 'NEXORA_ORDER_COMPLETED' ||
+    !occurredAt ||
+    producer !== 'NEXORA' ||
+    !payload ||
+    typeof payload !== 'object'
+  ) {
+    throw new Error('INVALID_EVENT');
+  }
+
+  return {
+    id,
+    type,
+    occurredAt,
+    producer,
+    payload,
+  } as DomainEvent;
 }
 
 export async function processNexoraOrderCompleted(limit = 20): Promise<number> {
   const firestore = db();
-  const snapshot = await firestore.collection('eventOutbox').where('type', '==', 'NEXORA_ORDER_COMPLETED').where('status', '==', 'PENDING').limit(Math.min(Math.max(limit, 1), 50)).get();
+  const snapshot = await firestore.collection('eventOutbox')
+    .where('type', '==', 'NEXORA_ORDER_COMPLETED')
+    .where('status', '==', 'PENDING')
+    .limit(Math.min(Math.max(limit, 1), 50))
+    .get();
+
   let processed = 0;
   for (const eventDoc of snapshot.docs) {
     try {
       const didProcess = await firestore.runTransaction(async tx => {
         const current = await tx.get(eventDoc.ref);
         if (!current.exists || current.data()?.status !== 'PENDING') return false;
+
         const data = current.data() || {};
-        const event = data.payload as NexoraOrderCompletedEvent;
-        if (!event?.orderId || !event?.userId) throw new Error('INVALID_EVENT');
+        const event = buildDomainEvent(data);
+        const payload = event.payload as NexoraOrderCompletedEvent;
 
-        const orderRef = firestore.collection('orders').doc(event.orderId);
-        const order = await tx.get(orderRef);
-        if (!order.exists) throw new Error('ORDER_NOT_FOUND');
-        const orderData = order.data() || {};
-        if (String(orderData.status || '').toUpperCase() !== 'COMPLETED') {
-          tx.update(eventDoc.ref, {
+        const result = await runEventIdempotently(firestore, event, async innerTx => {
+          const orderRef = firestore.collection('orders').doc(payload.orderId);
+          const order = await innerTx.get(orderRef);
+          if (!order.exists) throw new Error('ORDER_NOT_FOUND');
+
+          const orderData = order.data() || {};
+          if (String(orderData.status || '').toUpperCase() !== 'COMPLETED') {
+            innerTx.update(eventDoc.ref, {
+              status: 'PUBLISHED',
+              processedAt: new Date().toISOString(),
+              attempts: (data.attempts ?? 0) + 1,
+              lastError: 'EVENT_STALE_ORDER_NOT_COMPLETED',
+            });
+            return;
+          }
+
+          if (String(orderData.buyerId || '') !== payload.userId) {
+            throw new Error('EVENT_ORDER_USER_MISMATCH');
+          }
+
+          if (payload.requiresInstallation !== true || orderData.requiresInstallation !== true) {
+            innerTx.update(eventDoc.ref, {
+              status: 'PUBLISHED',
+              processedAt: new Date().toISOString(),
+              attempts: (data.attempts ?? 0) + 1,
+              lastError: 'EVENT_NOT_REQUIRING_INSTALLATION',
+            });
+            return;
+          }
+
+          const leadRef = firestore.collection('installationLeads').doc(payload.orderId);
+          const lead = await innerTx.get(leadRef);
+          if (!lead.exists) {
+            innerTx.create(leadRef, {
+              sourceEventId: event.id,
+              userId: payload.userId,
+              orderId: payload.orderId,
+              serviceType: 'INSTALLATION',
+              status: 'NEW',
+              createdAt: new Date().toISOString(),
+            });
+          }
+
+          innerTx.update(eventDoc.ref, {
             status: 'PUBLISHED',
             processedAt: new Date().toISOString(),
             attempts: (data.attempts ?? 0) + 1,
-            lastError: 'EVENT_STALE_ORDER_NOT_COMPLETED',
+            lastError: null,
           });
-          return true;
-        }
-        if (String(orderData.buyerId || '') !== event.userId) throw new Error('EVENT_ORDER_USER_MISMATCH');
-        if (event.requiresInstallation !== true || orderData.requiresInstallation !== true) {
-          tx.update(eventDoc.ref, {
-            status: 'PUBLISHED',
-            processedAt: new Date().toISOString(),
-            attempts: (data.attempts ?? 0) + 1,
-            lastError: 'EVENT_NOT_REQUIRING_INSTALLATION',
-          });
-          return true;
-        }
+        });
 
-        const leadRef = firestore.collection('installationLeads').doc(event.orderId);
-        const lead = await tx.get(leadRef);
-        if (!lead.exists) {
-          tx.create(leadRef, { sourceEventId: event.eventId, userId: event.userId, orderId: event.orderId, serviceType: 'INSTALLATION', status: 'NEW', createdAt: new Date().toISOString() });
-        }
-        tx.update(eventDoc.ref, { status: 'PUBLISHED', processedAt: new Date().toISOString(), attempts: (data.attempts ?? 0) + 1, lastError: null });
-        return true;
+        // runEventIdempotently owns the ledger transaction. This outer transaction
+        // only guards the legacy PENDING claim; the durable effect and PUBLISHED
+        // transition are committed atomically with processedEvents.
+        return result !== 'ALREADY_PROCESSED';
       });
+
       if (didProcess) processed++;
     } catch (error) {
       // A transaction can fail because another worker committed the same event.
