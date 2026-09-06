@@ -29,7 +29,7 @@ const reviewInput = {
   comment: 'Prueba de concurrencia',
 };
 
-test('CONEXA review: two concurrent writes converge to one review', async () => {
+test('CONEXA review: concurrent writes converge to one review and atomically close service', async () => {
   requireEmulator();
 
   const db = getAdminDb();
@@ -75,7 +75,16 @@ test('CONEXA review: two concurrent writes converge to one review', async () => 
   assert.equal((await db.collection('reviews').where('serviceRequestId', '==', reviewInput.serviceRequestId).get()).size, 1);
   assert.equal((await professionalRef.get()).data()?.reviewCount, 1);
   assert.equal((await transactionRef.get()).data()?.status, 'SETTLED');
-  assert.equal((await requestRef.get()).data()?.status, 'REVIEW_PENDING');
+  assert.equal((await transactionRef.get()).data()?.settlementReason, 'REVIEW_COMPLETED');
+  assert.equal((await requestRef.get()).data()?.status, 'CLOSED');
   assert.equal(first.review.id, reviewRef.id);
   assert.equal(second.review.id, reviewRef.id);
+
+  const retry = await saveProfessionalReview('client-concurrency-test', reviewInput);
+  assert.equal(retry.created, false);
+  assert.equal(retry.review.id, reviewRef.id);
+  assert.equal((await db.collection('reviews').where('serviceRequestId', '==', reviewInput.serviceRequestId).get()).size, 1);
+  assert.equal((await professionalRef.get()).data()?.reviewCount, 1);
+  assert.equal((await transactionRef.get()).data()?.status, 'SETTLED');
+  assert.equal((await requestRef.get()).data()?.status, 'CLOSED');
 });
