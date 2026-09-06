@@ -14,6 +14,28 @@ export function getFirebaseAdmin(): any {
     return firebaseAdminApp;
   }
 
+  const firestoreEmulatorHost = process.env.FIRESTORE_EMULATOR_HOST?.trim();
+  const emulatorProjectId = (
+    process.env.GCLOUD_PROJECT?.trim() ||
+    process.env.FIREBASE_PROJECT_ID?.trim()
+  );
+
+  // Safe local-test path: a demo-* project can only target Firebase emulators.
+  // The Admin SDK automatically routes Firestore to FIRESTORE_EMULATOR_HOST.
+  if (
+    process.env.NODE_ENV === 'test' &&
+    firestoreEmulatorHost &&
+    /^demo-[a-z0-9-]+$/i.test(emulatorProjectId || '')
+  ) {
+    try {
+      firebaseAdminApp = firebaseAdmin.initializeApp({ projectId: emulatorProjectId });
+      return firebaseAdminApp;
+    } catch (error: any) {
+      console.error('[FIREBASE ADMIN] Emulator initialization failed:', error?.message || error);
+      return null;
+    }
+  }
+
   const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT?.trim();
   const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
   let credential: any = null;
