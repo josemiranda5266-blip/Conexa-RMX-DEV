@@ -44,6 +44,38 @@ export function isConexaServiceClosedEvent(value: unknown): value is ConexaServi
   );
 }
 
+export function isDomainEvent(value: unknown): value is DomainEvent {
+  if (!value || typeof value !== 'object') return false;
+  const event = value as Record<string, unknown>;
+
+  if (
+    !isNonEmptyString(event.id) ||
+    !isNonEmptyString(event.type) ||
+    !isIsoDate(event.occurredAt) ||
+    !isNonEmptyString(event.producer)
+  ) {
+    return false;
+  }
+
+  if (event.type === 'CONEXA_SERVICE_CLOSED') {
+    return event.producer === 'CONEXA' && isConexaServiceClosedEvent(event.payload);
+  }
+
+  return (
+    event.type === 'NEXORA_ORDER_COMPLETED' &&
+    (event.producer === 'NEXORA' || event.producer === 'CONEXA') &&
+    event.payload !== null &&
+    typeof event.payload === 'object'
+  );
+}
+
+export function isConexaServiceClosedDomainEvent(
+  value: unknown,
+): value is DomainEvent<ConexaServiceClosedEvent> {
+  if (!isDomainEvent(value)) return false;
+  return value.type === 'CONEXA_SERVICE_CLOSED' && value.producer === 'CONEXA';
+}
+
 export function createConexaServiceClosedEvent(input: {
   serviceRequestId: string;
   clientId: string;
