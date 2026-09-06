@@ -21,5 +21,7 @@ export const processNexoraOutbox = onSchedule(
     timeoutSeconds: 120,
     memory: '256MiB',
   },
-  runNexoraOutboxWorker,
+  async () => {
+    await runNexoraOutboxWorker();
+  },
 );
