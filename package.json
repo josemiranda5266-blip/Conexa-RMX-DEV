@@ -8,6 +8,7 @@
     "dev": "pnpm --filter @super-app/web dev",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
+    "test:conexa-closure": "tsx --test tests/conexa-service-closure.test.ts",
     "build:legacy-conexa": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs"
   },
   "dependencies": {
