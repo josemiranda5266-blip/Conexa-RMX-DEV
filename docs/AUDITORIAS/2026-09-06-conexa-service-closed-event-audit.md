@@ -3,7 +3,7 @@
 **Proyecto:** Conexa-RMX-DEV / Super App  
 **Rama:** `integration/conexa-unified`  
 **Fecha:** 2026-09-06  
-**Estado:** **FASE 30.2 IMPLEMENTADA — VALIDACIÓN DE ENVELOPE COMPLETO; EJECUCIÓN LOCAL PENDIENTE**
+**Estado:** **FASE 30.3 IMPLEMENTADA — DISPATCHER COMÚN; PRODUCCIÓN DEL EVENTO AÚN BLOQUEADA**
 
 ## 1. Objetivo
 
@@ -41,13 +41,15 @@ Existe `POST /internal/events/process-nexora`, protegido mediante `x-internal-ev
 
 `apps/api-conexa/src/eventConsumer.ts` está especializado en `NEXORA_ORDER_COMPLETED`.
 
-**Pendiente:** dispatcher común por `DomainEventType` antes de agregar un segundo consumidor.
+**FASE 30.3 implementada:** se añadió `apps/api-conexa/src/eventDispatcher.ts`, un dispatcher común que valida el envelope antes del routing y selecciona handlers mediante `DomainEventType`. No se conectó todavía al consumer productivo para evitar modificar el flujo Nexora antes de cerrar la política de retry/replay.
 
 ### P1 — Validación de runtime insuficiente
 
 El consumer actual convierte `payload` mediante cast a `NexoraOrderCompletedEvent` y solamente valida manualmente campos mínimos.
 
-**FASE 30.2 implementada:** el contrato compartido ahora valida el envelope completo para `CONEXA_SERVICE_CLOSED`: `id`, `type`, `occurredAt`, `producer` y `payload`. Además, exige `producer === 'CONEXA'` para este evento.
+**Resuelto para el nuevo contrato:** el contrato compartido valida el envelope completo para `CONEXA_SERVICE_CLOSED`: `id`, `type`, `occurredAt`, `producer` y `payload`. Además, exige `producer === 'CONEXA'` para este evento.
+
+La migración del consumer legado Nexora a validación compartida queda pendiente para una fase específica de compatibilidad.
 
 ### P2 — Inconsistencia menor en `lastError`
 
@@ -95,25 +97,66 @@ Funciones disponibles:
 - `isConexaServiceClosedDomainEvent(value)` — valida específicamente `CONEXA_SERVICE_CLOSED` producido por CONEXA.
 - `EventOutboxRecord.lastError?: string | null` — convención normalizada.
 
-La validación del envelope no se aplica todavía como dispatcher genérico al consumidor de producción; eso queda deliberadamente pendiente.
+## 4. FASE 30.3 — Dispatcher común
 
-## 4. Pruebas agregadas
+Se añadió:
 
-`tests/shared-events-contract.test.ts` fue ampliado a cinco escenarios:
+`apps/api-conexa/src/eventDispatcher.ts`
 
-1. payload canónico válido;
-2. identidad/reason inválidos rechazados;
-3. fecha inválida rechazada;
-4. envelope válido con identidad y productor canónicos;
-5. envelope inválido por `id`, `producer`, `type`, `occurredAt` o payload.
+Responsabilidades actuales:
+
+1. validar que la entrada sea un `DomainEvent` válido;
+2. validar específicamente que `CONEXA_SERVICE_CLOSED` tenga productor `CONEXA` y payload válido;
+3. enrutar por `DomainEventType` mediante un registry de handlers;
+4. rechazar tipos sin handler con `UNSUPPORTED_DOMAIN_EVENT_TYPE`;
+5. mantener `DomainEvent.id` como identidad/idempotency key canónica disponible para el consumidor.
+
+**Decisión importante:** el dispatcher es deliberadamente stateless. No marca eventos como procesados ni escribe Firestore. La idempotencia durable debe quedar en el consumer/handler mediante una operación transaccional sobre el `eventOutbox` y/o una clave natural del efecto producido. Esto evita fingir que un dispatcher en memoria resuelve entrega at-least-once.
+
+Tampoco se modificó `reviewService.ts` ni se comenzó todavía a producir `CONEXA_SERVICE_CLOSED`.
+
+## 5. Pruebas agregadas para FASE 30.3
+
+Se creó:
+
+`tests/domain-event-dispatcher.test.ts`
+
+Escenarios:
+
+1. routing de `CONEXA_SERVICE_CLOSED` por `DomainEventType`;
+2. rechazo del envelope inválido antes de invocar handler;
+3. rechazo de tipo sin handler;
+4. repetición del mismo evento conserva exactamente el mismo `DomainEvent.id`, dejando explícito que la deduplicación durable pertenece al consumer.
 
 Script:
 
-`pnpm test:shared-events-contract`
+`pnpm test:event-dispatcher`
 
-**Importante:** los archivos fueron registrados en GitHub, pero todavía no existe evidencia de ejecución local de estos tests en esta fase. La ejecución queda como gate obligatorio antes de continuar.
+**Ejecución local:** pendiente de confirmación por el entorno de desarrollo después de este commit.
 
-## 5. Aspectos positivos ya demostrados
+## 6. Evidencia local confirmada de FASE 30.2
+
+El usuario ejecutó en la rama `integration/conexa-unified`:
+
+```text
+pnpm test:shared-events-contract
+
+✔ CONEXA_SERVICE_CLOSED contract accepts the canonical payload
+✔ CONEXA_SERVICE_CLOSED validator rejects missing identity and invalid close reason
+✔ CONEXA_SERVICE_CLOSED validator rejects malformed dates
+✔ CONEXA_SERVICE_CLOSED envelope requires canonical identity and producer
+✔ CONEXA_SERVICE_CLOSED envelope rejects invalid occurredAt and payload
+ℹ tests 5
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+```
+
+Resultado: **FASE 30.2 PASS — 5/5**.
+
+## 7. Aspectos positivos ya demostrados
 
 - El Outbox se crea dentro de la misma transacción que produce `NEXORA_ORDER_COMPLETED`.
 - El documento del Outbox tiene ID estable y estado explícito.
@@ -121,30 +164,30 @@ Script:
 - La creación de `installationLeads/{orderId}` usa una clave natural que evita duplicación.
 - La ruta interna exige secreto y comparación `timingSafeEqual`.
 - La implementación de cierre de servicio de CONEXA ya fue validada con 5 escenarios concurrentes en Firestore Emulator.
+- El contrato compartido de `CONEXA_SERVICE_CLOSED` tiene validación de payload y envelope.
+- El dispatcher común no ejecuta efectos laterales fuera del handler, manteniendo la frontera entre routing y entrega durable.
 
-## 6. Gates restantes de FASE 30.x
+## 8. Gates restantes de FASE 30.x
 
-1. **Ejecutar `test:shared-events-contract` localmente.**
-2. Definir dispatcher por `DomainEventType`.
-3. Definir idempotencia de productor y consumidor.
-4. Definir política `PENDING → PUBLISHED` y `PENDING → FAILED`.
-5. Definir replay de `FAILED` y límites de reintento.
-6. Definir scheduler/worker de producción.
-7. Definir comportamiento ante consumer caído, timeout, evento duplicado y payload inválido.
-8. Probar integración Outbox → consumer en emulator.
-9. Recién después modificar `reviewService.ts` para producir `CONEXA_SERVICE_CLOSED`.
+1. **Ejecutar `test:event-dispatcher` localmente.**
+2. Definir política `PENDING → PUBLISHED` y `PENDING → FAILED` con clasificación terminal/reintentable.
+3. Definir replay de `FAILED`, límites y autorización.
+4. Definir scheduler/worker de producción.
+5. Integrar el dispatcher con el consumer sin romper el flujo Nexora existente.
+6. Diseñar/validar idempotencia durable por `DomainEvent.id` y clave natural del efecto.
+7. Probar integración Outbox → dispatcher → consumer en emulator.
+8. Recién después modificar `reviewService.ts` para producir `CONEXA_SERVICE_CLOSED` dentro de la misma transacción del cierre.
 
-## 7. Decisión de arquitectura
+## 9. Decisión de arquitectura
 
-**FASE 30.2 implementada. No agregar todavía el productor `CONEXA_SERVICE_CLOSED`.**
+**FASE 30.3 implementada a nivel de routing, pero no habilitada en producción.**
 
-El contrato del nuevo evento está cerrado a nivel de payload y ahora también dispone de validación de envelope en runtime. La entrega operacional, el dispatcher, el replay y la idempotencia del consumidor todavía no están cerrados.
+No se agrega todavía el productor `CONEXA_SERVICE_CLOSED`, no se añade scheduler y no se habilita replay hasta cerrar los estados y la política de retry.
 
-Firestore soporta operaciones atómicas y reintenta transacciones cuando existe contención; además, las transacciones tienen aislamiento serializable. Esto respalda mantener el futuro write del Outbox dentro de la misma transacción que el cierre, pero no resuelve por sí solo scheduler, replay ni idempotencia del consumidor. citeturn0search0turn0search6
+Firestore puede reejecutar una función de transacción cuando existe contención; por eso el código dentro de una transacción debe tolerar múltiples ejecuciones y no depender de efectos laterales externos. La documentación oficial también recomienda idempotencia para flujos con reintentos y entrega at-least-once. citeturn0search0turn0search1
 
-## 8. Resultado
+## 10. Resultado
 
-**FASE 30.2 — IMPLEMENTADA.**
-
-**Ejecución local:** PENDIENTE.  
-**Producción de `CONEXA_SERVICE_CLOSED`: BLOQUEADA hasta completar los gates siguientes.**
+**FASE 30.2 — PASS confirmado localmente (5/5).**  
+**FASE 30.3 — IMPLEMENTADA; ejecución local pendiente.**  
+**Producción de `CONEXA_SERVICE_CLOSED`: BLOQUEADA hasta completar retry/replay, worker e integración.**
