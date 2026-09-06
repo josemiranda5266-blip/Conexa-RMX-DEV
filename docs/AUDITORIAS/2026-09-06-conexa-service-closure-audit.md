@@ -1,94 +1,89 @@
-# FASE 27.6 — AUDITORÍA DE CIERRE DE SERVICIO CONEXA
+# FASE 27.7 — AUTORIDAD CANÓNICA DE CIERRE CONEXA
 
 **Fecha:** 2026-09-06  
 **Rama:** `integration/conexa-unified`  
-**HEAD auditado:** `66fdaa6d548f2dfd080c6495075c07a84b21d9bd`  
-**Estado:** ABIERTO — requiere corrección antes de cerrar la fase de eventos.
+**Estado:** ABIERTO — no implementar todavía el productor de `CONEXA_SERVICE_CLOSED`.
 
 ## Objetivo
 
-Determinar si `CONEXA_SERVICE_CLOSED` tiene hoy una transición de dominio real que pueda producirse de forma atómica y ser consumida por Nexora u otros módulos, sin inventar una integración inexistente.
+Determinar quién tiene hoy autoridad funcional para ejecutar `REVIEW_PENDING -> CLOSED` y si la creación de la reseña ya representa, por contrato, el cierre definitivo del servicio.
 
 ## Hallazgos
 
-### 1. La máquina de estados define `CLOSED`, pero el cierre no tiene implementación demostrada
+### 1. La máquina de estados separa explícitamente reseña y cierre
 
-`src/domain/jobStateMachine.ts` define `COMPLETED -> REVIEW_PENDING -> CLOSED` y `CLOSE_JOB` como transición válida únicamente desde `REVIEW_PENDING` hacia `CLOSED`.
+`src/domain/jobStateMachine.ts` define:
 
-Se inspeccionó el árbol completo de la rama `integration/conexa-unified` y no se encontró un writer backend separado que materialice `REVIEW_PENDING -> CLOSED`.
+`COMPLETED -> REVIEW_PENDING -> CLOSED`
 
-### 2. La ruta de completar trabajo sí implementa `IN_PROGRESS -> REVIEW_PENDING`
+con `SUBMIT_REVIEW` como transición hacia `REVIEW_PENDING` y `CLOSE_JOB` como transición separada hacia `CLOSED`.
 
-El runtime legado/unificado verifica que el trabajo esté `IN_PROGRESS` y, dentro de una transacción Firestore, actualiza la solicitud a `REVIEW_PENDING`, registra `completedAt/completedBy` y actualiza la transacción financiera a `SERVICE_COMPLETED`.
+Por lo tanto, el modelo de dominio actual **no considera automáticamente que crear una reseña sea equivalente a cerrar el servicio**. Hay una acción de cierre explícita en el contrato de dominio. fileciteturn101file0L2-L6
 
-Esto es consistente con la máquina de estados y constituye el verdadero hito de finalización del servicio, pero NO es todavía `CLOSED`.
+### 2. La política de reseñas acepta dos estados, pero no transforma ninguno a CLOSED
 
-### 3. La creación de reseña es transaccional, pero no cierra `service_requests`
+`assertReviewEligible()` permite crear la reseña cuando `service_requests.status` es `COMPLETED` o `REVIEW_PENDING`. El comentario del código identifica `REVIEW_PENDING` como el estado canónico previo al feedback.
 
-`src/server/reviewService.ts` ejecuta la creación de la reseña y sus proyecciones en una transacción. También puede pasar una transacción financiera de `SERVICE_COMPLETED` a `SETTLED`.
+Esto confirma que la reseña funciona como una operación posterior a la finalización, no como un writer de cierre del agregado. fileciteturn100file0L2-L6
 
-Sin embargo, en la transacción auditada no existe una actualización de `service_requests/{id}` a `CLOSED`.
+### 3. El endpoint de reseñas autentica al cliente, pero no expresa una acción CLOSE_JOB
 
-Por lo tanto, no debe producirse `CONEXA_SERVICE_CLOSED` simplemente al crear la reseña: hacerlo convertiría un evento de cierre en un hecho que el agregado de servicio todavía no registra.
+`reviewRoute.ts` verifica el token del usuario y delega toda la mutación a `saveProfessionalReview()`. El payload contiene ratings, comentario, profesional y solicitud; no existe una acción explícita de `CLOSE_JOB`, ni una comprobación de una autoridad distinta para cerrar el servicio. fileciteturn104file0L2-L6
 
-### 4. El endpoint legado `/api/jobs/review-complete` está retirado
+Esto refuerza que la ruta actual es una **ruta de creación de reseña**, no una ruta de cierre de servicio.
 
-El endpoint devuelve HTTP 410 y deriva la responsabilidad a `/api/reviews/create`, indicando que la reseña y el cierre deben ser atómicos.
+### 4. `reviewService` sí tiene una transacción fuerte, pero su agregado principal no es `service_requests`
 
-Pero el `reviewService` actual no materializa el estado `CLOSED` en `service_requests` dentro de la transacción inspeccionada.
+La transacción de `saveProfessionalReview()` lee la solicitud, usuario, profesional y reseña; crea la reseña; actualiza reputación/proyecciones; y puede cambiar la transacción financiera de `SERVICE_COMPLETED` a `SETTLED`.
 
-Esto constituye una discrepancia de contrato/lifecycle que debe resolverse antes de introducir el evento `CONEXA_SERVICE_CLOSED`.
+No ejecuta `tx.update(requestRef, { status: 'CLOSED', ... })` ni produce `eventOutbox`. Por lo tanto, la operación actual no puede considerarse el writer canónico de `CLOSE_JOB`. fileciteturn99file0L2-L6
 
-### 5. Firestore Rules impiden que el cliente cierre arbitrariamente la solicitud
+### 5. La idempotencia de la reseña está bien encaminada
 
-La regla de `service_requests` permite al cliente modificar únicamente un conjunto limitado de campos descriptivos y sólo mientras `resource.data.status == 'REQUEST_CREATED'`. El cambio de estado no está autorizado directamente desde el cliente.
+La reseña utiliza un ID determinista basado en `clientId + professionalId + serviceRequestId`. Si el documento ya existe, la transacción devuelve la reseña existente con `created: false`.
 
-Esto es correcto desde el punto de vista de autoridad, pero implica que el cierre canónico debe quedar explícitamente en backend.
+Esto es una buena base para que una futura operación de cierre pueda reutilizar la reseña sin duplicarla. La transacción de Firestore es atómica y puede reintentarse ante contención, por lo que este patrón debe mantenerse libre de efectos externos dentro del callback. citeturn0search0turn0search1
 
-### 6. Conclusión reforzada por el inventario de la rama
+### 6. No hay evidencia suficiente para declarar que “enviar reseña = cerrar servicio”
 
-El árbol completo auditado muestra que `apps/api-conexa` actualmente contiene únicamente el consumidor de eventos y su servidor interno; el runtime de negocio de CONEXA sigue concentrado en el servidor legado/unificado y servicios `src/server/*`.
+La evidencia de dominio contradice esa suposición: existe una acción `CLOSE_JOB` independiente y no se encontró un writer que la ejecute.
 
-No se encontró un segundo cierre oculto en `apps/api-conexa` que justifique producir `CONEXA_SERVICE_CLOSED` ahora.
+Por eso, **no corresponde modificar `reviewService` solamente por intuición** para que marque `CLOSED`. Primero debe definirse el contrato funcional: quién confirma el cierre, en qué momento, y si el cierre depende obligatoriamente de que exista una reseña.
 
 ## Decisión de arquitectura
 
-**NO producir todavía `CONEXA_SERVICE_CLOSED`.**
+Mantener por ahora dos conceptos separados:
 
-El evento permanece como contrato reservado en `shared-events`, pero no debe tener productor hasta que exista una transición backend canónica:
+1. **Finalización del trabajo:** `IN_PROGRESS -> REVIEW_PENDING`.
+2. **Cierre administrativo del servicio:** `REVIEW_PENDING -> CLOSED`.
 
-`REVIEW_PENDING -> CLOSED`
+El productor de `CONEXA_SERVICE_CLOSED` deberá aparecer únicamente junto con el segundo concepto.
 
-La transición deberá:
+### Writer recomendado cuando se defina el contrato
 
-1. verificar identidad/autoridad;
-2. verificar que la solicitud esté en `REVIEW_PENDING`;
-3. crear/confirmar la reseña de forma idempotente;
-4. actualizar `service_requests.status = CLOSED` dentro de la misma transacción;
-5. crear `eventOutbox` dentro de esa misma transacción sólo cuando exista un consumidor real;
-6. usar un identificador único del evento, sin duplicar `id`/`eventId` innecesariamente;
-7. mantener la operación segura ante reintentos y concurrencia.
+La futura operación canónica debería ser una única transacción backend que:
 
-Firestore garantiza atomicidad de las transacciones y puede reejecutar una función transaccional ante contención, por lo que la operación no debe depender de efectos externos dentro del callback transaccional. citeturn0search0turn0search2
+1. autentique al actor;
+2. determine su autoridad de cierre a partir del backend, no de datos enviados por el cliente;
+3. lea `service_requests/{id}`;
+4. exija `status == REVIEW_PENDING`;
+5. cree o confirme la reseña de forma idempotente si el contrato exige feedback previo;
+6. cambie `service_requests.status` a `CLOSED`;
+7. registre `closedAt` y `closedBy` si esos campos forman parte del contrato final;
+8. cree `eventOutbox` en la misma transacción;
+9. mantenga el resultado seguro ante dos solicitudes concurrentes.
 
-Si el evento se vuelve retryable/asíncrono, debe tratarse como entrega potencialmente duplicada y el consumidor debe ser idempotente. Firebase documenta semántica de entrega al menos una vez y recomienda idempotencia para funciones event-driven con reintentos. citeturn0search1turn0search5
+Firestore ofrece aislamiento serializable y resuelve la contención entre transacciones, por lo que dos intentos concurrentes deben converger en un único cierre observable. citeturn0search1turn0search0
 
-## Severidad
+## Riesgos detectados
 
-- **P1 — lifecycle/contract drift:** `CLOSED` está definido en el dominio pero no se demostró un writer backend que materialice el cierre.
-- **P1 — event readiness:** `CONEXA_SERVICE_CLOSED` no debe producirse hasta que exista un agregado de servicio realmente cerrado y un consumidor definido.
-- **Sin P0:** no se detectó pérdida financiera inmediata derivada de este hallazgo; la ruta financiera de finalización ya está separada del cierre administrativo de la reseña.
+- **P1 — contrato de lifecycle:** existe `CLOSE_JOB` en dominio pero no existe writer operativo demostrado.
+- **P1 — ambigüedad funcional:** la reseña es idempotente, pero no está definido si constituye requisito o sólo consecuencia del cierre.
+- **P1 — evento:** `CONEXA_SERVICE_CLOSED` no debe emitirse desde `saveProfessionalReview()` mientras `service_requests` siga en `REVIEW_PENDING`.
+- **Sin P0:** no se encontró una pérdida financiera inmediata derivada de esta discrepancia; la liquidación financiera ya está separada de la transición administrativa de cierre.
 
-## Próximo paso
+## Próximo paso — FASE 27.8
 
-Auditar el contrato funcional de `reviewService` y del cliente de reseñas para decidir quién tiene autoridad para cerrar el servicio y, si corresponde, implementar después un único writer canónico `REVIEW_PENDING -> CLOSED`. Sólo después se diseñará el productor de `CONEXA_SERVICE_CLOSED` y sus pruebas de concurrencia/idempotencia.
+Auditar los consumidores de `service_requests.status`, las pantallas/acciones del cliente que muestran `REVIEW_PENDING` o `CLOSED`, y cualquier referencia a `SUBMIT_REVIEW`/`CLOSE_JOB`. El objetivo será reconstruir el contrato funcional completo antes de escribir el nuevo writer.
 
-## Referencias inspeccionadas
-
-- `src/domain/jobStateMachine.ts`
-- `src/server/reviewRoute.ts`
-- `src/server/reviewService.ts`
-- `src/server/reviewPolicy.ts`
-- `firestore.rules`
-- `server.ts`
-- árbol completo de `integration/conexa-unified`
+No se implementa todavía el cierre ni el evento.
