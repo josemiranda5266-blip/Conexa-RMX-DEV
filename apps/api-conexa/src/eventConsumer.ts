@@ -3,7 +3,7 @@ import type { DomainEvent } from '@super-app/shared-events';
 import type { DocumentReference, Firestore, Transaction } from 'firebase-admin/firestore';
 import { dispatchDomainEvent } from './eventDispatcher.js';
 import { getAdminDb } from '../../../src/server/firebaseAdmin.js';
-import { runEventIdempotently } from './eventIdempotency.js';
+import { runEventIdempotently, type EventIdempotencyResult } from './eventIdempotency.js';
 import { nextFailureState } from './outboxRecovery.js';
 
 function db(): Firestore {
@@ -24,12 +24,12 @@ function buildDomainEvent(data: Record<string, unknown>): DomainEvent {
   return { id, type, occurredAt, producer, payload } as DomainEvent;
 }
 
-async function handleNexoraOrderCompleted(event: DomainEvent): Promise<void> {
+async function handleNexoraOrderCompleted(event: DomainEvent): Promise<EventIdempotencyResult> {
   const firestore = db();
   const payload = event.payload as NexoraOrderCompletedEvent;
   const eventRef = firestore.collection('eventOutbox').doc(event.id) as DocumentReference;
 
-  await runEventIdempotently(firestore, event, async (tx: Transaction) => {
+  return runEventIdempotently(firestore, event, async (tx: Transaction) => {
     const current = await tx.get(eventRef);
     if (!current.exists || current.data()?.status !== 'PENDING') return;
 
@@ -81,8 +81,13 @@ export async function processNexoraOrderCompleted(limit = 20): Promise<number> {
   for (const eventDoc of snapshot.docs) {
     try {
       const event = buildDomainEvent(eventDoc.data() || {});
-      await dispatchDomainEvent(event, { NEXORA_ORDER_COMPLETED: handleNexoraOrderCompleted });
-      processed++;
+      let result: EventIdempotencyResult = 'ALREADY_PROCESSED';
+      await dispatchDomainEvent(event, {
+        NEXORA_ORDER_COMPLETED: async domainEvent => {
+          result = await handleNexoraOrderCompleted(domainEvent);
+        },
+      });
+      if (result === 'PROCESSED') processed++;
     } catch (error) {
       await firestore.runTransaction(async (tx: Transaction) => {
         const current = await tx.get(eventDoc.ref);
