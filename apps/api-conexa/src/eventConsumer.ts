@@ -47,72 +47,67 @@ export async function processNexoraOrderCompleted(limit = 20): Promise<number> {
   let processed = 0;
   for (const eventDoc of snapshot.docs) {
     try {
-      const didProcess = await firestore.runTransaction(async tx => {
+      const data = eventDoc.data() || {};
+      const event = buildDomainEvent(data);
+      const payload = event.payload as NexoraOrderCompletedEvent;
+
+      const result = await runEventIdempotently(firestore, event, async tx => {
         const current = await tx.get(eventDoc.ref);
-        if (!current.exists || current.data()?.status !== 'PENDING') return false;
+        if (!current.exists || current.data()?.status !== 'PENDING') return;
 
-        const data = current.data() || {};
-        const event = buildDomainEvent(data);
-        const payload = event.payload as NexoraOrderCompletedEvent;
+        const orderRef = firestore.collection('orders').doc(payload.orderId);
+        const order = await tx.get(orderRef);
+        if (!order.exists) throw new Error('ORDER_NOT_FOUND');
 
-        const result = await runEventIdempotently(firestore, event, async innerTx => {
-          const orderRef = firestore.collection('orders').doc(payload.orderId);
-          const order = await innerTx.get(orderRef);
-          if (!order.exists) throw new Error('ORDER_NOT_FOUND');
+        const orderData = order.data() || {};
+        const attempts = Number(current.data()?.attempts ?? 0) + 1;
 
-          const orderData = order.data() || {};
-          if (String(orderData.status || '').toUpperCase() !== 'COMPLETED') {
-            innerTx.update(eventDoc.ref, {
-              status: 'PUBLISHED',
-              processedAt: new Date().toISOString(),
-              attempts: (data.attempts ?? 0) + 1,
-              lastError: 'EVENT_STALE_ORDER_NOT_COMPLETED',
-            });
-            return;
-          }
-
-          if (String(orderData.buyerId || '') !== payload.userId) {
-            throw new Error('EVENT_ORDER_USER_MISMATCH');
-          }
-
-          if (payload.requiresInstallation !== true || orderData.requiresInstallation !== true) {
-            innerTx.update(eventDoc.ref, {
-              status: 'PUBLISHED',
-              processedAt: new Date().toISOString(),
-              attempts: (data.attempts ?? 0) + 1,
-              lastError: 'EVENT_NOT_REQUIRING_INSTALLATION',
-            });
-            return;
-          }
-
-          const leadRef = firestore.collection('installationLeads').doc(payload.orderId);
-          const lead = await innerTx.get(leadRef);
-          if (!lead.exists) {
-            innerTx.create(leadRef, {
-              sourceEventId: event.id,
-              userId: payload.userId,
-              orderId: payload.orderId,
-              serviceType: 'INSTALLATION',
-              status: 'NEW',
-              createdAt: new Date().toISOString(),
-            });
-          }
-
-          innerTx.update(eventDoc.ref, {
+        if (String(orderData.status || '').toUpperCase() !== 'COMPLETED') {
+          tx.update(eventDoc.ref, {
             status: 'PUBLISHED',
             processedAt: new Date().toISOString(),
-            attempts: (data.attempts ?? 0) + 1,
-            lastError: null,
+            attempts,
+            lastError: 'EVENT_STALE_ORDER_NOT_COMPLETED',
           });
-        });
+          return;
+        }
 
-        // runEventIdempotently owns the ledger transaction. This outer transaction
-        // only guards the legacy PENDING claim; the durable effect and PUBLISHED
-        // transition are committed atomically with processedEvents.
-        return result !== 'ALREADY_PROCESSED';
+        if (String(orderData.buyerId || '') !== payload.userId) {
+          throw new Error('EVENT_ORDER_USER_MISMATCH');
+        }
+
+        if (payload.requiresInstallation !== true || orderData.requiresInstallation !== true) {
+          tx.update(eventDoc.ref, {
+            status: 'PUBLISHED',
+            processedAt: new Date().toISOString(),
+            attempts,
+            lastError: 'EVENT_NOT_REQUIRING_INSTALLATION',
+          });
+          return;
+        }
+
+        const leadRef = firestore.collection('installationLeads').doc(payload.orderId);
+        const lead = await tx.get(leadRef);
+        if (!lead.exists) {
+          tx.create(leadRef, {
+            sourceEventId: event.id,
+            userId: payload.userId,
+            orderId: payload.orderId,
+            serviceType: 'INSTALLATION',
+            status: 'NEW',
+            createdAt: new Date().toISOString(),
+          });
+        }
+
+        tx.update(eventDoc.ref, {
+          status: 'PUBLISHED',
+          processedAt: new Date().toISOString(),
+          attempts,
+          lastError: null,
+        });
       });
 
-      if (didProcess) processed++;
+      if (result === 'PROCESSED') processed++;
     } catch (error) {
       // A transaction can fail because another worker committed the same event.
       // Never perform a stale, out-of-transaction write here: it could resurrect
