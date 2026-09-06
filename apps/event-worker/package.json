@@ -10,7 +10,6 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@super-app/api-conexa": "workspace:*",
     "firebase-admin": "^14.2.0",
     "firebase-functions": "^7.0.0"
   },
