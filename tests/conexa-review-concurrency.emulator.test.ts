@@ -7,10 +7,6 @@ const TEST_PROJECT_ID = process.env.GCLOUD_PROJECT || process.env.FIREBASE_PROJE
 
 function requireEmulator(): void {
   assert.ok(
-    process.env.NODE_ENV === 'test',
-    'NODE_ENV=test is required for the Firestore emulator integration suite',
-  );
-  assert.ok(
     process.env.FIRESTORE_EMULATOR_HOST,
     'FIRESTORE_EMULATOR_HOST is required; refusing to run against a live Firestore database',
   );
