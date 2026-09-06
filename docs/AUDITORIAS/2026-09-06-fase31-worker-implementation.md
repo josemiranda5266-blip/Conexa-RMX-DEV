@@ -3,7 +3,7 @@
 **Proyecto:** Conexa-RMX-DEV / Super App  
 **Rama:** `integration/conexa-unified`  
 **Fecha:** 2026-09-06  
-**Estado:** **IMPLEMENTACIÓN COMPLETADA — VALIDACIÓN LOCAL PENDIENTE**
+**Estado:** **PASS — VALIDACIÓN LOCAL Y EMULADA COMPLETADAS**
 
 ## Objetivo
 
@@ -27,11 +27,15 @@ Configuración inicial:
 
 El worker llama directamente a `processNexoraOrderCompleted(20)` del consumer existente. No replica la consulta del outbox, dispatcher, recovery ni ledger.
 
+El wrapper entregado a `onSchedule` retorna `Promise<void>`; la función de ejecución `runNexoraOutboxWorker()` conserva el retorno numérico para facilitar las pruebas.
+
 ## Decisión de concurrencia
 
 No se fuerza `maxInstances: 1`. Cloud Scheduler/Functions puede producir ejecuciones solapadas y el pipeline ya posee idempotencia durable por `DomainEvent.id`. Firebase advierte explícitamente que una nueva ejecución puede comenzar mientras otra sigue activa. citeturn0search0
 
-La FASE 31.5 deberá demostrar este comportamiento mediante pruebas de doble ejecución/concurrencia.
+La prueba emulada ejecutó dos workers concurrentemente sobre el mismo evento. Ambas ejecuciones pudieron reportar `processed=1`, pero el resultado durable fue único: un solo lead de instalación, un solo ledger de idempotencia y el outbox quedó `PUBLISHED` con `attempts=1`.
+
+Esto confirma que el contrato importante del worker es la idempotencia de los efectos persistentes, no que el contador local `processed` sea globalmente único entre ejecuciones concurrentes.
 
 ## Despliegue
 
@@ -48,18 +52,71 @@ No se reutiliza `INTERNAL_EVENT_SECRET`. La función programada es una entrada g
 
 No se agregaron secretos nuevos en esta fase.
 
-## Validación pendiente
+## Validación ejecutada por el usuario
 
-El código fue registrado, pero todavía **no se declara PASS** hasta que el usuario ejecute localmente:
+### Lint
 
 ```text
-pnpm install
 pnpm --filter @super-app/event-worker lint
-pnpm --filter @super-app/event-worker build
+
+> @super-app/event-worker@1.0.0 lint
+> tsc --noEmit
+
+PASS — 0 errores
 ```
 
-La prueba de concurrencia real queda para FASE 31.5.
+### Build
+
+```text
+pnpm --filter @super-app/event-worker build
+
+lib\\index.js  9.7kb
+Done in 50ms
+
+PASS
+```
+
+### Emulator / integración del worker
+
+Comando:
+
+```text
+pnpm test:event-worker-emulator
+```
+
+Resultado real:
+
+```text
+✔ event worker: scheduled pipeline publishes one event and creates one installation lead
+✔ event worker: concurrent executions remain idempotent
+✔ event worker: empty execution is successful and processes zero events
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+```
+
+Se utilizó el Firestore Emulator con el proyecto `demo-conexa-unified`.
+
+También apareció un `MetadataLookupWarning` durante la ejecución local, pero no provocó fallo: las 3 pruebas terminaron correctamente con código 0.
 
 ## Resultado
 
-**FASE 31.3 — IMPLEMENTACIÓN COMPLETADA; PASS BLOQUEADO HASTA VALIDACIÓN LOCAL.**
+**FASE 31.3 — PASS.**
+
+La implementación mínima del worker programado está compilando y funcionando contra Firestore Emulator, incluyendo ejecución vacía y concurrencia/idempotencia.
+
+## Próximo control recomendado
+
+Antes de desplegar, ejecutar la regresión de los contratos que forman la cadena completa:
+
+1. `test:event-idempotency-emulator`;
+2. `test:nexora-event-consumer-emulator`;
+3. `test:event-dispatcher-emulator`;
+4. `test:outbox-recovery-emulator`;
+5. `test:outbox-recovery`;
+6. `test:event-worker-emulator`.
+
+Después de esa regresión se podrá evaluar la preparación de **FASE 31.4 — readiness de despliegue**, sin desplegar automáticamente.
