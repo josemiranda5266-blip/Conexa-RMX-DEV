@@ -1,76 +1,21 @@
-import * as adminModule from 'firebase-admin';
-import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
-import fs from 'fs';
-import path from 'path';
+import * as admin from 'firebase-admin';
+import * as fs from 'fs';
+import * as path from 'path';
 
-const firebaseAdmin: any = (adminModule as any).default || adminModule;
-let firebaseAdminApp: any = null;
+let firebaseAdminApp: admin.app.App | null = null;
 let cachedDatabaseId: string | null = null;
 
-export function getFirebaseAdmin(): any {
+function getFirebaseAdmin(): admin.app.App | null {
   if (firebaseAdminApp) return firebaseAdminApp;
-  if (firebaseAdmin.apps && firebaseAdmin.apps.length > 0) {
-    firebaseAdminApp = firebaseAdmin.apps[0];
-    return firebaseAdminApp;
-  }
 
-  const firestoreEmulatorHost = process.env.FIRESTORE_EMULATOR_HOST?.trim();
-  const emulatorProjectId = (
-    process.env.GCLOUD_PROJECT?.trim() ||
-    process.env.FIREBASE_PROJECT_ID?.trim()
-  );
-
-  // Safe emulator path: only a demo-* project with an explicit emulator host.
-  // Firebase recommends demo projects for emulator tests, and the Admin SDK
-  // automatically routes Firestore to FIRESTORE_EMULATOR_HOST.
-  if (
-    firestoreEmulatorHost &&
-    /^demo-[a-z0-9-]+$/i.test(emulatorProjectId || '')
-  ) {
-    try {
-      firebaseAdminApp = firebaseAdmin.initializeApp({ projectId: emulatorProjectId });
-      return firebaseAdminApp;
-    } catch (error: any) {
-      console.error('[FIREBASE ADMIN] Emulator initialization failed:', error?.message || error);
-      return null;
-    }
-  }
-
-  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT?.trim();
-  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
-  let credential: any = null;
-
-  if (serviceAccount) {
-    try {
-      const parsed = serviceAccount.startsWith('{')
-        ? JSON.parse(serviceAccount)
-        : JSON.parse(Buffer.from(serviceAccount, 'base64').toString('utf8'));
-      credential = firebaseAdmin.cert(parsed);
-    } catch (error: any) {
-      console.error('[FIREBASE ADMIN] Invalid FIREBASE_SERVICE_ACCOUNT:', error?.message || error);
-    }
-  }
-
-  if (!credential && credentialsPath) {
-    try {
-      credential = firebaseAdmin.applicationDefault();
-    } catch (error: any) {
-      console.error('[FIREBASE ADMIN] GOOGLE_APPLICATION_CREDENTIALS unavailable:', error?.message || error);
-    }
-  }
-
-  if (!credential) {
-    try {
-      credential = firebaseAdmin.applicationDefault();
-    } catch {
-      // Application Default Credentials are unavailable.
-    }
-  }
+  const credential = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
+    ? admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON))
+    : admin.credential.applicationDefault();
 
   if (!credential) return null;
 
   try {
-    firebaseAdminApp = firebaseAdmin.initializeApp({ credential });
+    firebaseAdminApp = admin.initializeApp({ credential });
     return firebaseAdminApp;
   } catch (error: any) {
     console.error('[FIREBASE ADMIN] Initialization failed:', error?.message || error);
@@ -85,8 +30,9 @@ function getFirestoreDatabaseId(): string {
     if (fs.existsSync(configPath)) {
       const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       if (typeof parsed.firestoreDatabaseId === 'string' && parsed.firestoreDatabaseId.trim()) {
-        cachedDatabaseId = parsed.firestoreDatabaseId.trim();
-        return cachedDatabaseId;
+        const databaseId = parsed.firestoreDatabaseId.trim();
+        cachedDatabaseId = databaseId;
+        return databaseId;
       }
     }
   } catch (error: any) {
@@ -98,13 +44,17 @@ function getFirestoreDatabaseId(): string {
 export function getAdminDb(): any {
   const app = getFirebaseAdmin();
   if (!app) {
-    const error = new Error('FIREBASE_ADMIN_NOT_INITIALIZED');
-    (error as any).code = 'FIREBASE_ADMIN_NOT_INITIALIZED';
-    throw error;
+    throw new Error('FIREBASE_ADMIN_NOT_INITIALIZED');
   }
 
-  const databaseId = getFirestoreDatabaseId();
-  return databaseId !== '(default)'
-    ? getAdminFirestore(app, databaseId)
-    : getAdminFirestore(app);
+  const emulatorHost = process.env.FIRESTORE_EMULATOR_HOST;
+  const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || app.options.projectId;
+
+  if (emulatorHost && projectId?.startsWith('demo-')) {
+    return admin.firestore(app);
+  }
+
+  return admin.firestore(app);
 }
+
+export { getFirestoreDatabaseId };
