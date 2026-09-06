@@ -3,7 +3,7 @@
 **Proyecto:** CONEXA-RMX-DEV  
 **Rama:** `integration/conexa-unified`  
 **Fecha:** 2026-09-06  
-**Estado:** IMPLEMENTACIÓN REALIZADA — VERIFICACIÓN POST-CAMBIO PENDIENTE
+**Estado:** VERIFICACIÓN POST-CAMBIO — PASS
 
 ## 1. Gate previo
 
@@ -55,19 +55,38 @@ La implementación actual no inventa una transición `COMPLETED -> CLOSED`: sola
 | `CLOSED` | no existe | no se inventa una reseña; la ruta normal no repara silenciosamente |
 | `COMPLETED` | no existe | conserva compatibilidad: crea reseña pero permanece fuera del cierre atómico hasta `REVIEW_PENDING` |
 
-## 5. Prueba actualizada
+## 5. Prueba post-cambio — PASS
 
-Se amplió `tests/conexa-review-concurrency.emulator.test.ts` para verificar además:
+Se ejecutó nuevamente, después de la implementación:
 
-- `REVIEW_PENDING -> CLOSED` tras concurrencia;
-- `settlementReason === 'REVIEW_COMPLETED'`;
-- retry posterior con `created === false`;
-- ausencia de reseñas duplicadas;
-- ausencia de doble incremento de reputación;
-- transacción permanece `SETTLED`;
-- servicio permanece `CLOSED` después del retry.
+```bash
+pnpm test:conexa-review-emulator
+```
 
-**La prueba actualizada aún NO fue ejecutada después de este cambio.** Por lo tanto, esta fase no se marca como PASS todavía.
+Resultado observado en consola:
+
+```text
+✔ CONEXA review: two concurrent writes converge to one review
+ℹ tests 1
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
++ Script exited successfully (code 0)
+```
+
+El emulador utilizó `demo-conexa-unified` y se apagó correctamente al finalizar.
+
+La prueba confirmó nuevamente:
+
+- dos escrituras concurrentes convergen en una sola reseña;
+- no hay doble incremento de reputación;
+- no hay doble liquidación;
+- el `reviewId` determinista converge;
+- el proceso termina con código 0.
+
+**Nota:** la salida contiene `MetadataLookupWarning`, pero no produjo fallo: `pass 1`, `fail 0`, código 0. Se mantiene como observación de entorno para una futura limpieza, no como fallo de la prueba.
 
 ## 6. Evento `CONEXA_SERVICE_CLOSED`
 
@@ -77,18 +96,16 @@ Por seguridad de contrato, **no se emite todavía** desde `saveProfessionalRevie
 
 ## 7. Riesgos pendientes
 
-1. Ejecutar la prueba actualizada contra Firestore Emulator.
-2. Añadir casos explícitos para dos cierres concurrentes y `CLOSED` con reseña existente.
-3. Definir y probar la anomalía `CLOSED` sin reseña.
-4. Auditar el contrato completo de `CONEXA_SERVICE_CLOSED` antes de emitir outbox.
-5. Validar el comportamiento de la ruta HTTP completa, además del servicio de dominio.
+1. Añadir casos explícitos para dos cierres concurrentes y `CLOSED` con reseña existente.
+2. Definir y probar la anomalía `CLOSED` sin reseña.
+3. Auditar el contrato completo de `CONEXA_SERVICE_CLOSED` antes de emitir outbox.
+4. Validar el comportamiento de la ruta HTTP completa, además del servicio de dominio.
+5. Considerar una prueba posterior contra un entorno Firestore real para diferencias que el Emulator no reproduce completamente.
+
+Firebase advierte que el Emulator no implementa todo el comportamiento transaccional de producción y puede diferir especialmente en escenarios de múltiples escrituras concurrentes; por ello este PASS es un gate local necesario, no una certificación de producción. citeturn0search2
 
 ## 8. Criterio de salida
 
-FASE 28 queda en **VERIFICACIÓN POST-CAMBIO** hasta ejecutar nuevamente:
+**FASE 28 — PASS para el escenario de concurrencia e implementación post-cambio.**
 
-```bash
-pnpm test:conexa-review-emulator
-```
-
-No se debe declarar PASS de implementación hasta obtener `pass` y `fail 0` con el código actualizado.
+Quedan pendientes los escenarios adicionales y la auditoría del evento antes de considerar cerrado todo el ciclo de servicio.
