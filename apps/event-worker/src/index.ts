@@ -11,7 +11,6 @@ export const processNexoraOutbox = onSchedule(
     region: 'us-central1',
     timeoutSeconds: 120,
     memory: '256MiB',
-    maxInstances: 1,
   },
   async () => {
     const processed = await processNexoraOrderCompleted(BATCH_LIMIT);
