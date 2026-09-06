@@ -5,6 +5,15 @@ import { processNexoraOrderCompleted } from '../../api-conexa/src/eventConsumer.
 const SCHEDULE = 'every 5 minutes';
 const BATCH_LIMIT = 20;
 
+export async function runNexoraOutboxWorker(): Promise<number> {
+  const processed = await processNexoraOrderCompleted(BATCH_LIMIT);
+  logger.info('Nexora outbox worker completed', {
+    processed,
+    batchLimit: BATCH_LIMIT,
+  });
+  return processed;
+}
+
 export const processNexoraOutbox = onSchedule(
   {
     schedule: SCHEDULE,
@@ -12,11 +21,5 @@ export const processNexoraOutbox = onSchedule(
     timeoutSeconds: 120,
     memory: '256MiB',
   },
-  async () => {
-    const processed = await processNexoraOrderCompleted(BATCH_LIMIT);
-    logger.info('Nexora outbox worker completed', {
-      processed,
-      batchLimit: BATCH_LIMIT,
-    });
-  },
+  runNexoraOutboxWorker,
 );
