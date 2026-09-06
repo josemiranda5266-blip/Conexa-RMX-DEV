@@ -20,10 +20,10 @@ export function getFirebaseAdmin(): any {
     process.env.FIREBASE_PROJECT_ID?.trim()
   );
 
-  // Safe local-test path: a demo-* project can only target Firebase emulators.
-  // The Admin SDK automatically routes Firestore to FIRESTORE_EMULATOR_HOST.
+  // Safe emulator path: only a demo-* project with an explicit emulator host.
+  // Firebase recommends demo projects for emulator tests, and the Admin SDK
+  // automatically routes Firestore to FIRESTORE_EMULATOR_HOST.
   if (
-    process.env.NODE_ENV === 'test' &&
     firestoreEmulatorHost &&
     /^demo-[a-z0-9-]+$/i.test(emulatorProjectId || '')
   ) {
