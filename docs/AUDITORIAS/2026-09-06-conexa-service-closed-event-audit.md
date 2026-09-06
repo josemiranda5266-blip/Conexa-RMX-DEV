@@ -3,7 +3,7 @@
 **Proyecto:** Conexa-RMX-DEV / Super App  
 **Rama:** `integration/conexa-unified`  
 **Fecha:** 2026-09-06  
-**Estado:** **FASE 30.9 IMPLEMENTADA — RECOVERY E2E PENDIENTE DE EJECUCIÓN LOCAL**
+**Estado:** **FASE 30.9 PASS 3/3 — RECOVERY E2E CERRADO**
 
 ## 1. Objetivo
 
@@ -18,7 +18,7 @@ Auditar y cerrar el contrato transversal que permitirá que CONEXA publique `CON
 - 30.6 idempotencia durable: **PASS 3/3**.
 - 30.7 consumer Nexora + ledger: **PASS 2/2**.
 - 30.8 integración dispatcher → outbox → consumer: **PASS 2/2**.
-- 30.9 recovery E2E: **implementada; ejecución local pendiente**.
+- 30.9 recovery E2E: **PASS 3/3**.
 
 ## 3. FASE 30.9 — Recovery E2E
 
@@ -28,7 +28,7 @@ Se agregó:
 
 `tests/outbox-recovery.emulator.test.ts`
 
-Escenarios:
+Escenarios validados localmente:
 
 1. Evento inválido → `FAILED` con `INVALID_EVENT`.
 2. Replay autorizado → vuelve a `PENDING`, reinicia `attempts`, incrementa `replayCount` y conserva el mismo `DomainEvent.id`.
@@ -36,13 +36,23 @@ Escenarios:
 4. Replay no autorizado → rechazado y el evento permanece `FAILED`.
 5. Entregas concurrentes después del replay → un único efecto durable.
 
-Script:
+Resultado local confirmado:
+
+```text
+✔ outbox recovery E2E: permanent failure becomes FAILED, authorized replay preserves identity and succeeds
+✔ outbox recovery E2E: unauthorized replay is rejected and FAILED event remains untouched
+✔ outbox recovery E2E: concurrent deliveries after replay create one installation lead
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
++ Script exited successfully (code 0)
+```
+
+Script ejecutado:
 
 ```text
 pnpm test:outbox-recovery-emulator
 ```
-
-**Ejecución local:** pendiente.
 
 La separación mantiene una frontera importante: `runEventIdempotently()` sólo cubre efectos Firestore transaccionales. No deben incorporarse HTTP, Mercado Pago, correo u otros side effects externos dentro de esa transacción. Firestore puede reintentar una función de transacción ante contención, por lo que el callback debe ser seguro frente a múltiples ejecuciones. citeturn0search0turn0search4
 
@@ -122,12 +132,10 @@ Resultado confirmado:
 
 ## 8. Gates restantes
 
-1. **Ejecutar `pnpm test:outbox-recovery-emulator`.**
-2. Corregir cualquier incompatibilidad real detectada por el emulator.
-3. Diseñar autorización administrativa real para replay en runtime, no sólo en el helper.
-4. Diseñar worker/scheduler productivo gestionado.
-5. Conectar `CONEXA_SERVICE_CLOSED` a un consumidor real cuando exista un efecto de negocio definido.
-6. Sólo después producir `CONEXA_SERVICE_CLOSED` desde `reviewService.ts` dentro de la transacción de cierre.
+1. Diseñar autorización administrativa real para replay en runtime, no sólo en el helper.
+2. Diseñar worker/scheduler productivo gestionado.
+3. Conectar `CONEXA_SERVICE_CLOSED` a un consumidor real cuando exista un efecto de negocio definido.
+4. Sólo después producir `CONEXA_SERVICE_CLOSED` desde `reviewService.ts` dentro de la transacción de cierre.
 
 ## 9. Resultado
 
@@ -138,5 +146,5 @@ Resultado confirmado:
 **FASE 30.6 — PASS 3/3.**  
 **FASE 30.7 — PASS 2/2.**  
 **FASE 30.8 — PASS 2/2.**  
-**FASE 30.9 — IMPLEMENTADA; E2E pendiente de ejecución local.**  
-**Producción de `CONEXA_SERVICE_CLOSED`: BLOQUEADA hasta completar recovery E2E, definir autorización real de replay y definir el consumidor de negocio correspondiente.**
+**FASE 30.9 — PASS 3/3.**  
+**Producción de `CONEXA_SERVICE_CLOSED`: BLOQUEADA hasta definir autorización real de replay y consumidor de negocio correspondiente.**
