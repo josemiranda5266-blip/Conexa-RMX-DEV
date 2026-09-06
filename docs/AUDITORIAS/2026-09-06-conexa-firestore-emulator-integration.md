@@ -18,11 +18,12 @@ No se agregaron emuladores de Auth, Storage, Functions ni otros servicios porque
 
 ### 2. `src/server/firebaseAdmin.ts`
 
-Se agregó una ruta explícita para tests que requiere simultáneamente:
+Se agregó una ruta explícita para emulador que requiere simultáneamente:
 
-- `NODE_ENV=test`;
 - `FIRESTORE_EMULATOR_HOST` presente;
 - `GCLOUD_PROJECT` o `FIREBASE_PROJECT_ID` con formato `demo-*`.
+
+Se eliminó la dependencia de `NODE_ENV=test` de esta barrera. Esto permite que `firebase emulators:exec` proporcione el contexto del emulador sin depender de sintaxis específica de Bash, PowerShell o CMD.
 
 En ese caso se inicializa Firebase Admin con `projectId` y el SDK dirige Firestore al emulator mediante `FIRESTORE_EMULATOR_HOST`.
 
@@ -38,7 +39,7 @@ que utiliza `firebase emulators:exec --project demo-conexa-unified --only firest
 
 ### 4. `tests/conexa-review-concurrency.emulator.test.ts`
 
-La prueba ya no depende de que el shell establezca manualmente `NODE_ENV=test`. La barrera de seguridad de ejecución es:
+La prueba no depende de que el shell establezca manualmente `NODE_ENV=test`. La barrera de seguridad de ejecución es:
 
 - `FIRESTORE_EMULATOR_HOST` presente;
 - `GCLOUD_PROJECT` o `FIREBASE_PROJECT_ID` con formato `demo-*`.
