@@ -67,11 +67,25 @@ export async function saveProfessionalReview(
     if (!requestSnap.exists) throw new Error('SERVICE_REQUEST_NOT_FOUND');
     if (!clientSnap.exists) throw new Error('USER_NOT_FOUND');
     if (!professionalSnap.exists) throw new Error('PROFESSIONAL_NOT_FOUND');
-    if (reviewSnap.exists) {
-      return { review: reviewSnap.data() as Review, created: false };
-    }
 
     const request = requestSnap.data() as ServiceRequest;
+
+    if (reviewSnap.exists) {
+      const existingReview = reviewSnap.data() as Review;
+
+      // A retry after the review was committed must still complete the
+      // REVIEW_PENDING -> CLOSED transition atomically. CLOSED is a safe no-op.
+      if (request.status === 'REVIEW_PENDING') {
+        tx.update(requestRef, { status: 'CLOSED' });
+      } else if (request.status !== 'CLOSED') {
+        // Preserve the legacy COMPLETED -> review compatibility path without
+        // inventing a second state transition here.
+        return { review: existingReview, created: false };
+      }
+
+      return { review: existingReview, created: false };
+    }
+
     const client = clientSnap.data() as { id?: string; name?: string; avatar?: string; isBlocked?: boolean };
     const professional = professionalSnap.data() as Record<string, unknown>;
 
@@ -132,7 +146,14 @@ export async function saveProfessionalReview(
         reviewCompletedAt: createdAt,
         settledAt: createdAt,
         settlementStatus: 'SETTLED',
+        settlementReason: 'REVIEW_COMPLETED',
       });
+    }
+
+    // Canonical close: only REVIEW_PENDING is closed here. COMPLETED remains
+    // compatible with the legacy review flow and is not closed directly.
+    if (request.status === 'REVIEW_PENDING') {
+      tx.update(requestRef, { status: 'CLOSED' });
     }
 
     return { review, created: true };
