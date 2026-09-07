@@ -10,6 +10,26 @@ function db(): Firestore {
   return getAdminDb() as Firestore;
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isNexoraOrderCompletedPayload(value: unknown): value is NexoraOrderCompletedEvent {
+  if (!value || typeof value !== 'object') return false;
+
+  const payload = value as Record<string, unknown>;
+  return (
+    isNonEmptyString(payload.eventId) &&
+    payload.type === 'NEXORA_ORDER_COMPLETED' &&
+    isNonEmptyString(payload.occurredAt) &&
+    isNonEmptyString(payload.userId) &&
+    isNonEmptyString(payload.orderId) &&
+    Array.isArray(payload.listingIds) &&
+    payload.listingIds.every(isNonEmptyString) &&
+    typeof payload.requiresInstallation === 'boolean'
+  );
+}
+
 function buildDomainEvent(data: Record<string, unknown>): DomainEvent {
   const id = typeof data.id === 'string' ? data.id : '';
   const type = data.type;
@@ -17,8 +37,18 @@ function buildDomainEvent(data: Record<string, unknown>): DomainEvent {
   const producer = data.producer;
   const payload = data.payload;
 
-  if (!id || type !== 'NEXORA_ORDER_COMPLETED' || !occurredAt || producer !== 'NEXORA' || !payload || typeof payload !== 'object') {
+  if (
+    !id ||
+    type !== 'NEXORA_ORDER_COMPLETED' ||
+    !occurredAt ||
+    producer !== 'NEXORA' ||
+    !isNexoraOrderCompletedPayload(payload)
+  ) {
     throw new Error('INVALID_EVENT');
+  }
+
+  if (payload.eventId !== id || payload.type !== type || payload.occurredAt !== occurredAt) {
+    throw new Error('INVALID_EVENT_CORRELATION');
   }
 
   return { id, type, occurredAt, producer, payload } as DomainEvent;
