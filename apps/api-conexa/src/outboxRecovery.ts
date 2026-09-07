@@ -35,6 +35,7 @@ const PERMANENT_CODES = new Set([
   'PERMISSION_DENIED',
   'UNAUTHENTICATED',
   'INVALID_EVENT',
+  'INVALID_EVENT_CORRELATION',
   'ORDER_NOT_FOUND',
   'EVENT_ORDER_USER_MISMATCH',
 ]);
@@ -58,18 +59,24 @@ export function classifyOutboxError(error: unknown): OutboxErrorDisposition {
   return 'PERMANENT';
 }
 
+function safeFailureCode(error: unknown): string {
+  const code = errorCode(error);
+  if (code && /^[A-Z][A-Z0-9_]{1,63}$/.test(code)) return code;
+  if (error instanceof Error && /^[A-Z][A-Z0-9_]{1,63}$/.test(error.message)) return error.message;
+  return 'UNKNOWN_ERROR';
+}
+
 export function nextFailureState(
   attempts: number,
   error: unknown,
 ): { status: 'PENDING' | 'FAILED'; attempts: number; lastError: string } {
   const nextAttempts = Math.max(0, Number.isFinite(attempts) ? attempts : 0) + 1;
   const disposition = classifyOutboxError(error);
-  const message = error instanceof Error ? error.message : 'UNKNOWN';
 
   return {
     status: disposition === 'RETRYABLE' && nextAttempts < OUTBOX_MAX_ATTEMPTS ? 'PENDING' : 'FAILED',
     attempts: nextAttempts,
-    lastError: message,
+    lastError: safeFailureCode(error),
   };
 }
 
