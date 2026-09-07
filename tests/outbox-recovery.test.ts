@@ -40,7 +40,7 @@ test('retryable failures remain pending below the attempt limit', () => {
   assert.deepEqual(next, {
     status: 'PENDING',
     attempts: 3,
-    lastError: 'UNKNOWN',
+    lastError: 'UNAVAILABLE',
   });
 });
 
@@ -49,8 +49,14 @@ test('permanent failures become failed immediately', () => {
   assert.deepEqual(next, {
     status: 'FAILED',
     attempts: 1,
-    lastError: 'UNKNOWN',
+    lastError: 'PERMISSION_DENIED',
   });
+});
+
+test('unknown error messages are never persisted as raw diagnostics', () => {
+  const next = nextFailureState(0, new Error('database password=secret-token'));
+  assert.equal(next.lastError, 'UNKNOWN_ERROR');
+  assert.equal(next.lastError.includes('secret-token'), false);
 });
 
 test('retryable failures become failed at the maximum attempt', () => {
