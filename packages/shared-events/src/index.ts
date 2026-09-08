@@ -62,12 +62,11 @@ export function isDomainEvent(value: unknown): value is DomainEvent {
     return event.producer === 'CONEXA' && isConexaServiceClosedEvent(event.payload);
   }
 
-  return (
-    event.type === 'NEXORA_ORDER_COMPLETED' &&
-    (event.producer === 'NEXORA' || event.producer === 'CONEXA') &&
-    event.payload !== null &&
-    typeof event.payload === 'object'
-  );
+  if (event.type === 'NEXORA_ORDER_COMPLETED') {
+    return event.producer === 'NEXORA' && event.payload !== null && typeof event.payload === 'object';
+  }
+
+  return false;
 }
 
 export function isConexaServiceClosedDomainEvent(
