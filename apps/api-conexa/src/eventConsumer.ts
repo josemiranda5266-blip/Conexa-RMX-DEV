@@ -2,12 +2,12 @@ import type { NexoraOrderCompletedEvent } from '@super-app/shared-types';
 import type { DomainEvent } from '@super-app/shared-events';
 import type { DocumentReference, Firestore, Transaction } from 'firebase-admin/firestore';
 import { dispatchDomainEvent } from './eventDispatcher.js';
-import { getAdminDb } from '../../../src/server/firebaseAdmin.js';
+import { getAdminDb } from './firebaseAdmin.js';
 import { runEventIdempotently, type EventIdempotencyResult } from './eventIdempotency.js';
 import { nextFailureState } from './outboxRecovery.js';
 
 function db(): Firestore {
-  return getAdminDb() as Firestore;
+  return getAdminDb();
 }
 
 function isNonEmptyString(value: unknown): value is string {
