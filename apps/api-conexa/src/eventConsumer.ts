@@ -117,7 +117,21 @@ export async function processNexoraOrderCompleted(limit = 20): Promise<number> {
           result = await handleNexoraOrderCompleted(domainEvent);
         },
       });
-      if (result === 'PROCESSED') processed++;
+
+      if (result === 'PROCESSED') {
+        processed++;
+      } else if (result === 'ALREADY_PROCESSED') {
+        await firestore.runTransaction(async tx => {
+          const current = await tx.get(eventDoc.ref);
+          if (!current.exists || current.data()?.status !== 'PENDING') return;
+          tx.update(eventDoc.ref, {
+            status: 'PUBLISHED',
+            processedAt: new Date().toISOString(),
+            lastError: null,
+            updatedAt: new Date().toISOString(),
+          });
+        });
+      }
     } catch (error) {
       await firestore.runTransaction(async (tx: Transaction) => {
         const current = await tx.get(eventDoc.ref);
