@@ -6,10 +6,6 @@ import { decryptOAuthToken } from './mercadoPagoOAuthTokenStore.js';
 import { submitEvidenceToMP, type MPChargebackEvidenceFile } from '@super-app/shared-payments';
 
 export const chargebackAdminRouter = Router();
-// Base64 expands binary payloads by roughly one third, so allow enough JSON
-// envelope space for the documented 10 MB aggregate evidence limit. The parser
-// is attached only to evidence POST routes; normal admin/API requests retain the
-// default 1 MB body limit.
 const evidenceJsonParser = express.json({ limit: '15mb' });
 const MAX_EVIDENCE_FILES = 10;
 const MAX_TOTAL_EVIDENCE_BYTES = 10 * 1024 * 1024;
@@ -33,8 +29,8 @@ chargebackAdminRouter.get('/api/admin/chargebacks', async (req: Request, res: Re
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
     const snap = await getAdminDb().collection('chargebackCases').orderBy('updatedAt', 'desc').limit(limit).get();
     return res.json(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-  } catch (error: any) {
-    return res.status(500).json({ error: 'CHARGEBACK_LIST_FAILED', detail: error?.message || 'unknown' });
+  } catch {
+    return res.status(500).json({ error: 'CHARGEBACK_LIST_FAILED' });
   }
 });
 
@@ -51,11 +47,7 @@ chargebackAdminRouter.get('/api/admin/chargebacks/:id', async (req: Request, res
 function sanitizeFilename(value: unknown): string {
   if (typeof value !== 'string') return '';
   const basename = value.replace(/\\/g, '/').split('/').pop() || '';
-  return basename
-    .trim()
-    .replace(/[^a-zA-Z0-9._-]/g, '_')
-    .replace(/^\.+$/, '')
-    .slice(0, 180);
+  return basename.trim().replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^\.+$/, '').slice(0, 180);
 }
 
 function decodeEvidenceFiles(body: any): MPChargebackEvidenceFile[] {
@@ -113,7 +105,7 @@ chargebackAdminRouter.post('/api/admin/chargebacks/:id/evidence', evidenceJsonPa
     });
     return res.status(201).json({ success: true, files: normalized.map(file => ({ filename: file.filename, mimeType: file.mimeType, size: file.content.byteLength })) });
   } catch (error: any) {
-    return res.status(error?.message === 'CHARGEBACK_CASE_NOT_FOUND' ? 404 : 500).json({ error: error?.message || 'EVIDENCE_SAVE_FAILED' });
+    return res.status(error?.message === 'CHARGEBACK_CASE_NOT_FOUND' ? 404 : 500).json({ error: error?.message === 'CHARGEBACK_CASE_NOT_FOUND' ? error.message : 'EVIDENCE_SAVE_FAILED' });
   }
 });
 
@@ -144,16 +136,8 @@ chargebackAdminRouter.post('/api/admin/chargebacks/:id/submit-evidence', evidenc
       return res.json({ success: true, idempotent: true, provider: chargeback.evidenceProviderResponse || null });
     }
 
-    // The same case + exact evidence produces the same provider idempotency key.
-    // This protects against network retries creating duplicate submissions.
     const idempotencyKey = `chargeback-evidence:${id}:${submissionHash}`;
-    const result = await submitEvidenceToMP(
-      id,
-      evidence,
-      decryptOAuthToken(encrypted),
-      idempotencyKey,
-      connection.externalUserId || connection.mpUserId,
-    );
+    const result = await submitEvidenceToMP(id, evidence, decryptOAuthToken(encrypted), idempotencyKey, connection.externalUserId || connection.mpUserId);
     await caseRef.set({
       status: 'UNDER_REVIEW',
       evidenceSubmittedAt: new Date().toISOString(),
@@ -163,6 +147,6 @@ chargebackAdminRouter.post('/api/admin/chargebacks/:id/submit-evidence', evidenc
     }, { merge: true });
     return res.json({ success: true, idempotent: false, provider: result });
   } catch (error: any) {
-    return res.status(502).json({ error: 'CHARGEBACK_EVIDENCE_SUBMIT_FAILED', detail: error?.message || 'unknown' });
+    return res.status(502).json({ error: 'CHARGEBACK_EVIDENCE_SUBMIT_FAILED' });
   }
 });
