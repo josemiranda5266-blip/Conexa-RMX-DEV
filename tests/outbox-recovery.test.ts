@@ -59,6 +59,11 @@ test('unknown error messages are never persisted as raw diagnostics', () => {
   assert.equal(next.lastError.includes('secret-token'), false);
 });
 
+test('unknown uppercase provider codes are also normalized', () => {
+  const next = nextFailureState(0, { code: 'PASSWORD_SECRET_TOKEN' });
+  assert.equal(next.lastError, 'UNKNOWN_ERROR');
+});
+
 test('retryable failures become failed at the maximum attempt', () => {
   const next = nextFailureState(OUTBOX_MAX_ATTEMPTS - 1, { code: 'UNAVAILABLE' });
   assert.equal(next.status, 'FAILED');
