@@ -99,6 +99,9 @@ async function transitionEscrow(orderId: string, event: Parameters<typeof resolv
       const payment = paymentSnap.data() || {};
       const paymentStatus = String(payment.status || '').toUpperCase();
       if (paymentStatus !== 'PAID') throw new Error('PAYMENT_NOT_READY_FOR_RELEASE');
+      if (payment.chargebackPendingResolution === true || payment.chargebackPendingResolution === 'true') {
+        throw new Error('CHARGEBACK_IN_PROGRESS');
+      }
       const refundStatus = String(payment.refundStatus || 'NONE').toUpperCase();
       if (refundStatus === 'PROCESSING' || refundStatus === 'REQUESTED' || refundStatus === 'CONFIRMED') {
         throw new Error('REFUND_IN_PROGRESS');
