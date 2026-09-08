@@ -40,6 +40,8 @@ const PERMANENT_CODES = new Set([
   'EVENT_ORDER_USER_MISMATCH',
 ]);
 
+const KNOWN_FAILURE_CODES = new Set([...RETRYABLE_CODES, ...PERMANENT_CODES]);
+
 function errorCode(error: unknown): string | undefined {
   if (!error || typeof error !== 'object') return undefined;
   const value = error as { code?: unknown };
@@ -61,8 +63,7 @@ export function classifyOutboxError(error: unknown): OutboxErrorDisposition {
 
 function safeFailureCode(error: unknown): string {
   const code = errorCode(error);
-  if (code && /^[A-Z][A-Z0-9_]{1,63}$/.test(code)) return code;
-  if (error instanceof Error && /^[A-Z][A-Z0-9_]{1,63}$/.test(error.message)) return error.message;
+  if (code && KNOWN_FAILURE_CODES.has(code)) return code;
   return 'UNKNOWN_ERROR';
 }
 
