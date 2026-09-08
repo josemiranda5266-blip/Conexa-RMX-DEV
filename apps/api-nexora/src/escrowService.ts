@@ -95,13 +95,32 @@ async function transitionEscrow(orderId: string, event: Parameters<typeof resolv
       const order = orderSnap.data() || {};
       const orderStatus = String(order.status || '').toUpperCase();
       if (orderStatus !== 'PAID') throw new Error('ORDER_NOT_READY_FOR_RELEASE');
+
+      const items = Array.isArray(order.items) ? order.items : [];
+      const listingRefs = items.map((item: any) => db.collection('listings').doc(String(item.listingId)));
+      const listingSnapshots = await Promise.all(listingRefs.map(ref => tx.get(ref)));
+      listingSnapshots.forEach((listingSnap, index) => {
+        if (!listingSnap.exists) throw new Error('ESCROW_LINKED_LISTING_MISSING');
+        const listing = listingSnap.data() || {};
+        const owner = String(listing.reservedByOrderId || '').trim();
+        if (owner && owner !== current.orderId) throw new Error('LISTING_RESERVATION_MISMATCH');
+        const stock = Number.isInteger(listing.stock) && Number(listing.stock) >= 0 ? Number(listing.stock) : 0;
+        tx.update(listingRefs[index], {
+          status: stock === 0 ? 'Vendido' : 'Disponible',
+          reservedQuantity: 0,
+          reservedByOrderId: FieldValue.delete(),
+          reservationExpiresAt: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      });
+
       tx.update(orderRef, { status: 'COMPLETED', completedAt: timestamp, updatedAt: FieldValue.serverTimestamp(), escrowReleasedAt: timestamp });
       tx.update(paymentRef, { settlementStatus: 'SETTLED', settledAt: timestamp, updatedAt: FieldValue.serverTimestamp() });
       if (order.requiresInstallation) {
         const outboxRef = db.collection('eventOutbox').doc();
         tx.create(outboxRef, {
           id: outboxRef.id, type: 'NEXORA_ORDER_COMPLETED', occurredAt: timestamp, producer: 'NEXORA',
-          payload: { eventId: outboxRef.id, type: 'NEXORA_ORDER_COMPLETED', occurredAt: timestamp, userId: current.buyerId, orderId: current.orderId, listingIds: Array.isArray(order.items) ? order.items.map((item: any) => String(item.listingId)) : [], requiresInstallation: true },
+          payload: { eventId: outboxRef.id, type: 'NEXORA_ORDER_COMPLETED', occurredAt: timestamp, userId: current.buyerId, orderId: current.orderId, listingIds: items.map((item: any) => String(item.listingId)), requiresInstallation: true },
           status: 'PENDING', attempts: 0,
         });
       }
