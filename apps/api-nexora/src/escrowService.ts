@@ -96,6 +96,14 @@ async function transitionEscrow(orderId: string, event: Parameters<typeof resolv
       const orderStatus = String(order.status || '').toUpperCase();
       if (orderStatus !== 'PAID') throw new Error('ORDER_NOT_READY_FOR_RELEASE');
 
+      const payment = paymentSnap.data() || {};
+      const paymentStatus = String(payment.status || '').toUpperCase();
+      if (paymentStatus !== 'PAID') throw new Error('PAYMENT_NOT_READY_FOR_RELEASE');
+      const refundStatus = String(payment.refundStatus || 'NONE').toUpperCase();
+      if (refundStatus === 'PROCESSING' || refundStatus === 'REQUESTED' || refundStatus === 'CONFIRMED') {
+        throw new Error('REFUND_IN_PROGRESS');
+      }
+
       const items = Array.isArray(order.items) ? order.items : [];
       const listingRefs = items.map((item: any) => db.collection('listings').doc(String(item.listingId)));
       const listingSnapshots = await Promise.all(listingRefs.map(ref => tx.get(ref)));
