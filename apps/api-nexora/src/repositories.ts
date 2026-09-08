@@ -200,50 +200,6 @@ export const orderRepository = {
       tx.update(orderRef, { status: 'CANCELLED', cancelledAt, updatedAt: FieldValue.serverTimestamp() });
     });
     return cancelled;
-  },
-  async complete(id: string, actorId: string): Promise<{ order: NexoraOrder; eventId?: string }> {
-    const orderRef = db().collection('orders').doc(id);
-    let completed!: NexoraOrder;
-    let eventId: string | undefined;
-    await db().runTransaction(async tx => {
-      const snap = await tx.get(orderRef);
-      if (!snap.exists) throw new Error('ORDER_NOT_FOUND');
-      const data = snap.data() as NexoraOrder;
-      if (data.buyerId !== actorId && data.sellerId !== actorId) throw new Error('FORBIDDEN');
-      if (data.status === 'COMPLETED') { completed = { id, ...data }; return; }
-      if (data.status !== 'PAID') throw new Error('INVALID_ORDER_STATE');
-
-      const completedAt = now();
-      const listingRefs = data.items.map(item => db().collection('listings').doc(item.listingId));
-      const listings = await Promise.all(listingRefs.map(ref => tx.get(ref)));
-      listings.forEach((listingSnap, index) => {
-        if (!listingSnap.exists) return;
-        const listing = listingSnap.data() as Listing;
-        const stock = Number.isInteger(listing.stock) && Number(listing.stock) >= 0 ? Number(listing.stock) : 0;
-        const owner = String(listing.reservedByOrderId || '').trim();
-        if (owner && owner !== id) throw new Error('LISTING_RESERVATION_MISMATCH');
-        tx.update(listingRefs[index], {
-          status: stock === 0 ? 'Vendido' : 'Disponible',
-          reservedQuantity: 0,
-          reservedByOrderId: FieldValue.delete(),
-          reservationExpiresAt: FieldValue.delete(),
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-      });
-
-      completed = { ...data, id, status: 'COMPLETED', completedAt };
-      tx.update(orderRef, { status: 'COMPLETED', completedAt, updatedAt: FieldValue.serverTimestamp() });
-      if (data.requiresInstallation) {
-        const outboxRef = db().collection('eventOutbox').doc();
-        eventId = outboxRef.id;
-        tx.create(outboxRef, {
-          id: outboxRef.id, type: 'NEXORA_ORDER_COMPLETED', occurredAt: completedAt, producer: 'NEXORA',
-          payload: { eventId: outboxRef.id, type: 'NEXORA_ORDER_COMPLETED', occurredAt: completedAt, userId: data.buyerId, orderId: id, listingIds: data.items.map(i => i.listingId), requiresInstallation: true },
-          status: 'PENDING', attempts: 0
-        });
-      }
-    });
-    return { order: completed, ...(eventId ? { eventId } : {}) };
   }
 };
 
