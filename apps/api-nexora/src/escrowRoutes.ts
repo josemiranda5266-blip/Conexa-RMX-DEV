@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth, type AuthenticatedRequest } from './auth.js';
-import { confirmDelivery, expireAndReleaseEligibleEscrows, getEscrowForOrder, openEscrowDispute } from './escrowService.js';
+import { confirmDelivery, getEscrowForOrder, openEscrowDispute } from './escrowService.js';
 
 export const escrowRouter = Router();
 
@@ -39,21 +39,8 @@ escrowRouter.post('/api/orders/:id/dispute', requireAuth, async (req: Authentica
     const code = error instanceof Error ? error.message : 'UNKNOWN';
     if (code === 'ESCROW_NOT_FOUND') return res.status(404).json({ error: code });
     if (code === 'FORBIDDEN') return res.status(403).json({ error: code });
-    if (['DISPUTE_REASON_REQUIRED'].includes(code)) return res.status(400).json({ error: code });
-    if (['INVALID_ORDER_STATE'].includes(code)) return res.status(409).json({ error: code });
+    if (code === 'DISPUTE_REASON_REQUIRED') return res.status(400).json({ error: code });
+    if (code === 'INVALID_ORDER_STATE') return res.status(409).json({ error: code });
     return res.status(500).json({ error: 'Unable to open dispute' });
   }
 });
-
-export function startEscrowAutoReleaseWorker(intervalMs = 15 * 60_000): NodeJS.Timeout {
-  const run = async () => {
-    try {
-      const result = await expireAndReleaseEligibleEscrows();
-      if (result.scanned > 0) console.log(`[ESCROW] auto-release scanned=${result.scanned} released=${result.released}`);
-    } catch (error) {
-      console.error('[ESCROW] auto-release worker failed:', error);
-    }
-  };
-  void run();
-  return setInterval(run, intervalMs);
-}
