@@ -1,3 +1,5 @@
+import type { EventOutboxRecord as CanonicalEventOutboxRecord } from '@super-app/shared-events';
+
 export type Domain = 'CONEXA' | 'NEXORA';
 export type ServiceTerminalStatus = 'CLOSED' | 'SETTLED';
 export interface CanonicalUser { id: string; email?: string; name?: string; isBlocked?: boolean; hasConexaProfile?: boolean; hasNexoraProfile?: boolean; }
@@ -34,4 +36,5 @@ export type NegotiationStage = 'Consulta' | 'En conversación' | 'Oferta realiza
 export interface Conversation { id: string; listingId: string; buyerId: string; sellerId: string; stage: NegotiationStage; lastMessageText: string; lastMessageTime: string; unreadCountBuyer: number; unreadCountSeller: number; }
 export interface Message { id: string; conversationId: string; senderId: string; text: string; timestamp: string; isRead: boolean; imageAttachment?: string; }
 export interface NexoraReview { id: string; buyerId: string; sellerId: string; listingId?: string; rating: number; comment: string; date: string; verifiedPurchase?: boolean; isReported?: boolean; }
-export interface EventOutboxRecord<TPayload = unknown> { id: string; type: 'NEXORA_ORDER_COMPLETED' | 'CONEXA_SERVICE_CLOSED'; occurredAt: string; producer: Domain; payload: TPayload; status: 'PENDING' | 'PUBLISHED' | 'FAILED'; attempts: number; lastError?: string; }
+/** @deprecated Import EventOutboxRecord from @super-app/shared-events. */
+export type EventOutboxRecord<TPayload = unknown> = CanonicalEventOutboxRecord<TPayload>;
