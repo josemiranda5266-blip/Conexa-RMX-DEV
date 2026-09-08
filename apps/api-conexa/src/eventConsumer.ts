@@ -1,5 +1,4 @@
-import type { NexoraOrderCompletedEvent } from '@super-app/shared-types';
-import type { DomainEvent } from '@super-app/shared-events';
+import type { NexoraOrderCompletedEvent, DomainEvent } from '@super-app/shared-events';
 import type { DocumentReference, Firestore, Transaction } from 'firebase-admin/firestore';
 import { dispatchDomainEvent } from './eventDispatcher.js';
 import { getAdminDb } from './firebaseAdmin.js';
