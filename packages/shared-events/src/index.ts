@@ -2,6 +2,16 @@ export type DomainEventType = 'NEXORA_ORDER_COMPLETED' | 'CONEXA_SERVICE_CLOSED'
 
 export type DomainEventProducer = 'CONEXA' | 'NEXORA';
 
+export interface NexoraOrderCompletedEvent {
+  eventId: string;
+  type: 'NEXORA_ORDER_COMPLETED';
+  occurredAt: string;
+  userId: string;
+  orderId: string;
+  listingIds: string[];
+  requiresInstallation: boolean;
+}
+
 export interface ConexaServiceClosedEvent {
   serviceRequestId: string;
   clientId: string;
@@ -31,6 +41,42 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isIsoDate(value: unknown): value is string {
   return isNonEmptyString(value) && Number.isFinite(Date.parse(value));
+}
+
+export function isNexoraOrderCompletedEvent(value: unknown): value is NexoraOrderCompletedEvent {
+  if (!value || typeof value !== 'object') return false;
+  const event = value as Record<string, unknown>;
+  return (
+    isNonEmptyString(event.eventId) &&
+    event.type === 'NEXORA_ORDER_COMPLETED' &&
+    isIsoDate(event.occurredAt) &&
+    isNonEmptyString(event.userId) &&
+    isNonEmptyString(event.orderId) &&
+    Array.isArray(event.listingIds) &&
+    event.listingIds.every(isNonEmptyString) &&
+    typeof event.requiresInstallation === 'boolean'
+  );
+}
+
+export function createNexoraOrderCompletedEvent(input: {
+  eventId: string;
+  occurredAt: string;
+  userId: string;
+  orderId: string;
+  listingIds: string[];
+  requiresInstallation: boolean;
+}): NexoraOrderCompletedEvent {
+  const event: NexoraOrderCompletedEvent = {
+    eventId: input.eventId.trim(),
+    type: 'NEXORA_ORDER_COMPLETED',
+    occurredAt: input.occurredAt,
+    userId: input.userId.trim(),
+    orderId: input.orderId.trim(),
+    listingIds: input.listingIds.map(value => value.trim()).filter(Boolean),
+    requiresInstallation: input.requiresInstallation,
+  };
+  if (!isNexoraOrderCompletedEvent(event)) throw new Error('INVALID_NEXORA_ORDER_COMPLETED_EVENT');
+  return event;
 }
 
 export function isConexaServiceClosedEvent(value: unknown): value is ConexaServiceClosedEvent {
@@ -63,7 +109,7 @@ export function isDomainEvent(value: unknown): value is DomainEvent {
   }
 
   if (event.type === 'NEXORA_ORDER_COMPLETED') {
-    return event.producer === 'NEXORA' && event.payload !== null && typeof event.payload === 'object';
+    return event.producer === 'NEXORA' && isNexoraOrderCompletedEvent(event.payload);
   }
 
   return false;
