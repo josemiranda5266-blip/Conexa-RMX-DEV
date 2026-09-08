@@ -62,10 +62,7 @@ export async function requestMercadoPagoRefund(input: { merchantId: string; paym
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Idempotency-Key': input.idempotencyKey },
     body: input.amountArs === undefined ? '{}' : JSON.stringify({ amount: input.amountArs }),
   });
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(`MP_REFUND_${response.status}${detail ? `:${detail.slice(0, 300)}` : ''}`);
-  }
+  if (!response.ok) throw new Error(`MP_REFUND_${response.status}`);
   const data = await response.json().catch(() => ({})) as any;
   return { providerRefundId: data.id != null ? String(data.id) : undefined, status: data.status != null ? String(data.status) : undefined };
 }
