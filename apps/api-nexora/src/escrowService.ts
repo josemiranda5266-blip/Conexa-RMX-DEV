@@ -103,7 +103,8 @@ async function transitionEscrow(orderId: string, event: Parameters<typeof resolv
         if (!listingSnap.exists) throw new Error('ESCROW_LINKED_LISTING_MISSING');
         const listing = listingSnap.data() || {};
         const owner = String(listing.reservedByOrderId || '').trim();
-        if (owner && owner !== current.orderId) throw new Error('LISTING_RESERVATION_MISMATCH');
+        if (!owner) return;
+        if (owner !== current.orderId) throw new Error('LISTING_RESERVATION_MISMATCH');
         const stock = Number.isInteger(listing.stock) && Number(listing.stock) >= 0 ? Number(listing.stock) : 0;
         tx.update(listingRefs[index], {
           status: stock === 0 ? 'Vendido' : 'Disponible',
