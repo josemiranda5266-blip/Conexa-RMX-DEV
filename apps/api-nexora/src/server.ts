@@ -7,11 +7,13 @@ import { confirmDelivery } from './escrowService.js';
 import { escrowRouter } from './escrowRoutes.js';
 import { chargebackAdminRouter } from './payments/chargebackAdminRouter.js';
 import { handleMercadoPagoWebhook } from './payments/mercadoPagoWebhook.js';
+import { mercadoPagoOAuthRouter } from './payments/mercadoPagoOAuthRouter.js';
 
 const app = express();
 app.disable('x-powered-by');
 // Chargeback evidence uses a larger parser scoped to the admin router. Keep the
 // default API body limit at 1 MB to reduce broad request-body DoS exposure.
+app.use(mercadoPagoOAuthRouter);
 app.use(chargebackAdminRouter);
 app.use(express.json({ limit: '1mb' }));
 const parseLimit = (value: unknown) => { const parsed = Number(value); return Number.isFinite(parsed) ? Math.min(Math.max(Math.floor(parsed), 1), 100) : 50; };
