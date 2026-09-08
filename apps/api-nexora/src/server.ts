@@ -5,8 +5,7 @@ import { prepareNexoraCheckout } from './paymentCheckout.js';
 import { requestNexoraRefund } from './refundService.js';
 import { confirmDelivery } from './escrowService.js';
 import { escrowRouter } from './escrowRoutes.js';
-import { chargebackAdminRouter } from '../../../src/server/payments/chargebackAdminRouter.js';
-import { handleMercadoPagoWebhook } from '../../../src/server/payments/mercadoPagoWebhook.js';
+import { chargebackAdminRouter, handleMercadoPagoWebhook } from './payments/legacyBridge.js';
 
 const app = express();
 app.disable('x-powered-by');
