@@ -26,7 +26,13 @@ export async function runEventIdempotently(
     const ledgerRef = firestore.collection('processedEvents').doc(event.id);
     const ledger = await tx.get(ledgerRef);
 
-    if (ledger.exists) return 'ALREADY_PROCESSED';
+    if (ledger.exists) {
+      const data = ledger.data() || {};
+      if (data.eventId !== event.id || data.eventType !== event.type || data.producer !== event.producer) {
+        throw new Error('EVENT_IDEMPOTENCY_KEY_COLLISION');
+      }
+      return 'ALREADY_PROCESSED';
+    }
 
     await effect(tx);
 
