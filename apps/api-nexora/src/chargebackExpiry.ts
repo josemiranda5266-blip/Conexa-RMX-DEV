@@ -11,17 +11,19 @@ export async function expireOverdueChargebackCases(limit = 100): Promise<number>
     .get();
 
   const now = Date.now();
+  const expiredAt = new Date(now).toISOString();
   let expired = 0;
   await db.runTransaction(async tx => {
     for (const doc of snapshot.docs) {
-      const data = doc.data() || {};
+      const current = await tx.get(doc.ref);
+      if (!current.exists) continue;
+      const data = current.data() || {};
+      const status = String(data.status || '').toUpperCase();
       const deadline = Date.parse(String(data.responseDeadline || ''));
-      if (!Number.isFinite(deadline) || deadline > now) continue;
-      const currentStatus = String(data.status || '').toUpperCase();
-      if (!ACTIVE_STATUSES.includes(currentStatus)) continue;
+      if (!ACTIVE_STATUSES.includes(status) || !Number.isFinite(deadline) || deadline > now) continue;
       tx.update(doc.ref, {
         status: 'EXPIRED',
-        resolvedAt: new Date().toISOString(),
+        resolvedAt: expiredAt,
         resolutionReason: 'MERCADO_PAGO_RESPONSE_DEADLINE_EXPIRED',
         updatedAt: FieldValue.serverTimestamp(),
       });
