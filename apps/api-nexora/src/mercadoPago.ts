@@ -1,16 +1,17 @@
-import { getMercadoPagoOAuthConnection, decryptOAuthToken, type MercadoPagoOAuthConnection } from './payments/mercadoPagoOAuthTokenStore.js';
+import { getValidMercadoPagoOAuthConnection } from './payments/mercadoPagoOAuth.js';
+import { decryptOAuthToken, type MercadoPagoOAuthConnection } from './payments/mercadoPagoOAuthTokenStore.js';
 
 export type { MercadoPagoOAuthConnection } from './payments/mercadoPagoOAuthTokenStore.js';
 
 export async function getNexoraMercadoPagoConnection(merchantId: string): Promise<MercadoPagoOAuthConnection> {
-  return getMercadoPagoOAuthConnection(merchantId);
+  return getValidMercadoPagoOAuthConnection(merchantId);
 }
 
 export async function createNexoraCheckout(input: { merchantId: string; paymentTransactionId: string; title: string; amountArs: number; clientEmail?: string }) {
   if (!Number.isFinite(input.amountArs) || input.amountArs <= 0) throw new Error('INVALID_PAYMENT_AMOUNT');
   const appUrl = process.env.APP_URL?.trim();
   if (!appUrl) throw new Error('APP_URL_REQUIRED');
-  const connection = await getMercadoPagoOAuthConnection(input.merchantId);
+  const connection = await getValidMercadoPagoOAuthConnection(input.merchantId);
   const token = decryptOAuthToken(connection.encryptedAccessToken);
   const base = appUrl.replace(/\/$/, '');
   const notificationUrl = `${base}/api/mercadopago/webhook?transactionId=${encodeURIComponent(input.paymentTransactionId)}`;
@@ -36,7 +37,7 @@ export async function requestMercadoPagoRefund(input: { merchantId: string; paym
   if (!input.paymentId?.trim()) throw new Error('MP_PAYMENT_ID_REQUIRED');
   if (!input.idempotencyKey?.trim()) throw new Error('MP_IDEMPOTENCY_KEY_REQUIRED');
   if (input.amountArs !== undefined && (!Number.isFinite(input.amountArs) || input.amountArs <= 0)) throw new Error('INVALID_REFUND_AMOUNT');
-  const connection = await getMercadoPagoOAuthConnection(input.merchantId);
+  const connection = await getValidMercadoPagoOAuthConnection(input.merchantId);
   const token = decryptOAuthToken(connection.encryptedAccessToken);
   const response = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(input.paymentId)}/refunds`, {
     method: 'POST',
