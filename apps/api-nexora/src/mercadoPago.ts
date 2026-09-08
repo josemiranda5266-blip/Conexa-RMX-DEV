@@ -7,6 +7,22 @@ export async function getNexoraMercadoPagoConnection(merchantId: string): Promis
   return getValidMercadoPagoOAuthConnection(merchantId);
 }
 
+export async function findNexoraCheckout(input: { merchantId: string; paymentTransactionId: string }) {
+  const connection = await getValidMercadoPagoOAuthConnection(input.merchantId);
+  const token = decryptOAuthToken(connection.encryptedAccessToken);
+  const params = new URLSearchParams({ external_reference: input.paymentTransactionId });
+  const response = await fetch(`https://api.mercadopago.com/checkout/preferences/search?${params.toString()}`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error(`MP_CHECKOUT_SEARCH_${response.status}`);
+  const data = await response.json() as any;
+  const elements = Array.isArray(data?.elements) ? data.elements : [];
+  const match = elements.find((element: any) => String(element?.external_reference ?? '') === input.paymentTransactionId && element?.id && element?.init_point);
+  if (!match) return null;
+  return { preferenceId: String(match.id), checkoutUrl: String(match.init_point) };
+}
+
 export async function createNexoraCheckout(input: { merchantId: string; paymentTransactionId: string; title: string; amountArs: number; clientEmail?: string }) {
   if (!Number.isFinite(input.amountArs) || input.amountArs <= 0) throw new Error('INVALID_PAYMENT_AMOUNT');
   const appUrl = process.env.APP_URL?.trim();
