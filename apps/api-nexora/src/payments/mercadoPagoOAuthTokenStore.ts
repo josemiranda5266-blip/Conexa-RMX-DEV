@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { getOAuthConnection } from './mercadoPagoOAuthPersistence.js';
+import { getDb } from '../firebaseAdmin.js';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_BYTES = 12;
@@ -68,8 +68,10 @@ export function normalizeMercadoPagoOAuthConnection(data: any, fallbackMerchantI
 export async function getMercadoPagoOAuthConnection(merchantId: string): Promise<MercadoPagoOAuthConnection> {
   const normalizedMerchantId = merchantId.trim();
   if (!normalizedMerchantId) throw new Error('MERCADO_PAGO_MERCHANT_ID_REQUIRED');
-  const connection = await getOAuthConnection(normalizedMerchantId);
-  if (!connection) throw new Error('MERCADO_PAGO_CONNECTION_NOT_FOUND');
+  const snap = await getDb().collection('mercado_pago_connections').doc(normalizedMerchantId).get();
+  if (!snap.exists) throw new Error('MERCADO_PAGO_CONNECTION_NOT_FOUND');
+  const connection = normalizeMercadoPagoOAuthConnection(snap.data(), normalizedMerchantId);
+  if (!connection) throw new Error('MERCADO_PAGO_CONNECTION_INVALID');
   if (connection.revokedAt) throw new Error('MERCADO_PAGO_CONNECTION_REVOKED');
   return connection;
 }
