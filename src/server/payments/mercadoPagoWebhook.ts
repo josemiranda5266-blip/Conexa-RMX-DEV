@@ -3,12 +3,10 @@ import { getAdminDb } from '../firebaseAdmin.js';
 import { verifyMercadoPagoWebhookSignature } from './mercadoPagoConfig.js';
 import { reconcileMercadoPagoPayment } from './mercadoPagoReconciliation.js';
 import { MercadoPagoOAuthConnection, decryptOAuthToken, normalizeMercadoPagoOAuthConnection } from './mercadoPagoOAuthTokenStore.js';
-import { startChargebackExpiryWorker } from './chargebackExpiry.js';
 import { getChargebackFromMP } from '@super-app/shared-payments';
 import { absorbChargebackCasesForRefund, openOrUpdateChargebackCase, resolveChargebackCase } from './chargebackResolutionService.js';
 
 const CONNECTION_COLLECTION = 'mercado_pago_connections';
-startChargebackExpiryWorker();
 
 function resourceId(req: Request): string | undefined {
   const body = req.body as any;
@@ -63,7 +61,6 @@ export async function handleMercadoPagoWebhook(req: Request, res: Response): Pro
     if (isChargebackEvent(req)) {
       const providerPaymentId = paymentId(req);
       if (!providerPaymentId) return res.status(400).json({ success: false, code: 'PAYMENT_ID_REQUIRED' });
-      // For chargebacks the signed resource is data.id = chargeback case ID, never payment_id.
       if (!verifyMercadoPagoWebhookSignature(signature(req), requestId(req), signedResourceId)) return res.status(401).json({ success: false, code: 'WEBHOOK_SIGNATURE_INVALID' });
 
       const hintedTransactionId = typeof req.query.transactionId === 'string' ? req.query.transactionId.trim() : '';
