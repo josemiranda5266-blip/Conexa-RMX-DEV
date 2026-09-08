@@ -83,13 +83,23 @@ async function transitionEscrow(orderId: string, event: Parameters<typeof resolv
       updates.disputeReason = reason?.trim().slice(0, 1000) || 'Buyer opened a dispute';
     }
     if (transition.status === 'REFUNDED') updates.refundedAt = timestamp;
-    tx.update(escrowRef, updates);
-
+    
     const orderRef = db.collection('orders').doc(current.orderId);
     const paymentRef = db.collection('paymentTransactions').doc(current.paymentTransactionId);
     const orderSnap = await tx.get(orderRef);
     const paymentSnap = await tx.get(paymentRef);
     if (!orderSnap.exists || !paymentSnap.exists) throw new Error('ESCROW_LINKED_RECORD_MISSING');
+
+    if (transition.status === 'REFUNDED') {
+      const payment = paymentSnap.data() || {};
+      const paymentStatus = String(payment.status || '').toUpperCase();
+      const refundStatus = String(payment.refundStatus || '').toUpperCase();
+      if (paymentStatus !== 'REFUNDED' && refundStatus !== 'CONFIRMED') {
+        throw new Error('PAYMENT_NOT_REFUNDED');
+      }
+    }
+
+    tx.update(escrowRef, updates);
 
     if (transition.status === 'RELEASED') {
       const order = orderSnap.data() || {};
