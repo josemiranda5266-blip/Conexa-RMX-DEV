@@ -153,16 +153,42 @@ export async function reconcileMercadoPagoPayment(paymentId: string, connection:
             if (escrowSnap.exists && String(escrowSnap.data()?.status) === 'HELD') tx.update(escrowRef, { status: 'DISPUTED', disputedAt: now, disputeReason: 'MERCADO_PAGO_CHARGEBACK', updatedAt: now });
           } else if (transition.refunded && ['PENDING', 'PAID'].includes(orderStatus)) {
             const items = Array.isArray(order.items) ? order.items : [];
-            const listingRefs = items.map((item: any) => db.collection('listings').doc(String(item.listingId)));
-            const listingSnaps = await Promise.all(listingRefs.map(ref => tx.get(ref)));
-            listingSnaps.forEach((snap, index) => {
-              if (!snap.exists) return;
-              const listing = snap.data() || {};
-              if (String(listing.reservedByOrderId || '') !== orderId) return;
-              const stock = Number.isInteger(listing.stock) && Number(listing.stock) >= 0 ? Number(listing.stock) : 0;
-              const restored = stock + Number(items[index].quantity);
-              tx.update(listingRefs[index], { stock: restored, status: restored > 0 ? 'Disponible' : listing.status, reservedQuantity: 0, reservedByOrderId: FieldValue.delete(), reservationExpiresAt: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() });
-            });
+            const inventoryReversalRef = db.collection('inventoryReversals').doc(`refund:${orderId}`);
+            const inventoryReversalSnap = await tx.get(inventoryReversalRef);
+            if (!inventoryReversalSnap.exists) {
+              const listingRefs = items.map((item: any) => db.collection('listings').doc(String(item.listingId)));
+              const listingSnaps = await Promise.all(listingRefs.map(ref => tx.get(ref)));
+              listingSnaps.forEach((snap, index) => {
+                if (!snap.exists) return;
+                const listing = snap.data() || {};
+                const quantity = Number(items[index]?.quantity);
+                if (!Number.isFinite(quantity) || quantity <= 0) return;
+                const reservationOwner = String(listing.reservedByOrderId || '').trim();
+                if (reservationOwner && reservationOwner !== orderId) return;
+                const stock = Number.isInteger(listing.stock) && Number(listing.stock) >= 0 ? Number(listing.stock) : 0;
+                const restored = stock + quantity;
+                tx.update(listingRefs[index], {
+                  stock: restored,
+                  status: restored > 0 ? 'Disponible' : listing.status,
+                  reservedQuantity: reservationOwner === orderId ? 0 : listing.reservedQuantity,
+                  ...(reservationOwner === orderId ? { reservedByOrderId: FieldValue.delete(), reservationExpiresAt: FieldValue.delete() } : {}),
+                  updatedAt: FieldValue.serverTimestamp(),
+                });
+              });
+              tx.create(inventoryReversalRef, {
+                id: inventoryReversalRef.id,
+                domain: 'NEXORA',
+                paymentTransactionId: resolved.ref.id,
+                providerPaymentId: String(paymentId),
+                orderId,
+                kind: 'REFUND_INVENTORY',
+                amountArs: expectedAmount,
+                currency: 'ARS',
+                itemCount: items.length,
+                confirmedAt: now,
+                source: 'MERCADO_PAGO_WEBHOOK',
+              });
+            }
             tx.update(orderRef, { status: 'CANCELLED', cancellationReason: 'MERCADO_PAGO_REFUND', cancelledAt: now, updatedAt: FieldValue.serverTimestamp() });
             const escrowRef = db.collection(ESCROW_COLLECTION).doc(`escrow:${orderId}`);
             const escrowSnap = await tx.get(escrowRef);
