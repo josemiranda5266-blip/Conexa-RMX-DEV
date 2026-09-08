@@ -42,8 +42,7 @@ async function resolveFinancialRecord(transactionId: string) {
 
 function writeHeldEscrow(tx: FirebaseFirestore.Transaction, db: FirebaseFirestore.Firestore, input: { orderId: string; paymentTransactionId: string; buyerId: string; sellerId: string; amountArs: number; providerPaymentId: string }, at: string) {
   const ref = db.collection(ESCROW_COLLECTION).doc(`escrow:${input.orderId}`);
-  const autoReleaseAt = new Date(Date.parse(at) + ESCROW_AUTO_RELEASE_HOURS * 60 * 60_000).toISOString();
-  tx.create(ref, { id: ref.id, orderId: input.orderId, paymentTransactionId: input.paymentTransactionId, buyerId: input.buyerId, sellerId: input.sellerId, amountArs: input.amountArs, currency: 'ARS', status: 'HELD', createdAt: at, heldAt: at, autoReleaseAt, provider: 'MERCADO_PAGO', providerPaymentId: input.providerPaymentId, custodyMode: 'PROVIDER_SETTLED_CONTROL' });
+  tx.create(ref, { id: ref.id, orderId: input.orderId, paymentTransactionId: input.paymentTransactionId, buyerId: input.buyerId, sellerId: input.sellerId, amountArs: input.amountArs, currency: 'ARS', status: 'HELD', createdAt: at, heldAt: at, autoReleaseAt: new Date(Date.parse(at) + ESCROW_AUTO_RELEASE_HOURS * 60 * 60_000).toISOString(), provider: 'MERCADO_PAGO', providerPaymentId: input.providerPaymentId, custodyMode: 'PROVIDER_SETTLED_CONTROL' });
 }
 
 export async function reconcileMercadoPagoPayment(paymentId: string, connection: MercadoPagoOAuthConnection): Promise<PaymentReconciliationResult> {
@@ -129,7 +128,13 @@ export async function reconcileMercadoPagoPayment(paymentId: string, connection:
     }
 
     if (transition.paid && !(resolved.kind === 'NEXORA' && currentStatus === 'PAID')) { update.status = 'PAID'; update.paidAt = current.paidAt || now; if (resolved.kind === 'CONEXA') update.settlementStatus = current.settlementStatus || 'PENDING'; }
-    if (transition.refunded) update.refundedAt = current.refundedAt || now;
+    if (transition.refunded) {
+      update.refundedAt = current.refundedAt || now;
+      if (resolved.kind === 'NEXORA') {
+        update.refundStatus = 'CONFIRMED';
+        update.refundConfirmedAt = current.refundConfirmedAt || now;
+      }
+    }
     if (transition.cancelled) update.cancelledAt = current.cancelledAt || now;
     if (transition.changed && !transition.chargeback && !orderWasSettled) update.status = transition.status;
 
