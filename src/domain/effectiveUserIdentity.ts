@@ -6,36 +6,32 @@ export interface AuthClaimsIdentity {
 }
 
 /**
- * Resolves the frontend identity from Firebase-authenticated claims plus the
- * Firestore profile. Privileged roles are claim-authoritative; Firestore data
- * may provide capability/profile fields but cannot elevate the authenticated
- * session by itself.
+ * Resolves the authenticated identity from Firebase custom claims plus the
+ * public Firestore profile.
+ *
+ * Security boundary:
+ * - `role` is always authoritative from the authenticated claim.
+ * - Firestore may describe professional capability/profile data, but it can
+ *   never promote a USER to a privileged role by editing `/users/{uid}`.
+ * - `hasProfessionalProfile` is a capability flag and is intentionally
+ *   independent from the security role.
+ * - `activeMode` is a UI/session preference constrained by the identity and
+ *   available capabilities.
  */
 export function resolveEffectiveUserIdentity(
   firebaseIdentity: AuthClaimsIdentity,
   profile: Partial<UserProfile> | null | undefined,
 ): Pick<UserProfile, 'role' | 'isProfessional' | 'hasProfessionalProfile' | 'activeMode'> {
-  const claimRole = firebaseIdentity.role || 'USER';
-  const firestoreRole = profile?.role;
-  const privilegedClaim = claimRole === 'ADMIN' || claimRole === 'SUPER_ADMIN';
-
-  let role: Role = 'USER';
-  if (privilegedClaim) {
-    role = claimRole;
-  } else if (firestoreRole === 'ADMIN' || firestoreRole === 'SUPER_ADMIN') {
-    role = 'USER';
-  } else if (firestoreRole) {
-    role = firestoreRole;
-  } else {
-    role = claimRole;
-  }
+  const role: Role = firebaseIdentity.role || 'USER';
 
   const hasProfessionalProfile =
     profile?.hasProfessionalProfile === true ||
     profile?.isProfessional === true ||
-    role === 'PROFESSIONAL';
+    profile?.professionId != null ||
+    Boolean(profile?.professionName?.trim());
 
   const isProfessional = hasProfessionalProfile;
+
   const requestedMode = profile?.activeMode;
   const activeMode =
     role === 'ADMIN' || role === 'SUPER_ADMIN'
