@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { ServiceRequest, Quote } from '../types';
+import { canUseProfessionalMode } from '../domain/professionalMatching';
 import { 
   FileText, Clock, DollarSign, MapPin, CheckCircle2, 
   MessageSquare, ChevronRight, AlertCircle, Sparkles 
@@ -19,12 +20,7 @@ export const RequestsList: React.FC<RequestsListProps> = ({
   const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const isPro = !!currentUser && (
-    currentUser.role === 'PROFESSIONAL' ||
-    currentUser.isProfessional === true ||
-    currentUser.hasProfessionalProfile === true ||
-    currentUser.activeMode === 'PROFESSIONAL'
-  );
+  const isPro = !!currentUser && canUseProfessionalMode(currentUser);
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -122,7 +118,6 @@ export const RequestsList: React.FC<RequestsListProps> = ({
                 </span>
               </div>
 
-              {/* Quotes info strip */}
               <div className="p-3 bg-slate-50/70 backdrop-blur-sm rounded-2xl border border-white/60 flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
                   <FileText size={16} className="text-blue-600" />
@@ -152,7 +147,6 @@ export const RequestsList: React.FC<RequestsListProps> = ({
         })}
       </div>
 
-      {/* Selected Request Modal / Quotes Breakdown */}
       {selectedRequest && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-md animate-fade-in overflow-y-auto text-xs">
           <div className="bg-white/85 backdrop-blur-2xl rounded-3xl shadow-2xl max-w-lg w-full my-auto border border-white/80 p-6 space-y-4 max-h-[90vh] overflow-y-auto relative">
