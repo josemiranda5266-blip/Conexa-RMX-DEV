@@ -33,7 +33,7 @@ export async function handleProfessionalProfileSave(req: Request, res: Response)
       portfolioImages: Array.isArray(body.portfolioImages) ? body.portfolioImages : [],
     };
 
-    const result = await saveProfessionalProfile(auth.userId, input);
+    const result = await saveProfessionalProfile(auth.userId, input, auth.role);
     res.status(200).json(result);
   } catch (error: any) {
     const code = typeof error?.message === 'string' ? error.message : 'PROFESSIONAL_PROFILE_SAVE_FAILED';
