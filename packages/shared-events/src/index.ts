@@ -35,12 +35,16 @@ export interface EventOutboxRecord<TPayload = unknown> extends DomainEvent<TPayl
   replayCount?: number;
 }
 
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0;
+const MAX_ID_LENGTH = 128;
+const MAX_DATE_LENGTH = 64;
+const MAX_LISTING_IDS = 100;
+
+function isNonEmptyString(value: unknown, maxLength = MAX_ID_LENGTH): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= maxLength;
 }
 
 function isIsoDate(value: unknown): value is string {
-  return isNonEmptyString(value) && Number.isFinite(Date.parse(value));
+  return isNonEmptyString(value, MAX_DATE_LENGTH) && Number.isFinite(Date.parse(value));
 }
 
 export function isNexoraOrderCompletedEvent(value: unknown): value is NexoraOrderCompletedEvent {
@@ -53,7 +57,8 @@ export function isNexoraOrderCompletedEvent(value: unknown): value is NexoraOrde
     isNonEmptyString(event.userId) &&
     isNonEmptyString(event.orderId) &&
     Array.isArray(event.listingIds) &&
-    event.listingIds.every(isNonEmptyString) &&
+    event.listingIds.length <= MAX_LISTING_IDS &&
+    event.listingIds.every((listingId) => isNonEmptyString(listingId)) &&
     typeof event.requiresInstallation === 'boolean'
   );
 }
