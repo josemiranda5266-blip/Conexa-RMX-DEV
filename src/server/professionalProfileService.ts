@@ -3,6 +3,7 @@ import { normalizeProfessionalProfileWrite, type ProfessionalProfileWriteInput }
 import { getProfessionById, getProfessionByName } from '../domain/professionCatalog.js';
 import { buildPublicProfessionalProfileDocument } from './publicProfessionalProfileProjection.js';
 import { buildRadarCandidateProjection } from './radar/radarCandidateProjection.js';
+import type { AppRole } from '../domain/authPolicy.js';
 
 export interface SaveProfessionalProfileResult {
   user: Record<string, unknown>;
@@ -11,6 +12,7 @@ export interface SaveProfessionalProfileResult {
 export async function saveProfessionalProfile(
   userId: string,
   input: ProfessionalProfileWriteInput,
+  authenticatedRole: AppRole = 'USER',
 ): Promise<SaveProfessionalProfileResult> {
   const normalizedUserId = String(userId || '').trim();
   if (!normalizedUserId) throw new Error('USER_ID_REQUIRED');
@@ -51,9 +53,9 @@ export async function saveProfessionalProfile(
       specialties: validated.specialties,
       description: validated.description,
       workZoneRadiusKm: validated.workZoneRadiusKm,
-      workingHours: validated.workingHours,
       // Keep the legacy field synchronized while consumers migrate to workingHours.
       workHours: validated.workingHours,
+      workingHours: validated.workingHours,
       matriculaOrDegree: validated.matriculaOrDegree,
       hourlyRateArs: validated.hourlyRateArs,
       servicesOffered: validated.servicesOffered,
@@ -64,7 +66,18 @@ export async function saveProfessionalProfile(
       availabilityStatus: existing.availabilityStatus || 'DISPONIBLE',
     };
 
-    const updatedUser = { id: normalizedUserId, ...existing, ...fields };
+    // Security boundary: never persist or return a role change from this
+    // capability endpoint. The Firebase custom-claim role remains authoritative.
+    const updatedUser = {
+      id: normalizedUserId,
+      ...existing,
+      ...fields,
+      role: authenticatedRole,
+      activeMode: authenticatedRole === 'ADMIN' || authenticatedRole === 'SUPER_ADMIN'
+        ? 'ADMIN'
+        : 'PROFESSIONAL',
+    };
+
     const publicDocument = buildPublicProfessionalProfileDocument(updatedUser as any);
     const radarCandidate = buildRadarCandidateProjection(updatedUser as any);
 
