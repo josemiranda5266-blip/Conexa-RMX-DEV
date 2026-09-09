@@ -7,6 +7,7 @@ const OPPORTUNITY_COLLECTION = 'radar_opportunities';
 const REQUEST_COLLECTION = 'service_requests';
 const CANDIDATE_COLLECTION = 'radar_candidates';
 const USER_COLLECTION = 'users';
+const MAX_SCHEDULING_FIELD_LENGTH = 128;
 
 export interface RadarOpportunityConversionInput {
   opportunityId: string;
@@ -32,6 +33,14 @@ function normalizeId(value: unknown, code: string): string {
   const normalized = value.trim();
   if (!normalized || normalized.length > 128 || normalized.includes('/')) throw new Error(code);
   return normalized;
+}
+
+function normalizeOptionalSchedulingField(value: unknown, code: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') throw new Error(code);
+  const normalized = value.trim();
+  if (normalized.length > MAX_SCHEDULING_FIELD_LENGTH) throw new Error(code);
+  return normalized || undefined;
 }
 
 function buildServiceRequestId(opportunityId: string, professionalId: string): string {
@@ -76,8 +85,8 @@ function buildServiceRequest(
     approxLocation: opportunity.neighborhood
       ? `${opportunity.neighborhood}, ${opportunity.city}, ${opportunity.province}`
       : `${opportunity.city}, ${opportunity.province}`,
-    preferredDate: preferredDate?.trim() || 'A coordinar',
-    preferredTimeSlot: preferredTimeSlot?.trim() || 'A coordinar',
+    preferredDate: preferredDate || 'A coordinar',
+    preferredTimeSlot: preferredTimeSlot || 'A coordinar',
     urgency: mapUrgency(opportunity.urgency),
     status: 'REQUEST_CREATED',
     createdAt: now,
@@ -89,6 +98,29 @@ function buildServiceRequest(
   };
 }
 
+function resolveMatchedProfessionalId(
+  opportunity: RadarOpportunity,
+  requestedProfessionalId?: string,
+): string {
+  const matched = Array.isArray(opportunity.matchedProfessionals)
+    ? opportunity.matchedProfessionals
+    : [];
+
+  if (requestedProfessionalId) {
+    const isMatched = matched.some((candidate: any) =>
+      candidate && candidate.professionalId === requestedProfessionalId,
+    );
+    if (!isMatched) throw new Error('RADAR_PROFESSIONAL_NOT_MATCHED');
+    return requestedProfessionalId;
+  }
+
+  const firstMatchedProfessionalId = matched.find(
+    (candidate: any) => typeof candidate?.professionalId === 'string' && candidate.professionalId.trim(),
+  )?.professionalId;
+  if (!firstMatchedProfessionalId) throw new Error('RADAR_NO_MATCHED_PROFESSIONAL');
+  return firstMatchedProfessionalId;
+}
+
 export async function createServiceRequestFromRadarOpportunity(
   input: RadarOpportunityConversionInput,
   db: RadarOpportunityConversionDb = getAdminDb(),
@@ -98,6 +130,11 @@ export async function createServiceRequestFromRadarOpportunity(
   const requestedProfessionalId = input.professionalId === undefined
     ? undefined
     : normalizeId(input.professionalId, 'INVALID_RADAR_PROFESSIONAL_ID');
+  const preferredDate = normalizeOptionalSchedulingField(input.preferredDate, 'INVALID_RADAR_PREFERRED_DATE');
+  const preferredTimeSlot = normalizeOptionalSchedulingField(
+    input.preferredTimeSlot,
+    'INVALID_RADAR_PREFERRED_TIME_SLOT',
+  );
 
   const opportunityRef = db.collection(OPPORTUNITY_COLLECTION).doc(opportunityId);
 
@@ -147,11 +184,7 @@ export async function createServiceRequestFromRadarOpportunity(
     const client = clientSnapshot.data() as UserProfile;
     if (client.isBlocked === true) throw new Error('RADAR_CLIENT_BLOCKED');
 
-    const matched = Array.isArray(opportunity.matchedProfessionals)
-      ? opportunity.matchedProfessionals
-      : [];
-    const professionalId = requestedProfessionalId || matched[0]?.professionalId;
-    if (!professionalId) throw new Error('RADAR_NO_MATCHED_PROFESSIONAL');
+    const professionalId = resolveMatchedProfessionalId(opportunity, requestedProfessionalId);
 
     const candidateRef = db.collection(CANDIDATE_COLLECTION).doc(professionalId);
     const candidateSnapshot = await transaction.get(candidateRef);
@@ -197,8 +230,8 @@ export async function createServiceRequestFromRadarOpportunity(
       professional,
       requestId,
       now,
-      input.preferredDate,
-      input.preferredTimeSlot,
+      preferredDate,
+      preferredTimeSlot,
     );
 
     transaction.create(requestRef, serviceRequest);
