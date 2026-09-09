@@ -215,35 +215,46 @@ export async function processAccountDeletion(
       const next = getNextDeletionStage(checkpoint.stage);
       if (!next) break;
 
-      if (next === 'FIRESTORE_CLEANUP') {
-        await cleanupFirestore(db, userId);
-      } else if (next === 'STORAGE_CLEANUP') {
-        await cleanupStorage(userId);
-      } else if (next === 'AUDIT_RECORDED') {
-        await db.collection('admin_audit_logs').doc(`DELETE_ACCOUNT_${userId}`).set({
-          action: 'DELETE_ACCOUNT',
-          targetType: 'USER',
-          targetId: userId,
-          result: 'SUCCESS',
-          timestamp: now(),
-        }, { merge: true });
-      } else if (next === 'AUTH_ACCOUNT_DELETED') {
-        const app = getFirebaseAdmin();
-        if (!app) throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
-        try {
-          await app.auth().deleteUser(userId);
-        } catch (error: any) {
-          if (error?.code !== 'auth/user-not-found') throw error;
+      try {
+        if (next === 'FIRESTORE_CLEANUP') {
+          await cleanupFirestore(db, userId);
+        } else if (next === 'STORAGE_CLEANUP') {
+          await cleanupStorage(userId);
+        } else if (next === 'AUDIT_RECORDED') {
+          await db.collection('admin_audit_logs').doc(`DELETE_ACCOUNT_${userId}`).set({
+            action: 'DELETE_ACCOUNT',
+            targetType: 'USER',
+            targetId: userId,
+            result: 'SUCCESS',
+            timestamp: now(),
+          }, { merge: true });
+        } else if (next === 'AUTH_ACCOUNT_DELETED') {
+          const app = getFirebaseAdmin();
+          if (!app) throw new Error('FIREBASE_ADMIN_NOT_CONFIGURED');
+          try {
+            await app.auth().deleteUser(userId);
+          } catch (error: any) {
+            if (error?.code !== 'auth/user-not-found') throw error;
+          }
         }
-      }
 
-      await advanceStage(db, userId, checkpoint.stage, next);
-      checkpoint = {
-        ...checkpoint,
-        stage: next,
-        updatedAt: now(),
-        ...(next === 'COMPLETED' ? { completedAt: now() } : {}),
-      };
+        await advanceStage(db, userId, checkpoint.stage, next);
+        checkpoint = {
+          ...checkpoint,
+          stage: next,
+          updatedAt: now(),
+          ...(next === 'COMPLETED' ? { completedAt: now() } : {}),
+        };
+      } catch (error) {
+        // Concurrent deletion requests may legitimately complete the same
+        // stage first. Reload the durable checkpoint and continue instead of
+        // surfacing a false failure to the second caller.
+        if (error instanceof Error && error.message === 'DELETION_CHECKPOINT_CONFLICT') {
+          checkpoint = await readOrCreateCheckpoint(db, userId);
+          continue;
+        }
+        throw error;
+      }
     }
 
     return checkpoint;
