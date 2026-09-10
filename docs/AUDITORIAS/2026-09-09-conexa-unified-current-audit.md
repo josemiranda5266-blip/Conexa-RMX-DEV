@@ -3,17 +3,20 @@
 **Fecha:** 2026-09-09  
 **Repositorio:** `josemiranda5266-blip/Conexa-RMX-DEV`  
 **Rama objetivo:** `integration/conexa-unified`  
-**Último commit auditado:** `29da10aa5dbcf85854205c5b1491af6dc4665282`
+**Último commit auditado:** `c6e92496ca10a4dbe364b83ce08ecd0de8c03072`
 
 ## Estado de la auditoría
 
 La rama objetivo fue verificada antes de modificarla. El repositorio es el único destino de cambios definitivos.
 
-### Corrección aplicada durante esta fase
+### Correcciones aplicadas durante esta fase
 
-`src/server/accountDeletionService.ts` fue endurecido para concurrencia: dos solicitudes de baja del mismo usuario ya no convierten un conflicto de checkpoint en un falso error. Si otra ejecución avanza primero, la segunda recarga el checkpoint durable y continúa desde el estado persistido.
+- `src/server/accountDeletionService.ts` fue endurecido para concurrencia: dos solicitudes de baja del mismo usuario ya no convierten un conflicto de checkpoint en un falso error. Si otra ejecución avanza primero, la segunda recarga el checkpoint durable y continúa desde el estado persistido.
+- La validación de eventos compartidos fue acotada para limitar identificadores, tamaños de payload y colecciones antes de entrar al procesamiento de dominio.
+- La conversión de oportunidades RADAR ahora exige que el profesional solicitado pertenezca realmente al conjunto `matchedProfessionals` de la oportunidad; se evita así convertir una oportunidad hacia un profesional no emparejado.
+- La interfaz de solicitudes dejó de duplicar la heurística de capacidad profesional y consume `canUseProfessionalMode()` como autoridad única.
 
-Esto conserva el diseño reentrante de `accountDeletionPolicy.ts`, donde la eliminación se modela como etapas durables y Auth se elimina únicamente después de la limpieza de datos.
+Esto conserva el diseño reentrante de `accountDeletionPolicy.ts`, la idempotencia durable de eventos y la separación entre proyección canónica de RADAR y perfiles privados.
 
 ## Pendientes P0
 
@@ -33,6 +36,6 @@ Esto conserva el diseño reentrante de `accountDeletionPolicy.ts`, donde la elim
 
 ## Veredicto
 
-**NO PROD-READY todavía.** El principal riesgo arquitectónico sigue siendo la coexistencia de runtime legacy y servicios canónicos. La próxima modificación debe continuar reduciendo esa duplicación, no crear otra capa paralela.
+**NO PROD-READY todavía.** El principal riesgo arquitectónico sigue siendo la coexistencia de runtime legacy y servicios canónicos. La siguiente modificación de código debe continuar reduciendo esa duplicación, no crear otra capa paralela.
 
 No se ejecutaron tests ni builds.
