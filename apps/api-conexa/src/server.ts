@@ -15,10 +15,15 @@ function validInternalSecret(value: string | undefined): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+function normalizeProcessingLimit(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value)) return 20;
+  return Math.min(Math.max(value, 1), 100);
+}
+
 app.post('/internal/events/process-nexora', async (req, res) => {
   if (!validInternalSecret(req.header('x-internal-event-secret'))) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const processed = await processNexoraOrderCompleted(Number(req.body?.limit) || 20);
+    const processed = await processNexoraOrderCompleted(normalizeProcessingLimit(req.body?.limit));
     return res.json({ processed });
   } catch { return res.status(500).json({ error: 'Unable to process event outbox' }); }
 });
