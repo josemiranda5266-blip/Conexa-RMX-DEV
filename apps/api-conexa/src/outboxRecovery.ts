@@ -67,11 +67,15 @@ function safeFailureCode(error: unknown): string {
   return 'UNKNOWN_ERROR';
 }
 
+function normalizeCounter(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
 export function nextFailureState(
   attempts: number,
   error: unknown,
 ): { status: 'PENDING' | 'FAILED'; attempts: number; lastError: string } {
-  const nextAttempts = Math.max(0, Number.isFinite(attempts) ? attempts : 0) + 1;
+  const nextAttempts = normalizeCounter(attempts) + 1;
   const disposition = classifyOutboxError(error);
 
   return {
@@ -89,7 +93,7 @@ export function buildOutboxReplayUpdate<TPayload>(
   if (!authorization.authorized) throw new Error('OUTBOX_REPLAY_UNAUTHORIZED');
   if (record.status !== 'FAILED') throw new Error('OUTBOX_REPLAY_REQUIRES_FAILED');
 
-  const replayCount = Number.isFinite(record.replayCount) ? Number(record.replayCount) + 1 : 1;
+  const replayCount = normalizeCounter(record.replayCount) + 1;
   return {
     status: 'PENDING',
     attempts: 0,
