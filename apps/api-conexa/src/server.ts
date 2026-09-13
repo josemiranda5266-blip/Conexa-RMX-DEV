@@ -16,8 +16,9 @@ function validInternalSecret(value: string | undefined): boolean {
 }
 
 function normalizeProcessingLimit(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isInteger(value)) return 20;
-  return Math.min(Math.max(value, 1), 50);
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+  if (!Number.isInteger(parsed)) return 20;
+  return Math.min(Math.max(parsed, 1), 50);
 }
 
 app.post('/internal/events/process-nexora', async (req, res) => {
