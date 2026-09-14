@@ -5,12 +5,17 @@ import { getAdminDb } from './firebaseAdmin.js';
 import { runEventIdempotently, type EventIdempotencyResult } from './eventIdempotency.js';
 import { nextFailureState } from './outboxRecovery.js';
 
+const MAX_EVENT_ID_LENGTH = 256;
+const MAX_USER_ID_LENGTH = 128;
+const MAX_ORDER_ID_LENGTH = 128;
+const MAX_LISTING_IDS = 100;
+
 function db(): Firestore {
   return getAdminDb();
 }
 
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0;
+function isNonEmptyString(value: unknown, maxLength = MAX_EVENT_ID_LENGTH): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= maxLength;
 }
 
 function isNexoraOrderCompletedPayload(value: unknown): value is NexoraOrderCompletedEvent {
@@ -20,11 +25,12 @@ function isNexoraOrderCompletedPayload(value: unknown): value is NexoraOrderComp
   return (
     isNonEmptyString(payload.eventId) &&
     payload.type === 'NEXORA_ORDER_COMPLETED' &&
-    isNonEmptyString(payload.occurredAt) &&
-    isNonEmptyString(payload.userId) &&
-    isNonEmptyString(payload.orderId) &&
+    isNonEmptyString(payload.occurredAt, 64) &&
+    isNonEmptyString(payload.userId, MAX_USER_ID_LENGTH) &&
+    isNonEmptyString(payload.orderId, MAX_ORDER_ID_LENGTH) &&
     Array.isArray(payload.listingIds) &&
-    payload.listingIds.every(isNonEmptyString) &&
+    payload.listingIds.length <= MAX_LISTING_IDS &&
+    payload.listingIds.every(value => isNonEmptyString(value, MAX_ORDER_ID_LENGTH)) &&
     typeof payload.requiresInstallation === 'boolean'
   );
 }
@@ -37,9 +43,9 @@ function buildDomainEvent(data: Record<string, unknown>): DomainEvent {
   const payload = data.payload;
 
   if (
-    !id ||
+    !isNonEmptyString(id) ||
     type !== 'NEXORA_ORDER_COMPLETED' ||
-    !occurredAt ||
+    !isNonEmptyString(occurredAt, 64) ||
     producer !== 'NEXORA' ||
     !isNexoraOrderCompletedPayload(payload)
   ) {
@@ -51,6 +57,12 @@ function buildDomainEvent(data: Record<string, unknown>): DomainEvent {
   }
 
   return { id, type, occurredAt, producer, payload } as DomainEvent;
+}
+
+function normalizeProcessingLimit(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(parsed)) return 20;
+  return Math.min(Math.max(parsed, 1), 50);
 }
 
 async function handleNexoraOrderCompleted(event: DomainEvent): Promise<EventIdempotencyResult> {
@@ -103,7 +115,7 @@ export async function processNexoraOrderCompleted(limit = 20): Promise<number> {
   const snapshot = await firestore.collection('eventOutbox')
     .where('type', '==', 'NEXORA_ORDER_COMPLETED')
     .where('status', '==', 'PENDING')
-    .limit(Math.min(Math.max(limit, 1), 50))
+    .limit(normalizeProcessingLimit(limit))
     .get();
 
   let processed = 0;
