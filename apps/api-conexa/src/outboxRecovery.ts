@@ -43,9 +43,17 @@ const PERMANENT_CODES = new Set([
 const KNOWN_FAILURE_CODES = new Set([...RETRYABLE_CODES, ...PERMANENT_CODES]);
 
 function errorCode(error: unknown): string | undefined {
-  if (!error || typeof error !== 'object') return undefined;
-  const value = error as { code?: unknown };
-  return typeof value.code === 'string' ? value.code.toUpperCase() : undefined;
+  if (!error) return undefined;
+
+  if (typeof error === 'object') {
+    const value = error as { code?: unknown; message?: unknown };
+    if (typeof value.code === 'string' && value.code.trim()) return value.code.trim().toUpperCase();
+    if (typeof value.message === 'string' && value.message.trim()) return value.message.trim().toUpperCase();
+    return undefined;
+  }
+
+  if (typeof error === 'string' && error.trim()) return error.trim().toUpperCase();
+  return undefined;
 }
 
 export function classifyOutboxError(error: unknown): OutboxErrorDisposition {
